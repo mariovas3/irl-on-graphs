@@ -20,7 +20,7 @@ import numpy as np
 def get_Kt_kt(x_dim, Cs, cs, Fs, fs):
     V, v = np.zeros((x_dim, x_dim)), np.zeros((x_dim,))
     Ks, ks = [], []
-    T = len(Fs) + 1
+    T = len(Fs)
     for t in range(T, 0, -1):
         Q = Cs[t] + Fs[t].T @ V @ Fs[t]
         q = cs[t] + Fs[t].T @ (V @ fs[t] + v)
@@ -49,7 +49,7 @@ def get_Kt_kt(x_dim, Cs, cs, Fs, fs):
 
 def get_plan(x, Ks, ks, Fs, fs):
     us = []
-    T = len(Fs) + 1
+    T = len(Fs)
     for t in range(T):
         us.append(Ks[t] @ x + ks[t])
         x = Fs[t] @ np.concatenate((x, us[-1])) + fs[t]
