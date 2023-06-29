@@ -62,7 +62,7 @@ class PGGauss(PGAgentBase):
         mus, sigmas = self.policy(obs)
         policy_dist = dists.Normal(mus, sigmas)
         action = policy_dist.sample()
-        self.log_probs.append(policy_dist.log_prob(action))
+        self.log_probs.append(policy_dist.log_prob(action).sum())
         return action
     
     def update(self):
@@ -77,7 +77,7 @@ class PGGauss(PGAgentBase):
         
         # get weighted loss;
         self.optim.zero_grad()
-        loss = - torch.cat(self.log_probs) @ returns_to_go
+        loss = - torch.stack(self.log_probs) @ returns_to_go
         loss.backward()
         self.optim.step()
 

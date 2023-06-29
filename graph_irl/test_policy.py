@@ -14,10 +14,17 @@ if not TEST_OUTPUTS_PATH.exists():
     TEST_OUTPUTS_PATH.mkdir()
 
 
-mcc_env = gym.make("MountainCarContinuous-v0")
+ENV_NAME = "Hopper-v2"
+
+configs = {
+    'Hopper-v2': {'hiddens': [26, 26]},
+    'MountainCarContinuous-v0': {'hiddens': [4, 4]}
+}
+
+env = gym.make(ENV_NAME)
 num_episodes = 1000
-state_dim = mcc_env.observation_space.shape[0]
-action_dim = mcc_env.action_space.shape[0]
+state_dim = env.observation_space.shape[0]
+action_dim = env.action_space.shape[0]
 seeds = range(3)
 lr, discount = 1e-3, .99
 T = 200
@@ -65,19 +72,19 @@ def get_returns_over_seeds(env, agent_make, seeds, T, num_episodes, file_name=No
 
 def test_seeds_mcc():
     agent_kwargs = {
-        'name': r"PGGauss-b1-lr-{lr}",
+        'name': f"PGGauss-b1-lr-{lr}",
         'obs_dim': state_dim,
         'action_dim': action_dim,
         'policy': policy.GaussPolicy,
         'with_baseline': True,
-        'lr': 1e-3,
+        'lr': 1e-4,
         'discount': .99,
-        'hiddens': [4, 4],
+        'hiddens': configs[ENV_NAME]['hiddens'],
         'with_layer_norm': False
     }
-    pkl_file_name = TEST_OUTPUTS_PATH / 'PG-b1-mcc.pkl'
-    png_file_name = TEST_OUTPUTS_PATH / 'PG-b1-mcc.png'
-    returns_over_seeds = get_returns_over_seeds(mcc_env, policy.PGGauss, seeds, T, num_episodes, pkl_file_name, **agent_kwargs)
+    pkl_file_name = TEST_OUTPUTS_PATH / f'PG-b1-{ENV_NAME}.pkl'
+    png_file_name = TEST_OUTPUTS_PATH / f'PG-b1-{ENV_NAME}.png'
+    returns_over_seeds = get_returns_over_seeds(env, policy.PGGauss, seeds, T, num_episodes, pkl_file_name, **agent_kwargs)
     fig, ax = plt.subplots(figsize=(10, 5))
     avg_returns = np.mean(returns_over_seeds, 0)
     for s, r in zip(seeds, returns_over_seeds):
