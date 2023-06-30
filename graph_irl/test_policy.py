@@ -55,7 +55,9 @@ def get_returns_over_seeds(
             t = 0
             while not done and t < T:
                 # sample action;
-                action = agent.sample_action(torch.FloatTensor(obs).view(-1))
+                action = agent.sample_action(
+                    torch.FloatTensor(obs).view(-1)
+                )
                 # apply action;
                 obs, reward, terminated, truncated, info = env.step(
                     action.numpy()
@@ -96,7 +98,7 @@ def test_seeds_mcc():
         "hiddens": configs[ENV_NAME]["hiddens"],
         "with_layer_norm": False,
     }
-    png_file_name = agent_kwargs['name'] + f'-{env.spec.id}.png'
+    png_file_name = agent_kwargs["name"] + f"-{env.spec.id}.png"
     png_file_name = TEST_OUTPUTS_PATH / png_file_name
     returns_over_seeds = get_returns_over_seeds(
         env,
