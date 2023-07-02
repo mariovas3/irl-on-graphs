@@ -1,7 +1,26 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pickle
+import pygame
 from pathlib import Path
+
+
+def visualise_episode(env, agent, seed, T=None):
+    """
+    Assumes env has "human" in env.metadata["render_modes"].
+    """
+    obs, info = env.reset(seed=seed)
+    done = False
+    t = 0
+    pred = t < T if T else True
+    while not done and pred:
+        action = agent.sample_action(obs)
+        obs, reward, terminated, truncated, info = env.step(action)
+        if T:
+            t += 1
+            pred = t < T
+        done = terminated or truncated
+    pygame.display.quit()
 
 
 def get_moving_avgs(returns_over_episodes, num_steps):
