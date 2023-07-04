@@ -219,36 +219,6 @@ def update_q_funcs(loss_q1, loss_q2, optim_q1, optim_q2):
     optim_q2.step()
 
 
-# def train_single_epoch():
-    # if epoch == 0 and min_num_steps_before_training > 0:
-        # init_episodes = collect_episodes(
-            # max_episode_len,
-            # min_num_steps_before_training,
-            # discard_incomplete_episodes=False
-        # )
-        # replay_buffer.add_episodes(init_episodes)
-    # 
-    # for _ in range(num_train_loops_per_epoch):
-        # new_episodes = collect_episodes(
-            # max_episode_len,
-            # num_episodes_to_sample,
-            # discard_incomplete_episodes=False
-        # )
-        # replay_buffer.add_episodes(new_episodes)
-        # for _ in range(num_grad_steps):
-            # batch = self.replay_buffer.sample(batch_size)
-            # agent.get_policy_loss_and_temperature_loss(obs_t, Q1, Q2, use_entropy=False)
-            # l1, l2 = get_q_losses(Q1, Q2, Qt1, Qt2, obs_t, 
-                        #  action_t, reward_t, obs_tp1, 
-                        #  action_tp1, terminated_tp1, 
-                        #  agent, discount, resample_action_tp1=True
-                        # )
-            # agent.update_policy_and_temperature()
-            # update_q_funcs(l1, l2, optimQ1, optimQ2)
-            # track_params(Q1t, Q1, tau)
-            # track_params(Q2t, Q2, tau)
-
-
 def train_sac(
     env,
     num_iters,
@@ -269,7 +239,12 @@ def train_sac(
     **policy_kwargs
 ):
     """
-    This is currently some pseudo code for training SAC agent.
+    This is currently doing num_iters train iterations
+    each iteration gathers trajectories given current 
+    agent and then does num_grad_steps gradient steps;
+
+    might be good to add another loop over epochs
+    as in the original sac paper.
     """
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -320,6 +295,11 @@ def train_sac(
     # start running episodes;
     fifth = num_iters // 5
     now = time.time()
+    # might be good to do another (outer) for loop over epochs
+    # since num_iters corresponds to train loops per epoch;
+    # i.e., currently this code does 100 train loops in this one epoch;
+    # also might be good to clear the buffer at each epoch if
+    # I do an outer loop over epochs;
     for it in range(num_iters):
         # sample paths;
         if (it + 1) % fifth == 0:
@@ -366,7 +346,7 @@ if __name__ == "__main__":
 
 
     env = gym.make('Hopper-v2')
-    num_iters=100
+    num_iters=100  # this is the train iterations per epoch;
     Q1, Q2, agent, undiscounted_returns = train_sac(
         env,
         num_iters,
@@ -398,4 +378,6 @@ if __name__ == "__main__":
         )
     
     plt.plot(undiscounted_returns)
+    # plt.plot(agent.policy_losses)
+    # plt.plot(agent.temperature_losses)
     plt.show()
