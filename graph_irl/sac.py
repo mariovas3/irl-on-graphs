@@ -9,6 +9,7 @@ import random
 from buffer_v2 import Buffer
 from buffer import get_loader
 import matplotlib.pyplot as plt
+import time
 # from copy import deepcopy
 import pickle
 
@@ -318,10 +319,12 @@ def train_sac(
 
     # start running episodes;
     fifth = num_iters // 5
+    now = time.time()
     for it in range(num_iters):
         # sample paths;
         if (it + 1) % fifth == 0:
-            print(f"{20 * (it + 1) // fifth}% processed")
+            print(f"{20 * (it + 1) // fifth}% processed\n"
+                  f"took {now - time.time():.3f} seconds")
         buffer.collect_path(env, agent, num_steps_to_sample, undiscounted_returns)
 
         # do the gradient updates;
@@ -369,7 +372,7 @@ if __name__ == "__main__":
         num_iters,
         qfunc_hiddens=[256, 256],
         qfunc_layer_norm=True,
-        lr=3e-5,
+        lr=3e-4,
         buffer_len=5_000,
         batch_size=250,
         discount=0.99,
@@ -379,7 +382,7 @@ if __name__ == "__main__":
         policy=GaussPolicy,
         T=200,
         save_returns_to=TEST_OUTPUTS_PATH,
-        num_steps_to_sample=1000,
+        num_steps_to_sample=500,
         num_grad_steps=500,
         obs_dim=env.observation_space.shape[0],
         action_dim=env.action_space.shape[0],
@@ -388,27 +391,6 @@ if __name__ == "__main__":
     )
     
     
-    # train_sac(
-        # env, num_iters,
-        # qfunc_hiddens=[256, 256], qfunc_layer_norm=True,
-        # lr=3E-4,
-        # buffer_len=5_000,
-        # batch_size=250,
-        # discount=.99,
-        # tau=0.05,
-        # entropy_lb=None,
-        # seed=0,
-        # policy=GaussPolicy,
-        # obs_dim=env.observation_space.shape[0],
-        # action_dim=env.action_space.shape[0],
-        # hiddens=[256, 256],
-        # with_layer_norm=True
-    # )
-    
-    # train_sac(
-    #     env, num_episodes, [256, 256], False,
-    #     3e-4, 1_000, 250, 0.99, 0.1, None, 0, 200, TEST_OUTPUTS_PATH
-    # )
     print(
         np.concatenate((
             np.array(agent.policy_losses).reshape(-1, 1), 
