@@ -30,7 +30,7 @@ class SACAgentBase:
         self.policy_optim = torch.optim.Adam(
             self.policy.parameters(), lr=policy_lr
         )
-        self.log_temperature = torch.tensor(5.0, requires_grad=True)
+        self.log_temperature = torch.tensor(0.0, requires_grad=True)
         self.temperature_optim = torch.optim.Adam(
             [self.log_temperature], lr=temperature_lr
         )
@@ -39,6 +39,8 @@ class SACAgentBase:
         )
         self.temperature_loss = None
         self.policy_loss = None
+        self.policy_losses = []
+        self.temperature_losses = []
 
     def sample_action(self, obs):
         pass
@@ -54,17 +56,15 @@ class SACAgentMuJoCo(SACAgentBase):
     def __init__(
         self,
         name,
+        policy,
         policy_lr,
         entropy_lb,
         temperature_lr,
         **policy_kwargs
     ):
-        """
-        policy_kwargs contain arguments for GaussPolicy constructor;
-        """
         super(SACAgentMuJoCo, self).__init__(
             name,
-            GaussPolicy,
+            policy,
             policy_lr,
             entropy_lb,
             temperature_lr,
@@ -72,14 +72,15 @@ class SACAgentMuJoCo(SACAgentBase):
         )
 
     def sample_action(self, obs):
-        mus, sigmas = self.policy(obs)
-        policy_dist = dists.Normal(mus, sigmas)  # indep Gauss;
-        action = policy_dist.sample()
-        print(action)
+        policy_density = self.policy(obs)
+        action = policy_density.sample()
+        # if isinstance(policy_dist, dists.Normal):
+        #     # you can access mean and stddev 
+        #     # with policy_dist.mean and policy_dist.stddev;
         return action
 
     def update_policy_and_temperature(self):
-        print(self.policy_loss, self.temperature_loss)
+        # print(self.policy_loss, self.temperature_loss)
         # update policy params;
         self.policy_optim.zero_grad()
         self.policy_loss.backward()
@@ -91,28 +92,21 @@ class SACAgentMuJoCo(SACAgentBase):
         self.temperature_optim.step()
 
     def get_policy_loss_and_temperature_loss(
-        self, obs_t, qfunc1, qfunc2
+        self, obs_t, qfunc1, qfunc2, use_entropy=False
     ):
         # self.policy.requires_grad_(True)
         # self.log_temperature.requires_grad_(True)
         
-        # get gauss params;
-        mus, sigmas = self.policy(obs_t)
-        # print(mus, sigmas)
+        # get policy;
+        policy_density = self.policy(obs_t)
 
         # do reparam trick;
-        repr_trick = torch.randn(mus.shape)  # samples from N(0, I);
-        repr_trick = mus + repr_trick * sigmas
+        repr_trick = policy_density.rsample()
 
-        # get Gauss density of policy;
-        policy_density = dists.Normal(mus, sigmas)
-
-        # compute entropies of gaussian to be passed
-        # to optimisation step for temperature;
-        # in the papaer they use .log_prob() but
-        # gauss policy has closed form entropy, so I use it;
-        with torch.no_grad():
-            entropies = policy_density.entropy().sum(-1)
+        # for some policies, we can compute entropy;
+        if use_entropy:
+            with torch.no_grad():
+                entropies = policy_density.entropy().sum(-1)
 
         # get log prob for policy optimisation;
         log_prob = policy_density.log_prob(repr_trick).sum(-1)
@@ -122,7 +116,7 @@ class SACAgentMuJoCo(SACAgentBase):
         qfunc1.requires_grad_(False)
         qfunc2.requires_grad_(False)
         qfunc_in = torch.cat((obs_t, repr_trick), -1)
-        q_est = torch.min(qfunc1(qfunc_in), qfunc2(qfunc_in))
+        q_est = torch.min(qfunc1(qfunc_in), qfunc2(qfunc_in)).view(-1)
 
         # get loss for policy;
         self.policy_loss = (
@@ -130,13 +124,22 @@ class SACAgentMuJoCo(SACAgentBase):
         ).mean()
 
         # get loss for temperature;
-        self.temperature_loss = -(
-            self.log_temperature.exp()
-            * (entropies - self.entropy_lb).detach().mean()
-        )
+        if use_entropy:
+            self.temperature_loss = -(
+                self.log_temperature.exp()
+                * (entropies - self.entropy_lb).detach().mean()
+            )
+        else:
+            self.temperature_loss = - (
+                self.log_temperature.exp() * (log_prob + self.entropy_lb).detach()
+            ).mean()
+        
+        # housekeeping;
+        self.policy_losses.append(self.policy_loss.item())
+        self.temperature_losses.append(self.temperature_loss.item())
 
 
-def update_params(Q1t, Q1, tau):
+def track_params(Q1t, Q1, tau):
     """
     Updates parameters of Q1t to be:
     Q1t = Q1 * tau + Q1t * (1 - tau).
@@ -174,15 +177,14 @@ def get_q_losses(qfunc1, qfunc2, qt1, qt2, obs_t, action_t,
     q2_est = qfunc2(obs_action_t).view(-1)
     
     # see appropriate dist for obs_tp1;
-    mus, sigmas = agent.policy(obs_tp1)
-    d = dists.Normal(mus, sigmas)
+    policy_density = agent.policy(obs_tp1)
 
     # see if I should resample action_tp1;
     if resample_action_tp1:   
-        action_tp1 = d.sample()
+        action_tp1 = policy_density.sample()
     
     # get log probs;
-    log_probs = d.log_prob(action_tp1).detach().sum(-1).view(-1)
+    log_probs = policy_density.log_prob(action_tp1).detach().sum(-1).view(-1)
     
     obs_action_tp1 = torch.cat((obs_tp1, action_tp1), -1)
     # use the values from the target net that
@@ -190,25 +192,14 @@ def get_q_losses(qfunc1, qfunc2, qt1, qt2, obs_t, action_t,
     q_target = torch.min(
         qt1(obs_action_tp1),
         qt2(obs_action_tp1)
-    ).view(-1)
+    ).view(-1) - agent.log_temperature.exp() * log_probs
+    q_target = (reward_t + (1. - terminated_tp1.float()) * discount * q_target).detach()
 
     # loss for first q func;
-    loss_q1 = ((
-        q1_est 
-        - reward_t 
-        - discount * (1 - terminated_tp1.int()) * (
-            q_target - agent.log_temperature.detach().exp() * log_probs
-        )
-    ) ** 2).mean()
+    loss_q1 = nn.MSELoss()(q1_est, q_target)
 
     # loss for second q func;
-    loss_q2 = ((
-        q2_est 
-        - reward_t 
-        - discount * (1 - terminated_tp1.int()) *(
-            q_target - agent.log_temperature.detach().exp() * log_probs
-        )
-    ) ** 2).mean()
+    loss_q2 = nn.MSELoss()(q2_est, q_target)
 
     return loss_q1, loss_q2
 
@@ -374,8 +365,8 @@ def train_sac(
             update_q_funcs(l1, l2, optimQ1, optimQ2)
 
             # target q funcs update;
-            update_params(Q1t, Q1, tau)
-            update_params(Q2t, Q2, tau)
+            track_params(Q1t, Q1, tau)
+            track_params(Q2t, Q2, tau)
 
             # return (0, 0, 0, 0)
 
