@@ -164,8 +164,7 @@ def load_params_in_net(net: nn.Module, parameters: Iterable):
 
 
 def get_q_losses(qfunc1, qfunc2, qt1, qt2, obs_t, action_t,
-                 reward_t, obs_tp1, action_tp1, terminated_tp1, agent, discount,
-                 resample_action_tp1=True):
+                 reward_t, obs_tp1, terminated_tp1, agent, discount):
     qfunc1.requires_grad_(True)
     qfunc2.requires_grad_(True)
     
@@ -181,9 +180,8 @@ def get_q_losses(qfunc1, qfunc2, qt1, qt2, obs_t, action_t,
     # see appropriate dist for obs_tp1;
     policy_density = agent.policy(obs_tp1)
 
-    # see if I should resample action_tp1;
-    if resample_action_tp1:   
-        action_tp1 = policy_density.sample()
+    # sample future action;
+    action_tp1 = policy_density.sample()
     
     # get log probs;
     log_probs = policy_density.log_prob(action_tp1).detach().sum(-1).view(-1)
@@ -265,6 +263,8 @@ def train_sac(
     policy,
     T=200,
     save_returns_to: Path = None,
+    num_steps_to_sample=500,
+    num_grad_steps=500,
     **policy_kwargs
 ):
     """
@@ -314,64 +314,19 @@ def train_sac(
 
     # init replay buffer of size=N deque?
     undiscounted_returns = []
-    buffer, idx = [], 0
+    buffer = Buffer(buffer_len, obs_dim, action_dim)
 
     # start running episodes;
-    for _ in range(num_iters):
-        sampled_return = 0.0
-        done, t = False, 0
-
-        # sample starting state;
-        obs_t, info = env.reset(seed=seed)
-        obs_t = torch.FloatTensor(obs_t).view(-1)
-
-        # sample first action;
-        action_t = agent.sample_action(obs_t)
-
-        # buffer = deque([])
-        while not done and t < T:
-            # act with action_t and get state and reward;;
-            obs_tp1, reward_t, terminated, truncated, info = env.step(
-                action_t.numpy()
-            )
-            obs_tp1 = torch.FloatTensor(obs_tp1).view(-1)
-
-            # update return;
-            sampled_return += reward_t
-
-            # sample next action;
-            action_tp1 = agent.sample_action(obs_tp1)
-
-            # add experience to buffer;
-            if len(buffer) < buffer_len:
-                buffer.append((obs_t, action_t, torch.tensor(reward_t, dtype=torch.float32), obs_tp1, action_tp1, terminated))
-            else:
-                buffer_idx = idx % buffer_len
-                buffer[buffer_idx] = (obs_t, action_t, torch.tensor(reward_t, dtype=torch.float32), obs_tp1, action_tp1, terminated)
-            idx += 1
-
-            # update current observation and action;
-            obs_t, action_t = obs_tp1, action_tp1
-            done = terminated or truncated
-            t += 1
-
-        # add sampled episodic return to list;
-        undiscounted_returns.append(sampled_return)
-
-        # prep buffer to sample minibatches of experience.
-        data_loader = get_loader(
-            buffer, batch_size=batch_size, shuffle=False
-        )
+    fifth = num_iters // 5
+    for it in range(num_iters):
+        # sample paths;
+        if (it + 1) % fifth == 0:
+            print(f"{20 * (it + 1) // fifth}% processed")
+        buffer.collect_path(env, agent, num_steps_to_sample, undiscounted_returns)
 
         # do the gradient updates;
-        for i, (
-            obs_t,
-            action_t,
-            reward_t,
-            obs_tp1,
-            action_tp1,
-            terminated_tp1
-        ) in enumerate(data_loader, start=1):
+        for _ in range(num_grad_steps):
+            obs_t, action_t, reward_t, obs_tp1, terminated_tp1 = buffer.sample(batch_size)
             # get temperature and policy loss;
             agent.get_policy_loss_and_temperature_loss(obs_t, Q1, Q2)
                         
@@ -379,21 +334,19 @@ def train_sac(
             l1, l2 = get_q_losses(
                 Q1, Q2, Q1t, Q2t, obs_t, 
                 action_t, reward_t, obs_tp1, 
-                action_tp1, terminated_tp1, agent, 
+                terminated_tp1, agent, 
                 discount, 
-                resample_action_tp1=False
             )
 
+            # grad step on policy and temperature;
             agent.update_policy_and_temperature()
             
-            # update q funcs;
+            # grad steps on q funcs;
             update_q_funcs(l1, l2, optimQ1, optimQ2)
 
             # target q funcs update;
             track_params(Q1t, Q1, tau)
             track_params(Q2t, Q2, tau)
-            if i == 50:
-                break
 
     # optionally save for this seed from all episodes;
     if save_returns_to:
@@ -412,21 +365,45 @@ if __name__ == "__main__":
     env = gym.make('Hopper-v2')
     num_iters=100
     Q1, Q2, agent, undiscounted_returns = train_sac(
-        env, num_iters,
-        qfunc_hiddens=[256, 256], qfunc_layer_norm=True,
-        lr=3E-4,
+        env,
+        num_iters,
+        qfunc_hiddens=[256, 256],
+        qfunc_layer_norm=True,
+        lr=3e-5,
         buffer_len=5_000,
         batch_size=250,
-        discount=.99,
+        discount=0.99,
         tau=0.05,
         entropy_lb=None,
         seed=0,
         policy=GaussPolicy,
+        T=200,
+        save_returns_to=TEST_OUTPUTS_PATH,
+        num_steps_to_sample=1000,
+        num_grad_steps=500,
         obs_dim=env.observation_space.shape[0],
         action_dim=env.action_space.shape[0],
         hiddens=[256, 256],
         with_layer_norm=True
     )
+    
+    
+    # train_sac(
+        # env, num_iters,
+        # qfunc_hiddens=[256, 256], qfunc_layer_norm=True,
+        # lr=3E-4,
+        # buffer_len=5_000,
+        # batch_size=250,
+        # discount=.99,
+        # tau=0.05,
+        # entropy_lb=None,
+        # seed=0,
+        # policy=GaussPolicy,
+        # obs_dim=env.observation_space.shape[0],
+        # action_dim=env.action_space.shape[0],
+        # hiddens=[256, 256],
+        # with_layer_norm=True
+    # )
     
     # train_sac(
     #     env, num_episodes, [256, 256], False,
