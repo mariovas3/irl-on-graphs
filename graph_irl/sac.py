@@ -6,7 +6,9 @@ from torch import nn
 from typing import Iterable
 from pathlib import Path
 import random
+from buffer_v2 import Buffer
 from buffer import get_loader
+import matplotlib.pyplot as plt
 # from copy import deepcopy
 import pickle
 
@@ -193,7 +195,9 @@ def get_q_losses(qfunc1, qfunc2, qt1, qt2, obs_t, action_t,
         qt1(obs_action_tp1),
         qt2(obs_action_tp1)
     ).view(-1) - agent.log_temperature.exp() * log_probs
-    q_target = (reward_t + (1. - terminated_tp1.float()) * discount * q_target).detach()
+    # print(q_target.dtype)
+    # print(reward_t.dtype, (1-terminated_tp1.int()).dtype, (discount * q_target).dtype)
+    q_target = (reward_t + (1 - terminated_tp1.int()) * discount * q_target).detach()
 
     # loss for first q func;
     loss_q1 = nn.MSELoss()(q1_est, q_target)
@@ -216,13 +220,41 @@ def update_q_funcs(loss_q1, loss_q2, optim_q1, optim_q2):
     optim_q2.step()
 
 
+# def train_single_epoch():
+    # if epoch == 0 and min_num_steps_before_training > 0:
+        # init_episodes = collect_episodes(
+            # max_episode_len,
+            # min_num_steps_before_training,
+            # discard_incomplete_episodes=False
+        # )
+        # replay_buffer.add_episodes(init_episodes)
+    # 
+    # for _ in range(num_train_loops_per_epoch):
+        # new_episodes = collect_episodes(
+            # max_episode_len,
+            # num_episodes_to_sample,
+            # discard_incomplete_episodes=False
+        # )
+        # replay_buffer.add_episodes(new_episodes)
+        # for _ in range(num_grad_steps):
+            # batch = self.replay_buffer.sample(batch_size)
+            # agent.get_policy_loss_and_temperature_loss(obs_t, Q1, Q2, use_entropy=False)
+            # l1, l2 = get_q_losses(Q1, Q2, Qt1, Qt2, obs_t, 
+                        #  action_t, reward_t, obs_tp1, 
+                        #  action_tp1, terminated_tp1, 
+                        #  agent, discount, resample_action_tp1=True
+                        # )
+            # agent.update_policy_and_temperature()
+            # update_q_funcs(l1, l2, optimQ1, optimQ2)
+            # track_params(Q1t, Q1, tau)
+            # track_params(Q2t, Q2, tau)
+
+
 def train_sac(
     env,
-    num_episodes,
+    num_iters,
     qfunc_hiddens,
     qfunc_layer_norm,
-    policy_hiddens,
-    policy_layer_norm,
     lr,
     buffer_len,
     batch_size,
@@ -230,8 +262,10 @@ def train_sac(
     tau,
     entropy_lb,
     seed,
+    policy,
     T=200,
     save_returns_to: Path = None,
+    **policy_kwargs
 ):
     """
     This is currently some pseudo code for training SAC agent.
@@ -271,13 +305,11 @@ def train_sac(
     # make agent;
     agent = SACAgentMuJoCo(
         'SACAgentMuJoCo',  # name;
+        policy,  # policy;
         lr,  # policy_lr;
         entropy_lb,  # entropy_lb
         lr,  # temperature_lr
-        obs_dim=obs_dim,
-        action_dim=action_dim,
-        hiddens=policy_hiddens,
-        with_layer_norm=policy_layer_norm,
+        **policy_kwargs
     )
 
     # init replay buffer of size=N deque?
@@ -285,7 +317,7 @@ def train_sac(
     buffer, idx = [], 0
 
     # start running episodes;
-    for _ in range(num_episodes):
+    for _ in range(num_iters):
         sampled_return = 0.0
         done, t = False, 0
 
@@ -312,10 +344,10 @@ def train_sac(
 
             # add experience to buffer;
             if len(buffer) < buffer_len:
-                buffer.append((obs_t, action_t, reward_t, obs_tp1, action_tp1, terminated))
+                buffer.append((obs_t, action_t, torch.tensor(reward_t, dtype=torch.float32), obs_tp1, action_tp1, terminated))
             else:
                 buffer_idx = idx % buffer_len
-                buffer[buffer_idx] = (obs_t, action_t, reward_t, obs_tp1, action_tp1, terminated)
+                buffer[buffer_idx] = (obs_t, action_t, torch.tensor(reward_t, dtype=torch.float32), obs_tp1, action_tp1, terminated)
             idx += 1
 
             # update current observation and action;
@@ -353,13 +385,6 @@ def train_sac(
             )
 
             agent.update_policy_and_temperature()
-            # agent.policy_optim.zero_grad()
-            # agent.policy_loss.backward()
-            # agent.policy_optim.step()
-            
-            # agent.temperature_optim.zero_grad()
-            # agent.temperature_loss.backward()
-            # agent.temperature_optim.step()
             
             # update q funcs;
             update_q_funcs(l1, l2, optimQ1, optimQ2)
@@ -367,11 +392,8 @@ def train_sac(
             # target q funcs update;
             track_params(Q1t, Q1, tau)
             track_params(Q2t, Q2, tau)
-
-            # return (0, 0, 0, 0)
-
-            # update policy and temperature;
-            # agent.update_policy_and_temperature()
+            if i == 50:
+                break
 
     # optionally save for this seed from all episodes;
     if save_returns_to:
@@ -388,8 +410,33 @@ if __name__ == "__main__":
 
 
     env = gym.make('Hopper-v2')
-    num_episodes=200
+    num_iters=100
     Q1, Q2, agent, undiscounted_returns = train_sac(
-        env, num_episodes, [28, 28], False, [22, 22], True,
-        3e-4, 10_000, 250, 0.99, 0.05, None, 0, 200, TEST_OUTPUTS_PATH
+        env, num_iters,
+        qfunc_hiddens=[256, 256], qfunc_layer_norm=True,
+        lr=3E-4,
+        buffer_len=5_000,
+        batch_size=250,
+        discount=.99,
+        tau=0.05,
+        entropy_lb=None,
+        seed=0,
+        policy=GaussPolicy,
+        obs_dim=env.observation_space.shape[0],
+        action_dim=env.action_space.shape[0],
+        hiddens=[256, 256],
+        with_layer_norm=True
     )
+    
+    # train_sac(
+    #     env, num_episodes, [256, 256], False,
+    #     3e-4, 1_000, 250, 0.99, 0.1, None, 0, 200, TEST_OUTPUTS_PATH
+    # )
+    print(
+        np.concatenate((
+            np.array(agent.policy_losses).reshape(-1, 1), 
+            np.array(agent.temperature_losses).reshape(-1, 1)), -1)
+        )
+    
+    plt.plot(undiscounted_returns)
+    plt.show()

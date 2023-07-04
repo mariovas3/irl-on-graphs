@@ -40,9 +40,10 @@ class GaussPolicy(nn.Module):
         self.mu_net = nn.Linear(hiddens[-1], action_dim)
         self.std_net = nn.Linear(hiddens[-1], action_dim)
 
-    def forward(self, obs):
+    def forward(self, obs) -> dists.Distribution:
         emb = self.net(obs)  # shared embedding for mean and std;
-        return self.mu_net(emb), torch.log(1.0 + self.std_net(emb).exp())
+        mus, sigmas = self.mu_net(emb), torch.log(1.0 + self.std_net(emb).exp())
+        return dists.Normal(mus, sigmas)
 
 
 class PGAgentBase:
