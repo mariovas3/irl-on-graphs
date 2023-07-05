@@ -9,6 +9,7 @@ from buffer_v2 import Buffer
 from vis_utils import save_metric_plots, see_one_episode
 import time
 import pickle
+import gtimer as gt
 
 TEST_OUTPUTS_PATH = Path(".").absolute().parent / "test_output"
 if not TEST_OUTPUTS_PATH.exists():
@@ -232,31 +233,24 @@ def update_q_funcs(loss_q1, loss_q2, optim_q1, optim_q2):
 
 def train_sac(
     env,
+    agent,
     num_iters,
     qfunc_hiddens,
     qfunc_layer_norm,
-    lr,
+    qfunc_lr,
     buffer_len,
     batch_size,
     discount,
     tau,
-    entropy_lb,
     seed,
-    policy,
     save_returns_to: Path = None,
     num_steps_to_sample=500,
     num_grad_steps=500,
+    num_epochs=100,
+    min_steps_to_presample=1000,
     avg_the_returns=False,
-    **policy_kwargs,
+    **agent_policy_kwargs,
 ):
-    """
-    This is currently doing num_iters train iterations
-    each iteration gathers trajectories given current
-    agent and then does num_grad_steps gradient steps;
-
-    might be good to add another loop over epochs
-    as in the original sac paper.
-    """
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
@@ -267,8 +261,8 @@ def train_sac(
     # init 2 q nets;
     Q1 = Qfunc(obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm)
     Q2 = Qfunc(obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm)
-    optimQ1 = torch.optim.Adam(Q1.parameters(), lr=lr)
-    optimQ2 = torch.optim.Adam(Q2.parameters(), lr=lr)
+    optimQ1 = torch.optim.Adam(Q1.parameters(), lr=qfunc_lr)
+    optimQ2 = torch.optim.Adam(Q2.parameters(), lr=qfunc_lr)
 
     # init 2 target qnets with same parameters as q1 and q2;
     Q1t = Qfunc(
@@ -286,79 +280,87 @@ def train_sac(
     Q2t.requires_grad_(False)
 
     # make agent;
-    agent = SACAgentMuJoCo(
-        "SACAgentMuJoCo",  # name;
-        policy,  # policy;
-        lr,  # policy_lr;
-        entropy_lb,  # entropy_lb
-        lr,  # temperature_lr
-        **policy_kwargs,
+    agent = agent(
+        **agent_policy_kwargs['agent_kwargs'], 
+        **agent_policy_kwargs['policy_kwargs']
     )
 
-    # init replay buffer of size=N deque?
+    # init replay buffer;
     undiscounted_returns = []
     qfunc1_losses, qfunc2_losses = [], []
     buffer = Buffer(buffer_len, obs_dim, action_dim)
+    
+    # see if presampling needed.
+    if min_steps_to_presample > 0:
+        buffer.collect_path(env, agent, 
+                            min_steps_to_presample, 
+                            undiscounted_returns, 
+                            avg_the_returns)
 
     # start running episodes;
-    fifth = num_iters // 5
+    fifth_epochs = max(num_epochs // 5, 1)
+    fifth = max(num_iters // 5, 1)
+    # gt.stamp('init_part_sac')
     now = time.time()
-    # might be good to do another (outer) for loop over epochs
-    # since num_iters corresponds to train loops per epoch;
-    # i.e., currently this code does 100 train loops in this one epoch;
-    # also might be good to clear the buffer at each epoch if
-    # I do an outer loop over epochs;
-    for it in range(num_iters):
-        # sample paths;
-        if (it + 1) % fifth == 0:
-            print(
-                f"{20 * (it + 1) // fifth}% train iterations processed\n"
-                f"took {(time.time() - now) / 60:.3f} minutes"
-            )
-        buffer.collect_path(
-            env,
-            agent,
-            num_steps_to_sample,
-            undiscounted_returns,
-            avg_the_returns,  # if true, gives avg reward in episode.
-        )
-
-        # do the gradient updates;
-        for _ in range(num_grad_steps):
-            obs_t, action_t, reward_t, obs_tp1, terminated_tp1 = buffer.sample(
-                batch_size
-            )
-            # get temperature and policy loss;
-            agent.get_policy_loss_and_temperature_loss(obs_t, Q1, Q2)
-
-            # value func updates;
-            l1, l2 = get_q_losses(
-                Q1,
-                Q2,
-                Q1t,
-                Q2t,
-                obs_t,
-                action_t,
-                reward_t,
-                obs_tp1,
-                terminated_tp1,
+    for epoch in range(num_epochs):
+        # might be good to clear the buffer at each epoch
+        for it in range(num_iters):
+            # sample paths;
+            buffer.collect_path(
+                env,
                 agent,
-                discount,
+                num_steps_to_sample,
+                undiscounted_returns,
+                avg_the_returns,  # if true, gives avg reward in episode.
             )
-
-            # qfunc losses housekeeping;
-            qfunc1_losses.append(l1.item())
-            qfunc2_losses.append(l2.item())
-
-            # grad step on policy and temperature;
-            agent.update_policy_and_temperature()
-
-            # grad steps on q funcs;
-            update_q_funcs(l1, l2, optimQ1, optimQ2)
-
-            # target q funcs update;
-            track_params(Q1t, Q1, tau)
-            track_params(Q2t, Q2, tau)
+    
+            # do the gradient updates;
+            for _ in range(num_grad_steps):
+                obs_t, action_t, reward_t, obs_tp1, terminated_tp1 = buffer.sample(
+                    batch_size
+                )
+                # get temperature and policy loss;
+                agent.get_policy_loss_and_temperature_loss(obs_t, Q1, Q2)
+    
+                # value func updates;
+                l1, l2 = get_q_losses(
+                    Q1,
+                    Q2,
+                    Q1t,
+                    Q2t,
+                    obs_t,
+                    action_t,
+                    reward_t,
+                    obs_tp1,
+                    terminated_tp1,
+                    agent,
+                    discount,
+                )
+    
+                # qfunc losses housekeeping;
+                qfunc1_losses.append(l1.item())
+                qfunc2_losses.append(l2.item())
+    
+                # grad step on policy and temperature;
+                agent.update_policy_and_temperature()
+    
+                # grad steps on q funcs;
+                update_q_funcs(l1, l2, optimQ1, optimQ2)
+    
+                # target q funcs update;
+                track_params(Q1t, Q1, tau)
+                track_params(Q2t, Q2, tau)
+            if (it + 1) % fifth == 0:
+                print(
+                    f"{20 * (it + 1) // fifth}% train iterations processed\n"
+                    f"took {(time.time() - now) / 60:.3f} minutes"
+                )
+        if (epoch + 1) % fifth_epochs == 0:
+            # gt.stamp('fifth of epochs done', unique=False)
+            print(
+                    f"{20 * (epoch + 1) // fifth_epochs}% epochs processed\n"
+                    f"took {(time.time() - now) / 60:.3f} minutes"
+                )
 
     # optionally save for this seed from all episodes;
     if save_returns_to:
@@ -400,31 +402,46 @@ def train_sac(
 if __name__ == "__main__":
     import gymnasium as gym
 
-    T = 1000
+    T = 300
+    num_epochs = 2
 
     env = gym.make("Hopper-v2", max_episode_steps=T)
     num_iters = 100  # this is the train iterations per epoch;
+    agent_policy_kwargs = {
+        'agent_kwargs': {
+            'name': "SACAgentMuJoCo",
+            'policy': GaussPolicy,
+            'policy_lr': 3e-4,
+            'entropy_lb': None,
+            'temperature_lr': 3e-4, 
+        },
+        'policy_kwargs': {
+            'obs_dim': env.observation_space.shape[0],
+            'action_dim': env.action_space.shape[0],
+            'hiddens': [256, 256],
+            'with_layer_norm': True
+        }
+    }
+    
     Q1, Q2, agent, undiscounted_returns = train_sac(
         env,
+        SACAgentMuJoCo,
         num_iters,
         qfunc_hiddens=[256, 256],
         qfunc_layer_norm=True,
-        lr=3e-4,
-        buffer_len=5_000,
+        qfunc_lr=3e-4,
+        buffer_len=10_000,
         batch_size=250,
         discount=0.99,
         tau=0.05,
-        entropy_lb=None,
         seed=0,
-        policy=GaussPolicy,
         save_returns_to=TEST_OUTPUTS_PATH,
         num_steps_to_sample=500,
         num_grad_steps=500,
+        num_epochs=num_epochs,
+        min_steps_to_presample=1000,
         avg_the_returns=True,
-        obs_dim=env.observation_space.shape[0],
-        action_dim=env.action_space.shape[0],
-        hiddens=[256, 256],
-        with_layer_norm=True,
+        **agent_policy_kwargs
     )
 
     env = gym.make(
