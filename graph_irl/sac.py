@@ -400,7 +400,7 @@ def train_sac(
 if __name__ == "__main__":
     import gymnasium as gym
 
-    T = 300
+    T = 1000
 
     env = gym.make("Hopper-v2", max_episode_steps=T)
     num_iters = 100  # this is the train iterations per epoch;
@@ -428,6 +428,6 @@ if __name__ == "__main__":
     )
 
     env = gym.make(
-        "Hopper-v2", max_episode_steps=T, render_mode="human", seed=0
+        "Hopper-v2", max_episode_steps=T, render_mode="human"
     )
-    see_one_episode(env, agent)
+    see_one_episode(env, agent, seed=0)
