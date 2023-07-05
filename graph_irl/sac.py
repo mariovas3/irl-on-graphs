@@ -3,17 +3,12 @@ import torch
 from policy import GaussPolicy, Qfunc
 from torch import nn
 from typing import Iterable
-from pathlib import Path
 import random
+from pathlib import Path
 from buffer_v2 import Buffer
 from vis_utils import save_metric_plots, see_one_episode
 import time
 import pickle
-import gtimer as gt
-
-TEST_OUTPUTS_PATH = Path(".").absolute().parent / "test_output"
-if not TEST_OUTPUTS_PATH.exists():
-    TEST_OUTPUTS_PATH.mkdir()
 
 
 class SACAgentBase:
@@ -126,7 +121,7 @@ class SACAgentMuJoCo(SACAgentBase):
 
         # get loss for temperature;
         if use_entropy:
-            self.temperature_loss = -(
+            self.temperature_loss = (
                 self.log_temperature.exp()
                 * (entropies - self.entropy_lb).detach().mean()
             )
@@ -249,6 +244,8 @@ def train_sac(
     num_epochs=100,
     min_steps_to_presample=1000,
     avg_the_returns=False,
+    use_entropy=False,
+    UT_trick=False,
     **agent_policy_kwargs,
 ):
     torch.manual_seed(seed)
@@ -284,9 +281,13 @@ def train_sac(
         **agent_policy_kwargs['agent_kwargs'], 
         **agent_policy_kwargs['policy_kwargs']
     )
+    
+    # whether entropy and UT are used;
+    agent.name = agent.name + f"-policy-entropy-{int(use_entropy)}-UT-trick-{int(UT_trick)}"
 
     # init replay buffer;
     undiscounted_returns = []
+    path_lens = []
     qfunc1_losses, qfunc2_losses = [], []
     buffer = Buffer(buffer_len, obs_dim, action_dim)
     
@@ -295,7 +296,7 @@ def train_sac(
         buffer.collect_path(env, agent, 
                             min_steps_to_presample, 
                             undiscounted_returns, 
-                            avg_the_returns)
+                            avg_the_returns, path_lens)
 
     # start running episodes;
     fifth_epochs = max(num_epochs // 5, 1)
@@ -312,6 +313,7 @@ def train_sac(
                 num_steps_to_sample,
                 undiscounted_returns,
                 avg_the_returns,  # if true, gives avg reward in episode.
+                path_lens
             )
     
             # do the gradient updates;
@@ -320,7 +322,7 @@ def train_sac(
                     batch_size
                 )
                 # get temperature and policy loss;
-                agent.get_policy_loss_and_temperature_loss(obs_t, Q1, Q2)
+                agent.get_policy_loss_and_temperature_loss(obs_t, Q1, Q2, use_entropy)
     
                 # value func updates;
                 l1, l2 = get_q_losses(
@@ -369,6 +371,7 @@ def train_sac(
             "temperature-loss",
             "qfunc1-loss",
             "qfunc2-loss",
+            "path_lens",
             "undiscounted-returns",
         ]
         metrics = [
@@ -376,6 +379,7 @@ def train_sac(
             agent.temperature_losses,
             qfunc1_losses,
             qfunc2_losses,
+            path_lens,
             undiscounted_returns,
         ]
         if avg_the_returns:
@@ -402,16 +406,20 @@ def train_sac(
 if __name__ == "__main__":
     import gymnasium as gym
 
-    T = 300
-    num_epochs = 2
+    TEST_OUTPUTS_PATH = Path(".").absolute().parent / "test_output"
+    if not TEST_OUTPUTS_PATH.exists():
+        TEST_OUTPUTS_PATH.mkdir()
+
+    T = 500
+    num_epochs = 1
 
     env = gym.make("Hopper-v2", max_episode_steps=T)
-    num_iters = 100  # this is the train iterations per epoch;
+    num_iters = 500  # this is the train iterations per epoch;
     agent_policy_kwargs = {
         'agent_kwargs': {
             'name': "SACAgentMuJoCo",
             'policy': GaussPolicy,
-            'policy_lr': 3e-4,
+            'policy_lr': 1e-4,
             'entropy_lb': None,
             'temperature_lr': 3e-4, 
         },
@@ -430,7 +438,7 @@ if __name__ == "__main__":
         qfunc_hiddens=[256, 256],
         qfunc_layer_norm=True,
         qfunc_lr=3e-4,
-        buffer_len=10_000,
+        buffer_len=100_000,
         batch_size=250,
         discount=0.99,
         tau=0.05,
@@ -441,10 +449,14 @@ if __name__ == "__main__":
         num_epochs=num_epochs,
         min_steps_to_presample=1000,
         avg_the_returns=True,
+        use_entropy=True,
+        UT_trick=False,
         **agent_policy_kwargs
     )
 
+    print(f"temperature is: {agent.log_temperature.exp()}")
+
     env = gym.make(
-        "Hopper-v2", max_episode_steps=T, render_mode="human"
+        "Hopper-v2", max_episode_steps=1000, render_mode="human"
     )
     see_one_episode(env, agent, seed=0)

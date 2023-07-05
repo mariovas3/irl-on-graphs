@@ -9,12 +9,16 @@ import torch
 def see_one_episode(env, agent, seed):
     obs, info = env.reset(seed=seed)
     done = False
+    step = 0
     while not done:
         time.sleep(1 / 60)  # slow down rendering, otherwise 125 fps;
         obs = torch.tensor(obs, dtype=torch.float32)
         action = agent.sample_action(obs).numpy()
         obs, reward, terminated, truncated, info = env.step(action)
         done = terminated or truncated
+        step += 1
+        if terminated:
+            print(f"simulation died step: {step}")
     pygame.display.quit()
 
 
