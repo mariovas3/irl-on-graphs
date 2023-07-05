@@ -1,16 +1,13 @@
 import numpy as np
 import torch
-import torch.distributions as dists
 from policy import GaussPolicy, Qfunc
 from torch import nn
 from typing import Iterable
 from pathlib import Path
 import random
 from buffer_v2 import Buffer
-from buffer import get_loader
-import matplotlib.pyplot as plt
+from vis_utils import save_metric_plots, see_one_episode
 import time
-# from copy import deepcopy
 import pickle
 
 TEST_OUTPUTS_PATH = Path(".").absolute().parent / "test_output"
@@ -26,7 +23,7 @@ class SACAgentBase:
         policy_lr,
         entropy_lb,
         temperature_lr,
-        **policy_kwargs
+        **policy_kwargs,
     ):
         self.name = name
         self.policy = policy(**policy_kwargs)
@@ -63,7 +60,7 @@ class SACAgentMuJoCo(SACAgentBase):
         policy_lr,
         entropy_lb,
         temperature_lr,
-        **policy_kwargs
+        **policy_kwargs,
     ):
         super(SACAgentMuJoCo, self).__init__(
             name,
@@ -71,14 +68,14 @@ class SACAgentMuJoCo(SACAgentBase):
             policy_lr,
             entropy_lb,
             temperature_lr,
-            **policy_kwargs
+            **policy_kwargs,
         )
 
     def sample_action(self, obs):
         policy_density = self.policy(obs)
         action = policy_density.sample()
         # if isinstance(policy_dist, dists.Normal):
-        #     # you can access mean and stddev 
+        #     # you can access mean and stddev
         #     # with policy_dist.mean and policy_dist.stddev;
         return action
 
@@ -99,7 +96,7 @@ class SACAgentMuJoCo(SACAgentBase):
     ):
         # self.policy.requires_grad_(True)
         # self.log_temperature.requires_grad_(True)
-        
+
         # get policy;
         policy_density = self.policy(obs_t)
 
@@ -133,10 +130,11 @@ class SACAgentMuJoCo(SACAgentBase):
                 * (entropies - self.entropy_lb).detach().mean()
             )
         else:
-            self.temperature_loss = - (
-                self.log_temperature.exp() * (log_prob + self.entropy_lb).detach()
+            self.temperature_loss = -(
+                self.log_temperature.exp()
+                * (log_prob + self.entropy_lb).detach()
             ).mean()
-        
+
         # housekeeping;
         self.policy_losses.append(self.policy_loss.item())
         self.temperature_losses.append(self.temperature_loss.item())
@@ -164,39 +162,52 @@ def load_params_in_net(net: nn.Module, parameters: Iterable):
     )
 
 
-def get_q_losses(qfunc1, qfunc2, qt1, qt2, obs_t, action_t,
-                 reward_t, obs_tp1, terminated_tp1, agent, discount):
+def get_q_losses(
+    qfunc1,
+    qfunc2,
+    qt1,
+    qt2,
+    obs_t,
+    action_t,
+    reward_t,
+    obs_tp1,
+    terminated_tp1,
+    agent,
+    discount,
+):
     qfunc1.requires_grad_(True)
     qfunc2.requires_grad_(True)
-    
+
     # freeze policy and temperature;
     # agent.policy.requires_grad_(False)
     # agent.log_temperature.requres_grad_(False)
 
     # get predictions from q functions;
     obs_action_t = torch.cat((obs_t, action_t), -1)
-    q1_est = qfunc1(obs_action_t).view(-1) 
+    q1_est = qfunc1(obs_action_t).view(-1)
     q2_est = qfunc2(obs_action_t).view(-1)
-    
+
     # see appropriate dist for obs_tp1;
     policy_density = agent.policy(obs_tp1)
 
     # sample future action;
     action_tp1 = policy_density.sample()
-    
+
     # get log probs;
     log_probs = policy_density.log_prob(action_tp1).detach().sum(-1).view(-1)
-    
+
     obs_action_tp1 = torch.cat((obs_tp1, action_tp1), -1)
     # use the values from the target net that
     # had lower value predictions;
-    q_target = torch.min(
-        qt1(obs_action_tp1),
-        qt2(obs_action_tp1)
-    ).view(-1) - agent.log_temperature.exp() * log_probs
+    q_target = (
+        torch.min(qt1(obs_action_tp1), qt2(obs_action_tp1)).view(-1)
+        - agent.log_temperature.exp() * log_probs
+    )
     # print(q_target.dtype)
     # print(reward_t.dtype, (1-terminated_tp1.int()).dtype, (discount * q_target).dtype)
-    q_target = (reward_t + (1 - terminated_tp1.int()) * discount * q_target).detach()
+    q_target = (
+        reward_t + (1 - terminated_tp1.int()) * discount * q_target
+    ).detach()
 
     # loss for first q func;
     loss_q1 = nn.MSELoss()(q1_est, q_target)
@@ -232,15 +243,15 @@ def train_sac(
     entropy_lb,
     seed,
     policy,
-    T=200,
     save_returns_to: Path = None,
     num_steps_to_sample=500,
     num_grad_steps=500,
-    **policy_kwargs
+    avg_the_returns=False,
+    **policy_kwargs,
 ):
     """
     This is currently doing num_iters train iterations
-    each iteration gathers trajectories given current 
+    each iteration gathers trajectories given current
     agent and then does num_grad_steps gradient steps;
 
     might be good to add another loop over epochs
@@ -254,12 +265,8 @@ def train_sac(
     obs_action_dim = obs_dim + action_dim
 
     # init 2 q nets;
-    Q1 = Qfunc(
-        obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm
-    )
-    Q2 = Qfunc(
-        obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm
-    )
+    Q1 = Qfunc(obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm)
+    Q2 = Qfunc(obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm)
     optimQ1 = torch.optim.Adam(Q1.parameters(), lr=lr)
     optimQ2 = torch.optim.Adam(Q2.parameters(), lr=lr)
 
@@ -280,16 +287,17 @@ def train_sac(
 
     # make agent;
     agent = SACAgentMuJoCo(
-        'SACAgentMuJoCo',  # name;
+        "SACAgentMuJoCo",  # name;
         policy,  # policy;
         lr,  # policy_lr;
         entropy_lb,  # entropy_lb
         lr,  # temperature_lr
-        **policy_kwargs
+        **policy_kwargs,
     )
 
     # init replay buffer of size=N deque?
     undiscounted_returns = []
+    qfunc1_losses, qfunc2_losses = [], []
     buffer = Buffer(buffer_len, obs_dim, action_dim)
 
     # start running episodes;
@@ -303,27 +311,48 @@ def train_sac(
     for it in range(num_iters):
         # sample paths;
         if (it + 1) % fifth == 0:
-            print(f"{20 * (it + 1) // fifth}% processed\n"
-                  f"took {now - time.time():.3f} seconds")
-        buffer.collect_path(env, agent, num_steps_to_sample, undiscounted_returns)
+            print(
+                f"{20 * (it + 1) // fifth}% train iterations processed\n"
+                f"took {(time.time() - now) / 60:.3f} minutes"
+            )
+        buffer.collect_path(
+            env,
+            agent,
+            num_steps_to_sample,
+            undiscounted_returns,
+            avg_the_returns,  # if true, gives avg reward in episode.
+        )
 
         # do the gradient updates;
         for _ in range(num_grad_steps):
-            obs_t, action_t, reward_t, obs_tp1, terminated_tp1 = buffer.sample(batch_size)
+            obs_t, action_t, reward_t, obs_tp1, terminated_tp1 = buffer.sample(
+                batch_size
+            )
             # get temperature and policy loss;
             agent.get_policy_loss_and_temperature_loss(obs_t, Q1, Q2)
-                        
+
             # value func updates;
             l1, l2 = get_q_losses(
-                Q1, Q2, Q1t, Q2t, obs_t, 
-                action_t, reward_t, obs_tp1, 
-                terminated_tp1, agent, 
-                discount, 
+                Q1,
+                Q2,
+                Q1t,
+                Q2t,
+                obs_t,
+                action_t,
+                reward_t,
+                obs_tp1,
+                terminated_tp1,
+                agent,
+                discount,
             )
+
+            # qfunc losses housekeeping;
+            qfunc1_losses.append(l1.item())
+            qfunc2_losses.append(l2.item())
 
             # grad step on policy and temperature;
             agent.update_policy_and_temperature()
-            
+
             # grad steps on q funcs;
             update_q_funcs(l1, l2, optimQ1, optimQ2)
 
@@ -333,20 +362,48 @@ def train_sac(
 
     # optionally save for this seed from all episodes;
     if save_returns_to:
-        file_name = agent.name + f"-{env.spec.id}-seed-{seed}.pkl"
-        file_name = save_returns_to / file_name
-        with open(file_name, "wb") as f:
-            pickle.dump(undiscounted_returns, f)
+        metric_names = [
+            "policy-loss",
+            "temperature-loss",
+            "qfunc1-loss",
+            "qfunc2-loss",
+            "undiscounted-returns",
+        ]
+        metrics = [
+            agent.policy_losses,
+            agent.temperature_losses,
+            qfunc1_losses,
+            qfunc2_losses,
+            undiscounted_returns,
+        ]
+        if avg_the_returns:
+            metric_names[-1] = "avg-reward-per-episode"
+
+        for metric_name, metric in zip(metric_names, metrics):
+            file_name = (
+                agent.name + f"-{env.spec.id}-{metric_name}-seed-{seed}.pkl"
+            )
+            file_name = save_returns_to / file_name
+            with open(file_name, "wb") as f:
+                pickle.dump(metric, f)
+        save_metric_plots(
+            agent.name,
+            env.spec.id,
+            metric_names,
+            metrics,
+            save_returns_to,
+            seed,
+        )
     return Q1, Q2, agent, undiscounted_returns
 
 
 if __name__ == "__main__":
     import gymnasium as gym
-    # import matplotlib.pyplot as plt
 
+    T = 300
 
-    env = gym.make('Hopper-v2')
-    num_iters=100  # this is the train iterations per epoch;
+    env = gym.make("Hopper-v2", max_episode_steps=T)
+    num_iters = 100  # this is the train iterations per epoch;
     Q1, Q2, agent, undiscounted_returns = train_sac(
         env,
         num_iters,
@@ -360,24 +417,17 @@ if __name__ == "__main__":
         entropy_lb=None,
         seed=0,
         policy=GaussPolicy,
-        T=200,
         save_returns_to=TEST_OUTPUTS_PATH,
         num_steps_to_sample=500,
         num_grad_steps=500,
+        avg_the_returns=True,
         obs_dim=env.observation_space.shape[0],
         action_dim=env.action_space.shape[0],
         hiddens=[256, 256],
-        with_layer_norm=True
+        with_layer_norm=True,
     )
-    
-    
-    print(
-        np.concatenate((
-            np.array(agent.policy_losses).reshape(-1, 1), 
-            np.array(agent.temperature_losses).reshape(-1, 1)), -1)
-        )
-    
-    plt.plot(undiscounted_returns)
-    # plt.plot(agent.policy_losses)
-    # plt.plot(agent.temperature_losses)
-    plt.show()
+
+    env = gym.make(
+        "Hopper-v2", max_episode_steps=T, render_mode="human", seed=0
+    )
+    see_one_episode(env, agent)
