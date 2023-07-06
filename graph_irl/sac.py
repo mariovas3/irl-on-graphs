@@ -6,7 +6,7 @@ from typing import Iterable
 import random
 from pathlib import Path
 from buffer_v2 import Buffer
-from vis_utils import save_metric_plots, see_one_episode
+from vis_utils import save_metric_plots, see_one_episode, get_moving_avgs
 import time
 import pickle
 from tqdm import tqdm
@@ -237,6 +237,97 @@ def update_q_funcs(loss_q1, loss_q2, optim_q1, optim_q2):
     optim_q2.step()
 
 
+def train_sac_one_epoch(
+    env,
+    agent,
+    Q1,
+    Q2,
+    Q1t,
+    Q2t,
+    optimQ1,
+    optimQ2,
+    tau,
+    discount,
+    num_iters,
+    num_grad_steps,
+    num_steps_to_sample,
+    buffer,
+    batch_size,
+    qfunc1_losses: list,
+    qfunc2_losses: list,
+    UT_trick=False,
+):
+    for _ in tqdm(range(num_iters)):
+        # sample paths;
+        buffer.collect_path(
+            env,
+            agent,
+            num_steps_to_sample,
+        )
+
+        # do the gradient updates;
+        for _ in range(num_grad_steps):
+            obs_t, action_t, reward_t, obs_tp1, terminated_tp1 = buffer.sample(
+                batch_size
+            )
+            # get temperature and policy loss;
+            agent.get_policy_loss_and_temperature_loss(obs_t, Q1, Q2, UT_trick)
+
+            # value func updates;
+            l1, l2 = get_q_losses(
+                Q1,
+                Q2,
+                Q1t,
+                Q2t,
+                obs_t,
+                action_t,
+                reward_t,
+                obs_tp1,
+                terminated_tp1,
+                agent,
+                discount,
+            )
+
+            # qfunc losses housekeeping;
+            qfunc1_losses.append(l1.item())
+            qfunc2_losses.append(l2.item())
+
+            # grad step on policy and temperature;
+            agent.update_policy_and_temperature()
+
+            # grad steps on q funcs;
+            update_q_funcs(l1, l2, optimQ1, optimQ2)
+
+            # target q funcs update;
+            track_params(Q1t, Q1, tau)
+            track_params(Q2t, Q2, tau)
+
+
+def save_metrics(save_returns_to, metric_names, metrics, agent_name, env_name, seed):
+    now = time.time()
+    new_dir = agent_name + f"-{env_name}-seed-{seed}-{now}"
+    new_dir = save_returns_to / new_dir
+    new_dir.mkdir(parents=True)
+    save_returns_to = new_dir
+    for metric_name, metric in zip(metric_names, metrics):
+        file_name = (
+            agent_name + f"-{env_name}-{metric_name}-seed-{seed}.pkl"
+        )
+        file_name = save_returns_to / file_name
+        with open(file_name, "wb") as f:
+            pickle.dump(metric, f)
+            
+    # save plots of the metrics;
+    save_metric_plots(
+        agent_name,
+        env_name,
+        metric_names,
+        metrics,
+        save_returns_to,
+        seed,
+    )
+
+
 def train_sac(
     env,
     agent,
@@ -257,6 +348,7 @@ def train_sac(
     UT_trick=False,
     **agent_policy_kwargs,
 ):
+    # instantiate necessary objects;
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
@@ -292,7 +384,7 @@ def train_sac(
     )
     
     # whether entropy and UT are used;
-    agent.name = agent.name + f"-UT-trick-{int(UT_trick)}"
+    agent.name = agent.name + f"-UT-{int(UT_trick)}-buffer-size-{buffer_len}-epochs-{num_epochs}-iters-{num_iters}"
 
     # init replay buffer;
     qfunc1_losses, qfunc2_losses = [], []
@@ -304,67 +396,14 @@ def train_sac(
                             min_steps_to_presample)
 
     # start running episodes;
-    fifth_epochs = max(num_epochs // 5, 1)
-    fifth = max(num_iters // 5, 1)
-    # gt.stamp('init_part_sac')
-    now = time.time()
-    for epoch in tqdm(range(num_epochs)):
-        # might be good to clear the buffer at each epoch
-        for it in tqdm(range(num_iters)):
-            # sample paths;
-            buffer.collect_path(
-                env,
-                agent,
-                num_steps_to_sample,
-            )
-    
-            # do the gradient updates;
-            for _ in range(num_grad_steps):
-                obs_t, action_t, reward_t, obs_tp1, terminated_tp1 = buffer.sample(
-                    batch_size
-                )
-                # get temperature and policy loss;
-                agent.get_policy_loss_and_temperature_loss(obs_t, Q1, Q2, UT_trick)
-    
-                # value func updates;
-                l1, l2 = get_q_losses(
-                    Q1,
-                    Q2,
-                    Q1t,
-                    Q2t,
-                    obs_t,
-                    action_t,
-                    reward_t,
-                    obs_tp1,
-                    terminated_tp1,
-                    agent,
-                    discount,
-                )
-    
-                # qfunc losses housekeeping;
-                qfunc1_losses.append(l1.item())
-                qfunc2_losses.append(l2.item())
-    
-                # grad step on policy and temperature;
-                agent.update_policy_and_temperature()
-    
-                # grad steps on q funcs;
-                update_q_funcs(l1, l2, optimQ1, optimQ2)
-    
-                # target q funcs update;
-                track_params(Q1t, Q1, tau)
-                track_params(Q2t, Q2, tau)
-            if (it + 1) % fifth == 0:
-                print(
-                    f"{20 * (it + 1) // fifth}% train iterations processed\n"
-                    f"took {(time.time() - now) / 60:.3f} minutes"
-                )
-        if (epoch + 1) % fifth_epochs == 0:
-            # gt.stamp('fifth of epochs done', unique=False)
-            print(
-                    f"{20 * (epoch + 1) // fifth_epochs}% epochs processed\n"
-                    f"took {(time.time() - now) / 60:.3f} minutes"
-                )
+    for _ in tqdm(range(num_epochs)):
+        train_sac_one_epoch(
+            env, agent, Q1, Q2, Q1t, Q2t,
+            optimQ1, optimQ2, tau,
+            discount, num_iters, num_grad_steps,
+            num_steps_to_sample, buffer, batch_size,
+            qfunc1_losses, qfunc2_losses, UT_trick
+        )
 
     # optionally save for this seed from all episodes;
     if save_returns_to:
@@ -375,7 +414,8 @@ def train_sac(
             "qfunc2-loss",
             "path_lens",
             "undiscounted-returns",
-            "avg-reward"
+            "avg-reward",
+            "moving-avg-returns-30"
         ]
         metrics = [
             agent.policy_losses,
@@ -384,35 +424,34 @@ def train_sac(
             qfunc2_losses,
             buffer.path_lens,
             buffer.undiscounted_returns,
-            buffer.avg_rewards_per_episode
+            buffer.avg_rewards_per_episode,
+            get_moving_avgs(buffer.undiscounted_returns, 30),
         ]
 
-        for metric_name, metric in zip(metric_names, metrics):
-            file_name = (
-                agent.name + f"-{env.spec.id}-{metric_name}-seed-{seed}.pkl"
-            )
-            file_name = save_returns_to / file_name
-            with open(file_name, "wb") as f:
-                pickle.dump(metric, f)
-        save_metric_plots(
-            agent.name,
-            env.spec.id,
+        # save the metrics as numbers as well as plot;
+        save_metrics(
+            save_returns_to,
             metric_names,
             metrics,
-            save_returns_to,
-            seed,
+            agent.name,
+            env.spec.id,
+            seed
         )
+    
+    # return the q funcs and the agent;
     return Q1, Q2, agent
 
 
 if __name__ == "__main__":
     import gymnasium as gym
 
+    # path to save logs;
     TEST_OUTPUTS_PATH = Path(".").absolute().parent / "test_output"
     if not TEST_OUTPUTS_PATH.exists():
         TEST_OUTPUTS_PATH.mkdir()
 
-    T = 300
+    # max path length;
+    T = 1000
     num_epochs = 1
 
     env = gym.make("Hopper-v2", max_episode_steps=T)
@@ -440,13 +479,13 @@ if __name__ == "__main__":
         qfunc_hiddens=[256, 256],
         qfunc_layer_norm=True,
         qfunc_lr=3e-4,
-        buffer_len=5_000,
+        buffer_len=10_000,
         batch_size=250,
         discount=0.99,
         tau=0.05,
         seed=0,
         save_returns_to=TEST_OUTPUTS_PATH,
-        num_steps_to_sample=500,
+        num_steps_to_sample=1000,
         num_grad_steps=500,
         num_epochs=num_epochs,
         min_steps_to_presample=1000,

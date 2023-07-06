@@ -26,7 +26,7 @@ def save_metric_plots(agent_name, env_name, metric_names, metrics, path, seed):
     file_name = agent_name + f"-{env_name}-metric-plots-seed-{seed}.png"
     file_name = path / file_name
     rows = int(sqrt(len(metrics)))
-    cols = (rows + 1) if rows * rows < len(metrics) else rows
+    cols = int(len(metrics) / rows) + (1 if len(metrics) % rows else 0)
     fig = plt.figure(figsize=(12, 8))
     for i, (metric_name, metric) in enumerate(zip(metric_names, metrics)):
         plt.subplot(rows, cols, i + 1)
