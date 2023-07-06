@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from policy import GaussPolicy, Qfunc
+from policy import GaussPolicy, Qfunc, batch_UT_trick, latent_only_batch_UT_trick
 from torch import nn
 from typing import Iterable
 import random
@@ -9,6 +9,7 @@ from buffer_v2 import Buffer
 from vis_utils import save_metric_plots, see_one_episode
 import time
 import pickle
+from tqdm import tqdm
 
 
 class SACAgentBase:
@@ -88,44 +89,54 @@ class SACAgentMuJoCo(SACAgentBase):
         self.temperature_optim.step()
 
     def get_policy_loss_and_temperature_loss(
-        self, obs_t, qfunc1, qfunc2, use_entropy=False
+        self, obs_t, qfunc1, qfunc2, UT_trick=False
     ):
-        # self.policy.requires_grad_(True)
-        # self.log_temperature.requires_grad_(True)
-
-        # get policy;
-        policy_density = self.policy(obs_t)
-
-        # do reparam trick;
-        repr_trick = policy_density.rsample()
-
-        # for some policies, we can compute entropy;
-        if use_entropy:
-            with torch.no_grad():
-                entropies = policy_density.entropy().sum(-1)
-
-        # get log prob for policy optimisation;
-        log_prob = policy_density.log_prob(repr_trick).sum(-1)
-
         # freeze q-nets and eval at current observation
         # and reparam trick action and choose min for policy loss;
         qfunc1.requires_grad_(False)
         qfunc2.requires_grad_(False)
-        qfunc_in = torch.cat((obs_t, repr_trick), -1)
-        q_est = torch.min(qfunc1(qfunc_in), qfunc2(qfunc_in)).view(-1)
 
-        # get loss for policy;
-        self.policy_loss = (
-            np.exp(self.log_temperature.item()) * log_prob - q_est
-        ).mean()
+        # get policy;
+        policy_density = self.policy(obs_t)
 
-        # get loss for temperature;
-        if use_entropy:
-            self.temperature_loss = (
+        if UT_trick:
+            # do integration by Unscented transform;
+            log_pi_integral = latent_only_batch_UT_trick(
+                policy_density.log_prob, 
+                policy_density.mean, 
+                policy_density.stddev,
+                with_log_prob=True
+            ).sum(-1)
+            q1_integral = batch_UT_trick(qfunc1, obs_t, policy_density.mean, policy_density.stddev)
+            q2_integral = batch_UT_trick(qfunc2, obs_t, policy_density.mean, policy_density.stddev)
+            q_integral = torch.min(q1_integral, q2_integral).view(-1)
+
+            # get policy_loss;
+            self.policy_loss = (
+                np.exp(self.log_temperature.item()) * log_pi_integral - q_integral
+            ).mean()
+
+            # get temperature loss;
+            self.temperature_loss = -(
                 self.log_temperature.exp()
-                * (entropies - self.entropy_lb).detach().mean()
-            )
+                * (log_pi_integral + self.entropy_lb).detach()
+            ).mean()
         else:
+            # do reparam trick;
+            repr_trick = policy_density.rsample()
+
+            # get log prob for policy optimisation;
+            log_prob = policy_density.log_prob(repr_trick).sum(-1)
+
+            qfunc_in = torch.cat((obs_t, repr_trick), -1)
+            q_est = torch.min(qfunc1(qfunc_in), qfunc2(qfunc_in)).view(-1)
+
+            # get loss for policy;
+            self.policy_loss = (
+                np.exp(self.log_temperature.item()) * log_prob - q_est
+            ).mean()
+
+            # get temperature loss;
             self.temperature_loss = -(
                 self.log_temperature.exp()
                 * (log_prob + self.entropy_lb).detach()
@@ -243,8 +254,6 @@ def train_sac(
     num_grad_steps=500,
     num_epochs=100,
     min_steps_to_presample=1000,
-    avg_the_returns=False,
-    use_entropy=False,
     UT_trick=False,
     **agent_policy_kwargs,
 ):
@@ -283,37 +292,30 @@ def train_sac(
     )
     
     # whether entropy and UT are used;
-    agent.name = agent.name + f"-policy-entropy-{int(use_entropy)}-UT-trick-{int(UT_trick)}"
+    agent.name = agent.name + f"-UT-trick-{int(UT_trick)}"
 
     # init replay buffer;
-    undiscounted_returns = []
-    path_lens = []
     qfunc1_losses, qfunc2_losses = [], []
     buffer = Buffer(buffer_len, obs_dim, action_dim)
     
     # see if presampling needed.
     if min_steps_to_presample > 0:
         buffer.collect_path(env, agent, 
-                            min_steps_to_presample, 
-                            undiscounted_returns, 
-                            avg_the_returns, path_lens)
+                            min_steps_to_presample)
 
     # start running episodes;
     fifth_epochs = max(num_epochs // 5, 1)
     fifth = max(num_iters // 5, 1)
     # gt.stamp('init_part_sac')
     now = time.time()
-    for epoch in range(num_epochs):
+    for epoch in tqdm(range(num_epochs)):
         # might be good to clear the buffer at each epoch
-        for it in range(num_iters):
+        for it in tqdm(range(num_iters)):
             # sample paths;
             buffer.collect_path(
                 env,
                 agent,
                 num_steps_to_sample,
-                undiscounted_returns,
-                avg_the_returns,  # if true, gives avg reward in episode.
-                path_lens
             )
     
             # do the gradient updates;
@@ -322,7 +324,7 @@ def train_sac(
                     batch_size
                 )
                 # get temperature and policy loss;
-                agent.get_policy_loss_and_temperature_loss(obs_t, Q1, Q2, use_entropy)
+                agent.get_policy_loss_and_temperature_loss(obs_t, Q1, Q2, UT_trick)
     
                 # value func updates;
                 l1, l2 = get_q_losses(
@@ -373,17 +375,17 @@ def train_sac(
             "qfunc2-loss",
             "path_lens",
             "undiscounted-returns",
+            "avg-reward"
         ]
         metrics = [
             agent.policy_losses,
             agent.temperature_losses,
             qfunc1_losses,
             qfunc2_losses,
-            path_lens,
-            undiscounted_returns,
+            buffer.path_lens,
+            buffer.undiscounted_returns,
+            buffer.avg_rewards_per_episode
         ]
-        if avg_the_returns:
-            metric_names[-1] = "avg-reward-per-episode"
 
         for metric_name, metric in zip(metric_names, metrics):
             file_name = (
@@ -400,7 +402,7 @@ def train_sac(
             save_returns_to,
             seed,
         )
-    return Q1, Q2, agent, undiscounted_returns
+    return Q1, Q2, agent
 
 
 if __name__ == "__main__":
@@ -410,16 +412,16 @@ if __name__ == "__main__":
     if not TEST_OUTPUTS_PATH.exists():
         TEST_OUTPUTS_PATH.mkdir()
 
-    T = 500
+    T = 300
     num_epochs = 1
 
     env = gym.make("Hopper-v2", max_episode_steps=T)
-    num_iters = 500  # this is the train iterations per epoch;
+    num_iters = 100  # this is the train iterations per epoch;
     agent_policy_kwargs = {
         'agent_kwargs': {
             'name': "SACAgentMuJoCo",
             'policy': GaussPolicy,
-            'policy_lr': 1e-4,
+            'policy_lr': 3e-4,
             'entropy_lb': None,
             'temperature_lr': 3e-4, 
         },
@@ -431,14 +433,14 @@ if __name__ == "__main__":
         }
     }
     
-    Q1, Q2, agent, undiscounted_returns = train_sac(
+    Q1, Q2, agent = train_sac(
         env,
         SACAgentMuJoCo,
         num_iters,
         qfunc_hiddens=[256, 256],
         qfunc_layer_norm=True,
         qfunc_lr=3e-4,
-        buffer_len=100_000,
+        buffer_len=5_000,
         batch_size=250,
         discount=0.99,
         tau=0.05,
@@ -448,9 +450,7 @@ if __name__ == "__main__":
         num_grad_steps=500,
         num_epochs=num_epochs,
         min_steps_to_presample=1000,
-        avg_the_returns=True,
-        use_entropy=True,
-        UT_trick=False,
+        UT_trick=True,
         **agent_policy_kwargs
     )
 

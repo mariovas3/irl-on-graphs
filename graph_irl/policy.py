@@ -36,8 +36,76 @@ class GaussPolicy(nn.Module):
 
     def forward(self, obs) -> dists.Distribution:
         emb = self.net(obs)  # shared embedding for mean and std;
-        mus, sigmas = self.mu_net(emb), torch.log(1.0 + self.std_net(emb).exp())
+        mus, sigmas = self.mu_net(emb), torch.log(1.01 + self.std_net(emb).exp())
         return dists.Normal(mus, sigmas)
+
+
+def batch_UT_trick(f, obs, mus, sigmas):
+    """
+    Assumes the latent variable component of the input of f
+    is diagonal Gaussian with Batch of mean vectors in mus and 
+    batch of standard deviations in sigmas.
+
+    Args:
+        f: Callable that maps last dim of input to output_dim.
+        obs: Tensor of shape (B, obs_dim).
+        mus: Tensor of shape (B, action_dim).
+        sigmas: Tensor of shape (B, action_dim).
+    
+    Returns:
+        Tensor of shape (B, out_dim).
+    
+    Note:
+        This performs the Unscented transform trick. For diagonal
+        Gaussian latents, the eigenvectors are the axis aligned 
+        coordinate vectors with eigenvalues being the squared 
+        standard deviations. To do the UT, I eval f at the mean 
+        and the positive and negative pivots. The pivots 
+        are mean +- sqrt(eig_val) * eig_vec -> leading to 
+        2 * action_dim + 1 inputs per mean vector.
+    """
+    obs_dim, action_dim = obs.shape[-1], mus.shape[-1]
+    B = len(obs)  # batch_dim
+
+    # concat obs and mus -> (B, obs_action_dim);
+    obs_mus = torch.cat((obs, mus), -1)
+    
+    # shape of diags is (B, action_dim, action_dim)
+    diags = sigmas.unsqueeze(1) * torch.eye(action_dim)
+
+    # pad inner most axis 
+    # on the left to make (B, action_dim, obs_action_dim)
+    diags = nn.functional.pad(diags, (obs_dim, 0))
+
+    # concat negative pivots with row of zeros;
+    diags = torch.cat(
+        (
+        diags, torch.zeros((B, 1, diags.shape[-1])), - diags
+        ), 1
+    )
+
+    # return shape (B, out_dim)
+    return f(obs_mus.unsqueeze(1) + diags).mean(1)
+
+
+def latent_only_batch_UT_trick(f, mus, sigmas, with_log_prob=False):
+    B, D = mus.shape
+
+    # make to (B, D, D) shape;
+    diags = sigmas.unsqueeze(1) * torch.eye(D)
+    
+    # make to (B, 2D + 1, D) shape;
+    diags = torch.cat(
+        (
+        diags, torch.zeros((B, 1, D)), -diags
+        ), 1
+    )
+
+    # return (B, out_dim) shape;
+    if with_log_prob:
+        f_in = (mus.unsqueeze(1) + diags).permute((1, 0, 2))
+        return f(f_in).mean(0)
+    return f(mus.unsqueeze(1) + diags).mean(1)
 
 
 class PGAgentBase:
