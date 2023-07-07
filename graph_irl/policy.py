@@ -14,9 +14,9 @@ class GaussPolicy(nn.Module):
         self, obs_dim, action_dim, hiddens, with_layer_norm=False
     ):
         super(GaussPolicy, self).__init__()
-
+        self.name = "GaussPolicy"
         # init net;
-        self.net = nn.Sequential()
+        self.net = nn.Sequential(nn.LayerNorm(obs_dim))
 
         # add modules/Layers to net;
         for i in range(len(hiddens)):
@@ -26,18 +26,72 @@ class GaussPolicy(nn.Module):
                 self.net.append(nn.Linear(hiddens[i - 1], hiddens[i]))
 
             # ReLU activation;
-            self.net.append(nn.ReLU())
+            self.net.append(nn.Tanh() if i == len(hiddens) -1 else nn.ReLU())
             if with_layer_norm:
                 self.net.append(nn.LayerNorm(hiddens[i]))
 
         # add Affine layer for mean and stds for indep Gauss vector.
         self.mu_net = nn.Linear(hiddens[-1], action_dim)
-        self.std_net = nn.Linear(hiddens[-1], action_dim)
+        self.std_net = nn.Sequential(
+            nn.Linear(hiddens[-1], action_dim),
+            nn.ReLU()
+        )
 
     def forward(self, obs) -> dists.Distribution:
         emb = self.net(obs)  # shared embedding for mean and std;
-        mus, sigmas = self.mu_net(emb), torch.log(1.01 + self.std_net(emb).exp())
+        mus, sigmas = self.mu_net(emb), self.std_net(emb) + 1e-6
         return dists.Normal(mus, sigmas)
+
+
+class TanhGauss:
+    def __init__(self, gauss_dist):
+        """
+        This distribution does not have stddev attribute.
+        If UT_trick is to be applied, can try sth like:
+        
+        >>> mus = tanh_dist.diag_gauss.mean
+        >>> sigmas = tang_dist.diag_gauss.stddev
+        >>> f = lambda x: net(torch.tanh(x))
+        >>> result = UT_trick(f, mus, sigmas)
+        """
+        self.diag_gauss = gauss_dist
+    
+    def log_prob(self, tanh_domain_x):
+        gauss_domain_x = (1. + tanh_domain_x).log() / 2 - (1. - tanh_domain_x).log() / 2
+        return self._log_prob_from_gauss(gauss_domain_x)
+
+    def _log_prob_from_gauss(self, x):
+        """
+        x can be (*, B, x_dim)
+        """
+        tanh_term = (1. - torch.tanh(x) ** 2).log().sum(-1)
+        return self.diag_gauss.log_prob(x).sum(-1) - tanh_term
+    
+    def sample(self):
+        return torch.tanh(self.diag_gauss.sample())
+    
+    def rsample(self):
+        return torch.tanh(self.diag_gauss.rsample())
+    
+    @property
+    def mean(self):
+        return torch.tanh(self.diag_gauss.mean)
+
+    @property
+    def stddev(self):
+        raise NotImplementedError
+
+
+class TanhGaussPolicy(nn.Module):
+    def __init__(self, obs_dim, action_dim, hiddens, with_layer_norm=False):
+        super(TanhGaussPolicy, self).__init__()
+        self.name = "TanhGaussPolicy"
+        self.gauss_dist = GaussPolicy(
+            obs_dim, action_dim, hiddens, with_layer_norm
+        )
+    
+    def forward(self, obs):
+        return TanhGauss(self.gauss_dist(obs))
 
 
 def batch_UT_trick(f, obs, mus, sigmas):
@@ -104,6 +158,7 @@ def latent_only_batch_UT_trick(f, mus, sigmas, with_log_prob=False):
     # return (B, out_dim) shape;
     if with_log_prob:
         f_in = (mus.unsqueeze(1) + diags).permute((1, 0, 2))
+        # print(f_in.detach().min(), f_in.detach().max())
         return f(f_in).mean(0)
     return f(mus.unsqueeze(1) + diags).mean(1)
 
