@@ -34,12 +34,12 @@ class GaussPolicy(nn.Module):
         self.mu_net = nn.Linear(hiddens[-1], action_dim)
         self.std_net = nn.Sequential(
             nn.Linear(hiddens[-1], action_dim),
-            nn.ReLU()
+            nn.Softplus()
         )
 
     def forward(self, obs) -> dists.Distribution:
         emb = self.net(obs)  # shared embedding for mean and std;
-        mus, sigmas = self.mu_net(emb), self.std_net(emb) + 1e-6
+        mus, sigmas = self.mu_net(emb), torch.clamp(self.std_net(emb), .01, 4.)
         return dists.Normal(mus, sigmas)
 
 
