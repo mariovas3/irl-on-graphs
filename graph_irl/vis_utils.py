@@ -4,21 +4,30 @@ import pygame
 from math import sqrt
 import time
 import torch
+import pickle
 
 
-def see_one_episode(env, agent, seed):
+def see_one_episode(env, agent, seed, save_to):
     obs, info = env.reset(seed=seed)
     done = False
     step = 0
+    obs_list = [obs]
+    action_list = []
     while not done:
         time.sleep(1 / 60)  # slow down rendering, otherwise 125 fps;
         obs = torch.tensor(obs, dtype=torch.float32)
-        action = agent.sample_action(obs).numpy()
+        action = agent.sample_deterministic(obs).numpy()
+        action_list.append(action)
         obs, reward, terminated, truncated, info = env.step(action)
+        obs_list.append(obs)
         done = terminated or truncated
         step += 1
         if terminated:
             print(f"simulation died step: {step}")
+    # save episode;
+    with open(save_to, 'wb') as f:
+        pickle.dump(obs_list, f)
+        pickle.dump(action_list, f)
     pygame.display.quit()
 
 
