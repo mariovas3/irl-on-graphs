@@ -95,6 +95,27 @@ class Buffer:
             t += 1
 
 
+def sample_eval_path(T, env, agent, seed):
+    observations, actions, rewards = [], [], []
+    obs, info = env.reset(seed=seed)
+    observations.append(obs)
+    for _ in range(T):
+        obs = torch.tensor(obs, dtype=torch.float32)
+        action = agent.sample_deterministic(obs).numpy()
+        new_obs, reward, terminated, truncated, info = env.step(action)
+        actions.append(action)
+        observations.append(new_obs)
+        rewards.append(reward)
+        obs = new_obs
+        if terminated and not truncated:
+            return observations, actions, rewards, 0
+        if terminated and truncated:
+            return observations, actions, rewards, 1
+        if truncated:
+            return observations, actions, rewards, 2
+    return observations, actions, rewards, 2
+
+
 if __name__ == "__main__":
     import gymnasium as gym
 
