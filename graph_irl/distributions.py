@@ -23,7 +23,7 @@ class GaussInputDist:
     def stddev(self):
         return self.diag_gauss.stddev
 
-    def get_UT_trick_input(self, offset=2.):
+    def get_UT_trick_input(self, offset=1.):
         mus = self.diag_gauss.mean
         sigmas = self.diag_gauss.stddev
         B, D = mus.shape

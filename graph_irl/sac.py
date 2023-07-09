@@ -1,8 +1,10 @@
 """
-TODO: 
-    (1): Implement UT trick for TanhGaussianPolicy.
+TODO:
+    * Implement GNN and train sac on graph task;
+    * Maybe wrap the train loops for sac in a policy training
+      class, to be easy to train for several iterations in the 
+      IRL setting.
 """
-
 
 import numpy as np
 import torch
@@ -81,9 +83,6 @@ class SACAgentMuJoCo(SACAgentBase):
     def sample_action(self, obs):
         policy_density = self.policy(obs)
         action = policy_density.sample()
-        # if isinstance(policy_dist, dists.Normal):
-        #     # you can access mean and stddev
-        #     # with policy_dist.mean and policy_dist.stddev;
         return action
     
     def sample_deterministic(self, obs):
@@ -91,7 +90,6 @@ class SACAgentMuJoCo(SACAgentBase):
         return policy_density.mean.detach()
 
     def update_policy_and_temperature(self):
-        # print(self.policy_loss, self.temperature_loss)
         # update policy params;
         self.policy_optim.zero_grad()
         self.policy_loss.backward()
@@ -195,10 +193,6 @@ def get_q_losses(
     qfunc1.requires_grad_(True)
     qfunc2.requires_grad_(True)
 
-    # freeze policy and temperature;
-    # agent.policy.requires_grad_(False)
-    # agent.log_temperature.requres_grad_(False)
-
     # get predictions from q functions;
     obs_action_t = torch.cat((obs_t, action_t), -1)
     q1_est = qfunc1(obs_action_t).view(-1)
@@ -208,13 +202,17 @@ def get_q_losses(
     policy_density = agent.policy(obs_tp1)
 
     if UT_trick:
+        # get (B, 2 * action_dim + 1, action_dim) samples;
         UT_trick_samples = policy_density.get_UT_trick_input()
+        # eval expectation of q-target functions by averaging over the 
+        # 2 * action_dim + 1 samples and get (B, 1) output;
         qt1_est = batch_UT_trick_from_samples(
             qt1, obs_tp1, UT_trick_samples
         )
         qt2_est = batch_UT_trick_from_samples(
             qt2, obs_tp1, UT_trick_samples
         )
+        # get negative entropy by using the UT trick;
         log_probs = policy_density.log_prob_UT_trick().sum(-1)
     else:
         # sample future action;
