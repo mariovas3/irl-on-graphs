@@ -23,7 +23,7 @@ class GaussInputDist:
     def stddev(self):
         return self.diag_gauss.stddev
 
-    def get_UT_trick_input(self):
+    def get_UT_trick_input(self, offset=2.):
         mus = self.diag_gauss.mean
         sigmas = self.diag_gauss.stddev
         B, D = mus.shape
@@ -39,7 +39,7 @@ class GaussInputDist:
         )
 
         # return (B, 2D + 1, D) shape;
-        return mus.unsqueeze(1) + diags
+        return mus.unsqueeze(1) + offset * diags
 
     def log_prob_UT_trick(self):
         pass
@@ -65,15 +65,6 @@ class GaussDist(GaussInputDist):
 
 class TanhGauss(GaussInputDist):
     def __init__(self, diag_gauss):
-        """
-        This distribution does not have stddev attribute.
-        If UT_trick is to be applied, can try sth like:
-        
-        >>> mus = tanh_dist.diag_gauss.mean
-        >>> sigmas = tang_dist.diag_gauss.stddev
-        >>> f = lambda x: net(torch.tanh(x))
-        >>> result = UT_trick(f, mus, sigmas)
-        """
         super(TanhGauss, self).__init__(diag_gauss)
 
     def log_prob(self, tanh_domain_x):
@@ -133,7 +124,7 @@ def batch_UT_trick_from_samples(f, obs, samples):
     return f(f_in).mean(1) # avg across 2D + 1 points;
 
 
-def batch_UT_trick(f, obs, mus, sigmas):
+def batch_UT_trick(f, obs, mus, sigmas, offset=1.):
     """
     Assumes the latent variable component of the input of f
     is diagonal Gaussian with Batch of mean vectors in mus and 
@@ -178,10 +169,10 @@ def batch_UT_trick(f, obs, mus, sigmas):
     )
 
     # return shape (B, out_dim)
-    return f(obs_mus.unsqueeze(1) + diags).mean(1)
+    return f(obs_mus.unsqueeze(1) + offset * diags).mean(1)
 
 
-def latent_only_batch_UT_trick(f, mus, sigmas, with_log_prob=False):
+def latent_only_batch_UT_trick(f, mus, sigmas, with_log_prob=False, offset=1.):
     B, D = mus.shape
 
     # make to (B, D, D) shape;
@@ -199,4 +190,4 @@ def latent_only_batch_UT_trick(f, mus, sigmas, with_log_prob=False):
         f_in = (mus.unsqueeze(1) + diags).permute((1, 0, 2))
         # print(f_in.detach().min(), f_in.detach().max())
         return f(f_in).mean(0)
-    return f(mus.unsqueeze(1) + diags).mean(1)
+    return f(mus.unsqueeze(1) + offset * diags).mean(1)

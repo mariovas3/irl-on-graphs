@@ -7,6 +7,7 @@ TODO:
 import numpy as np
 import torch
 from policy import *
+from distributions import batch_UT_trick_from_samples
 from torch import nn
 from typing import Iterable
 import random
@@ -113,15 +114,10 @@ class SACAgentMuJoCo(SACAgentBase):
         policy_density = self.policy(obs_t)
 
         if UT_trick:
-            # do integration by Unscented transform;
-            log_pi_integral = latent_only_batch_UT_trick(
-                policy_density.log_prob, 
-                policy_density.mean, 
-                policy_density.stddev,
-                with_log_prob=True
-            ).sum(-1)
-            q1_integral = batch_UT_trick(qfunc1, obs_t, policy_density.mean, policy_density.stddev)
-            q2_integral = batch_UT_trick(qfunc2, obs_t, policy_density.mean, policy_density.stddev)
+            log_pi_integral = policy_density.log_prob_UT_trick().sum(-1)
+            UT_trick_samples = policy_density.get_UT_trick_input()
+            q1_integral = batch_UT_trick_from_samples(qfunc1, obs_t, UT_trick_samples)
+            q2_integral = batch_UT_trick_from_samples(qfunc2, obs_t, UT_trick_samples)
             q_integral = torch.min(q1_integral, q2_integral).view(-1)
 
             # get policy_loss;
@@ -212,18 +208,14 @@ def get_q_losses(
     policy_density = agent.policy(obs_tp1)
 
     if UT_trick:
-        qt1_est = batch_UT_trick(qt1, obs_tp1, 
-                       policy_density.mean, 
-                       policy_density.stddev).view(-1)
-        qt2_est = batch_UT_trick(qt2, obs_tp1, 
-                       policy_density.mean,
-                       policy_density.stddev).view(-1)
-        log_probs = latent_only_batch_UT_trick(
-            policy_density.log_prob, 
-            policy_density.mean, 
-            policy_density.stddev,
-            with_log_prob=True
-        ).sum(-1)
+        UT_trick_samples = policy_density.get_UT_trick_input()
+        qt1_est = batch_UT_trick_from_samples(
+            qt1, obs_tp1, UT_trick_samples
+        )
+        qt2_est = batch_UT_trick_from_samples(
+            qt2, obs_tp1, UT_trick_samples
+        )
+        log_probs = policy_density.log_prob_UT_trick().sum(-1)
     else:
         # sample future action;
         action_tp1 = policy_density.sample()
@@ -541,7 +533,7 @@ if __name__ == "__main__":
         num_grad_steps=500,
         num_epochs=num_epochs,
         min_steps_to_presample=1000,
-        UT_trick=False,
+        UT_trick=True,
         **agent_policy_kwargs
     )
 
