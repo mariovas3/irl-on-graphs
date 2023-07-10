@@ -101,7 +101,7 @@ class SACAgentMuJoCo(SACAgentBase):
         self.temperature_optim.step()
 
     def get_policy_loss_and_temperature_loss(
-        self, obs_t, qfunc1, qfunc2, UT_trick=False
+        self, obs_t, qfunc1, qfunc2, UT_trick=False, with_entropy=False
     ):
         # freeze q-nets and eval at current observation
         # and reparam trick action and choose min for policy loss;
@@ -112,7 +112,10 @@ class SACAgentMuJoCo(SACAgentBase):
         policy_density = self.policy(obs_t)
 
         if UT_trick:
-            log_pi_integral = policy_density.log_prob_UT_trick().sum(-1)
+            if with_entropy:
+                log_pi_integral = policy_density.entropy().sum(-1)
+            else:
+                log_pi_integral = policy_density.log_prob_UT_trick().sum(-1)
             UT_trick_samples = policy_density.get_UT_trick_input()
             q1_integral = batch_UT_trick_from_samples(qfunc1, obs_t, UT_trick_samples)
             q2_integral = batch_UT_trick_from_samples(qfunc2, obs_t, UT_trick_samples)
@@ -133,7 +136,10 @@ class SACAgentMuJoCo(SACAgentBase):
             repr_trick = policy_density.rsample()
 
             # get log prob for policy optimisation;
-            log_prob = policy_density.log_prob(repr_trick).sum(-1)
+            if with_entropy:
+                log_prob = policy_density.entropy().sum(-1)
+            else:
+                log_prob = policy_density.log_prob(repr_trick).sum(-1)
 
             qfunc_in = torch.cat((obs_t, repr_trick), -1)
             q_est = torch.min(qfunc1(qfunc_in), qfunc2(qfunc_in)).view(-1)
@@ -188,7 +194,8 @@ def get_q_losses(
     terminated_tp1,
     agent,
     discount,
-    UT_trick=False
+    UT_trick=False,
+    with_entropy=False
 ):
     qfunc1.requires_grad_(True)
     qfunc2.requires_grad_(True)
@@ -213,13 +220,19 @@ def get_q_losses(
             qt2, obs_tp1, UT_trick_samples
         )
         # get negative entropy by using the UT trick;
-        log_probs = policy_density.log_prob_UT_trick().sum(-1)
+        if with_entropy:
+            log_probs = policy_density.entropy().sum(-1)
+        else:
+            log_probs = policy_density.log_prob_UT_trick().sum(-1)
     else:
         # sample future action;
         action_tp1 = policy_density.sample()
     
         # get log probs;
-        log_probs = policy_density.log_prob(action_tp1).detach().sum(-1).view(-1)
+        if with_entropy:
+            log_probs = policy_density.entropy().sum(-1)
+        else:
+            log_probs = policy_density.log_prob(action_tp1).sum(-1).view(-1)
 
         # input for target nets;
         obs_action_tp1 = torch.cat((obs_tp1, action_tp1), -1)
@@ -279,6 +292,7 @@ def train_sac_one_epoch(
     qfunc1_losses: list,
     qfunc2_losses: list,
     UT_trick=False,
+    with_entropy=False,
     eval_path_returns: list=None,
     eval_path_lens: list=None,
 ):
@@ -302,7 +316,7 @@ def train_sac_one_epoch(
                 batch_size
             )
             # get temperature and policy loss;
-            agent.get_policy_loss_and_temperature_loss(obs_t, Q1, Q2, UT_trick)
+            agent.get_policy_loss_and_temperature_loss(obs_t, Q1, Q2, UT_trick, with_entropy)
 
             # value func updates;
             l1, l2 = get_q_losses(
@@ -317,7 +331,8 @@ def train_sac_one_epoch(
                 terminated_tp1,
                 agent,
                 discount,
-                UT_trick
+                UT_trick,
+                with_entropy,
             )
 
             # qfunc losses housekeeping;
@@ -378,6 +393,7 @@ def train_sac(
     num_epochs=100,
     min_steps_to_presample=1000,
     UT_trick=False,
+    with_entropy=False,
     **agent_policy_kwargs,
 ):
     # instantiate necessary objects;
@@ -416,7 +432,7 @@ def train_sac(
     )
     
     # whether entropy and UT are used;
-    agent.name = agent.name + f"-{agent.policy.name}-UT-{int(UT_trick)}-buffer-size-{buffer_len}-epochs-{num_epochs}-iters-{num_iters}"
+    agent.name = agent.name + f"-{agent.policy.name}-UT-{int(UT_trick)}-entropy-{int(with_entropy)}-buffer-size-{buffer_len}-epochs-{num_epochs}-iters-{num_iters}"
 
     # init replay buffer;
     qfunc1_losses, qfunc2_losses = [], []
@@ -437,7 +453,8 @@ def train_sac(
             optimQ1, optimQ2, tau,
             discount, num_iters, num_grad_steps,
             num_steps_to_sample, buffer, batch_size,
-            qfunc1_losses, qfunc2_losses, UT_trick,
+            qfunc1_losses, qfunc2_losses, 
+            UT_trick, with_entropy,
             eval_path_returns, eval_path_lens
         )
 
@@ -496,7 +513,7 @@ if __name__ == "__main__":
     num_epochs = 1
     num_iters = 100  # iterations per epoch;
 
-    env = gym.make("Hopper-v2", max_episode_steps=T)
+    env = gym.make("Ant-v2", max_episode_steps=T)
     
     agent_policy_kwargs = {
         'agent_kwargs': {
@@ -531,13 +548,14 @@ if __name__ == "__main__":
         num_grad_steps=500,
         num_epochs=num_epochs,
         min_steps_to_presample=1000,
-        UT_trick=True,
+        UT_trick=False,
+        with_entropy=False,
         **agent_policy_kwargs
     )
 
     print(f"temperature is: {agent.log_temperature.exp()}")
 
     env = gym.make(
-        "Hopper-v2", max_episode_steps=1000, render_mode="human"
+        "Ant-v2", max_episode_steps=1000, render_mode="human"
     )
     see_one_episode(env, agent, seed=0, save_to=TEST_OUTPUTS_PATH / 'bob.pkl')
