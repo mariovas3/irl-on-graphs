@@ -436,7 +436,7 @@ def train_sac(
 
     # init replay buffer;
     qfunc1_losses, qfunc2_losses = [], []
-    buffer = Buffer(buffer_len, obs_dim, action_dim)
+    buffer = Buffer(buffer_len, obs_dim, action_dim, seed=seed)
     
     # see if presampling needed.
     if min_steps_to_presample > 0:
