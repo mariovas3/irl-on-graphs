@@ -36,10 +36,11 @@ class GCN(nn.Module):
 class GraphGaussPolicy(nn.Module):
     def __init__(
         self, obs_dim, action_dim, hiddens, with_layer_norm=False,
-        encoder=None,
+        encoder=None, two_actions=False
     ):
         super(GraphGaussPolicy, self).__init__()
         self.name = "GraphGaussPolicy"
+        self.two_actions = two_actions
 
         # set encoder;
         self.encoder = encoder
@@ -61,13 +62,17 @@ class GraphGaussPolicy(nn.Module):
             self.net.append(nn.ReLU())
 
         # add Affine layer for mean and stds for indep Gauss vector.
-        self.mu_net = nn.Linear(hiddens[-1], action_dim)
+        if two_actions:
+            out_dim = 2 * action_dim
+        else:
+            out_dim = action_dim
+        self.mu_net = nn.Linear(hiddens[-1], out_dim)
         self.std_net = nn.Sequential(
-            nn.Linear(hiddens[-1], action_dim),
+            nn.Linear(hiddens[-1], out_dim),
             nn.Softplus()
         )
 
-    def forward(self, obs) -> dists.Distribution:
+    def forward(self, obs):
         if self.encoder:
             obs = self.encoder(obs)  # (B, obs_dim)
         emb = self.net(obs)  # shared embedding for mean and std;
@@ -104,7 +109,7 @@ class GaussPolicy(nn.Module):
             nn.Softplus()
         )
 
-    def forward(self, obs) -> dists.Distribution:
+    def forward(self, obs):
         emb = self.net(obs)  # shared embedding for mean and std;
         mus, sigmas = self.mu_net(emb), torch.clamp(self.std_net(emb), .01, 4.)
         return GaussDist(dists.Normal(mus, sigmas))
