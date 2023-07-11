@@ -33,13 +33,13 @@ class GCN(nn.Module):
         return (x * (degrees / degrees.sum()).view(len(x), 1)).sum(0)
 
 
-class GraphGaussPolicy(nn.Module):
+class GaussPolicy(nn.Module):
     def __init__(
         self, obs_dim, action_dim, hiddens, with_layer_norm=False,
         encoder=None, two_actions=False
     ):
-        super(GraphGaussPolicy, self).__init__()
-        self.name = "GraphGaussPolicy"
+        super(GaussPolicy, self).__init__()
+        self.name = "GaussPolicy"
         self.two_actions = two_actions
 
         # set encoder;
@@ -73,54 +73,22 @@ class GraphGaussPolicy(nn.Module):
         )
 
     def forward(self, obs):
-        if self.encoder:
+        if self.encoder is not None:
             obs = self.encoder(obs)  # (B, obs_dim)
         emb = self.net(obs)  # shared embedding for mean and std;
         mus, sigmas = self.mu_net(emb), torch.clamp(self.std_net(emb), .01, 4.)
         return GaussDist(dists.Normal(mus, sigmas))
 
 
-class GaussPolicy(nn.Module):
-    def __init__(
-        self, obs_dim, action_dim, hiddens, with_layer_norm=False
-    ):
-        super(GaussPolicy, self).__init__()
-        self.name = "GaussPolicy"
-        # init net;
-        self.net = nn.Sequential(nn.LayerNorm(obs_dim))
-
-        # add modules/Layers to net;
-        for i in range(len(hiddens)):
-            if i == 0:
-                self.net.append(nn.Linear(obs_dim, hiddens[i]))
-            else:
-                self.net.append(nn.Linear(hiddens[i - 1], hiddens[i]))
-
-            if with_layer_norm:
-                self.net.append(nn.LayerNorm(hiddens[i]))
-            
-            # ReLU activation;
-            self.net.append(nn.ReLU())
-
-        # add Affine layer for mean and stds for indep Gauss vector.
-        self.mu_net = nn.Linear(hiddens[-1], action_dim)
-        self.std_net = nn.Sequential(
-            nn.Linear(hiddens[-1], action_dim),
-            nn.Softplus()
-        )
-
-    def forward(self, obs):
-        emb = self.net(obs)  # shared embedding for mean and std;
-        mus, sigmas = self.mu_net(emb), torch.clamp(self.std_net(emb), .01, 4.)
-        return GaussDist(dists.Normal(mus, sigmas))
-
-
 class TanhGaussPolicy(nn.Module):
-    def __init__(self, obs_dim, action_dim, hiddens, with_layer_norm=False):
+    def __init__(self, obs_dim, action_dim, hiddens, with_layer_norm=False,
+                 encoder=None, two_actions=False
+    ):
         super(TanhGaussPolicy, self).__init__()
         self.name = "TanhGaussPolicy"
         self.gauss_dist = GaussPolicy(
-            obs_dim, action_dim, hiddens, with_layer_norm
+            obs_dim, action_dim, hiddens, with_layer_norm,
+            encoder, two_actions
         )
     
     def forward(self, obs):
