@@ -41,11 +41,11 @@ class GraphGaussPolicy(nn.Module):
         super(GraphGaussPolicy, self).__init__()
         self.name = "GraphGaussPolicy"
 
-        # init net;
-        self.net = nn.Sequential(nn.LayerNorm(obs_dim))
-
         # set encoder;
         self.encoder = encoder
+
+        # init net;
+        self.net = nn.Sequential(nn.LayerNorm(obs_dim))
 
         # add modules/Layers to net;
         for i in range(len(hiddens)):
