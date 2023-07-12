@@ -1,17 +1,21 @@
 import numpy as np
 from scipy.spatial import KDTree
 import torch
+from typing import Callable
 from torch_geometric.data import Data
 
 
 class GraphEnv:
-    def __init__(self, x: torch.Tensor, 
-                 max_episode_steps, 
-                 num_expert_steps,
-                 max_repeats):
+    def __init__(self, x: torch.Tensor,
+                 reward_fn: Callable, 
+                 max_episode_steps: int, 
+                 num_expert_steps: int,
+                 max_repeats:int):
         """
         Args:
             x (torch.Tensor): Initial node features.
+            reward_fn (Callable): Accept a graph state summary and 
+                and output a scalar reward.
             max_episode_steps (int): Truncation length.
             num_expert_steps (int): Termination length.
             max_repeats (int): Truncate if add >= max_repeats existing edges.
@@ -27,6 +31,7 @@ class GraphEnv:
         self.repeats_done = 0
         self.terminated, self.truncated = False, False
         self.num_self_loops = 0
+        self.reward_fn = reward_fn
     
     def reset(self):
         """Returns (observation, None) to be compatible with openai gym."""
@@ -82,7 +87,7 @@ class GraphEnv:
             info['repeats_done'] = self.repeats_done
             info['steps_done'] = self.steps_done
             info['num_self_loops'] = self.num_self_loops
-            return self.data, False, False, info
+            return self.data, self.reward_fn(self.data), False, False, info
         
         if (first, second) in self.unique_edges or (second, first) in self.unique_edges:
             self.repeats_done += 1
@@ -92,7 +97,7 @@ class GraphEnv:
                 info['repeats_done'] = self.repeats_done
                 info['steps_done'] = self.steps_done
                 info['num_self_loops'] = self.num_self_loops
-                return self.data, False, True, info
+                return self.data, self.reward_fn(self.data), False, True, info
         else:
             # add undirected edge to the graph Data container;
             self.data.edge_index = torch.cat(
@@ -122,4 +127,5 @@ class GraphEnv:
         info['repeats_done'] = self.repeats_done
         info['num_self_loops'] = self.num_self_loops
         self.terminated, self.truncated = terminated, truncated
-        return self.data, terminated, truncated, info
+        # reward fn should have its own encoder GNN;
+        return self.data, self.reward_fn(self.data), terminated, truncated, info
