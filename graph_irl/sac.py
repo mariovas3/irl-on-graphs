@@ -57,8 +57,103 @@ class SACAgentBase:
     def get_policy_loss_and_temperature_loss(self, *args, **kwargs):
         pass
 
-    def update_policy_and_temperature(self, *args, **kwargs):
-        pass
+    def update_policy_and_temperature(self):
+        # update policy params;
+        self.policy_optim.zero_grad()
+        self.policy_loss.backward()
+        self.policy_optim.step()
+
+        # update temperature;
+        self.temperature_optim.zero_grad()
+        self.temperature_loss.backward()
+        self.temperature_optim.step()
+
+
+class SACAgentGraph(SACAgentBase):
+    def __init__(
+        self,
+        name,
+        policy,
+        policy_lr,
+        entropy_lb,
+        temperature_lr,
+        **policy_kwargs      
+    ):
+        super(SACAgentGraph, self).__init__(
+            name,
+            policy,
+            policy_lr,
+            entropy_lb,
+            temperature_lr,
+            **policy_kwargs,
+        )
+    
+    def sample_action(self, obs):
+        policy_dist, graph_embeds = self.policy(obs)
+        return policy_dist.sample(), graph_embeds
+    
+    def sample_deterministic(self, obs):
+        policy_dist, graph_embeds = self.policy(obs)
+        return policy_dist.mean.detach(), graph_embeds
+    
+    def get_policy_loss_and_temperature_loss(
+        self, obs_t, qfunc1, qfunc2, UT_trick=False, with_entropy=False
+    ):
+        # freeze q-nets and eval at current observation
+        # and reparam trick action and choose min for policy loss;
+        qfunc1.requires_grad_(False)
+        qfunc2.requires_grad_(False)
+
+        # get policy;
+        policy_density, graph_embeds = self.policy(obs_t)
+
+        if UT_trick:
+            if with_entropy:
+                log_pi_integral = policy_density.entropy().sum(-1)
+            else:
+                log_pi_integral = policy_density.log_prob_UT_trick().sum(-1)
+            UT_trick_samples = policy_density.get_UT_trick_input()
+            q1_integral = batch_UT_trick_from_samples(qfunc1.net, qfunc1.gnn(obs_t), UT_trick_samples)
+            q2_integral = batch_UT_trick_from_samples(qfunc2.net, qfunc2.gnn(obs_t), UT_trick_samples)
+            q_integral = torch.min(q1_integral, q2_integral).view(-1)
+
+            # get policy_loss;
+            self.policy_loss = (
+                np.exp(self.log_temperature.item()) * log_pi_integral - q_integral
+            ).mean()
+
+            # get temperature loss;
+            self.temperature_loss = -(
+                self.log_temperature.exp()
+                * (log_pi_integral + self.entropy_lb).detach()
+            ).mean()
+        else:
+            # do reparam trick;
+            repr_trick = policy_density.rsample()
+
+            # get log prob for policy optimisation;
+            if with_entropy:
+                log_prob = policy_density.entropy().sum(-1)
+            else:
+                log_prob = policy_density.log_prob(repr_trick).sum(-1)
+
+            qfunc_in = (obs_t, repr_trick)
+            q_est = torch.min(qfunc1(qfunc_in), qfunc2(qfunc_in)).view(-1)
+
+            # get loss for policy;
+            self.policy_loss = (
+                np.exp(self.log_temperature.item()) * log_prob - q_est
+            ).mean()
+
+            # get temperature loss;
+            self.temperature_loss = -(
+                self.log_temperature.exp()
+                * (log_prob + self.entropy_lb).detach()
+            ).mean()
+
+        # housekeeping;
+        self.policy_losses.append(self.policy_loss.item())
+        self.temperature_losses.append(self.temperature_loss.item())
 
 
 class SACAgentMuJoCo(SACAgentBase):
@@ -88,17 +183,6 @@ class SACAgentMuJoCo(SACAgentBase):
     def sample_deterministic(self, obs):
         policy_density = self.policy(obs)
         return policy_density.mean.detach()
-
-    def update_policy_and_temperature(self):
-        # update policy params;
-        self.policy_optim.zero_grad()
-        self.policy_loss.backward()
-        self.policy_optim.step()
-
-        # update temperature;
-        self.temperature_optim.zero_grad()
-        self.temperature_loss.backward()
-        self.temperature_optim.step()
 
     def get_policy_loss_and_temperature_loss(
         self, obs_t, qfunc1, qfunc2, UT_trick=False, with_entropy=False
@@ -195,30 +279,41 @@ def get_q_losses(
     agent,
     discount,
     UT_trick=False,
-    with_entropy=False
+    with_entropy=False,
+    for_graph=False,
 ):
     qfunc1.requires_grad_(True)
     qfunc2.requires_grad_(True)
 
     # get predictions from q functions;
-    obs_action_t = torch.cat((obs_t, action_t), -1)
+    if for_graph:
+        obs_action_t = (obs_t, action_t)
+        policy_density, graph_embeds = agent.policy(obs_tp1)
+    else:
+        obs_action_t = torch.cat((obs_t, action_t), -1)
+        policy_density = agent.policy(obs_tp1)    
     q1_est = qfunc1(obs_action_t).view(-1)
     q2_est = qfunc2(obs_action_t).view(-1)
-
-    # see appropriate dist for obs_tp1;
-    policy_density = agent.policy(obs_tp1)
 
     if UT_trick:
         # get (B, 2 * action_dim + 1, action_dim) samples;
         UT_trick_samples = policy_density.get_UT_trick_input()
         # eval expectation of q-target functions by averaging over the 
         # 2 * action_dim + 1 samples and get (B, 1) output;
-        qt1_est = batch_UT_trick_from_samples(
-            qt1, obs_tp1, UT_trick_samples
-        )
-        qt2_est = batch_UT_trick_from_samples(
-            qt2, obs_tp1, UT_trick_samples
-        )
+        if for_graph:
+            qt1_est = batch_UT_trick_from_samples(
+                qt1.net, qt1.gnn(obs_tp1), UT_trick_samples
+            )
+            qt2_est = batch_UT_trick_from_samples(
+                qt2.net, qt2.gnn(obs_tp1), UT_trick_samples
+            )
+        else:
+            qt1_est = batch_UT_trick_from_samples(
+                qt1, obs_tp1, UT_trick_samples
+            )
+            qt2_est = batch_UT_trick_from_samples(
+                qt2, obs_tp1, UT_trick_samples
+            )
         # get negative entropy by using the UT trick;
         if with_entropy:
             log_probs = policy_density.entropy().sum(-1)
@@ -235,7 +330,10 @@ def get_q_losses(
             log_probs = policy_density.log_prob(action_tp1).sum(-1).view(-1)
 
         # input for target nets;
-        obs_action_tp1 = torch.cat((obs_tp1, action_tp1), -1)
+        if for_graph:
+            obs_action_tp1 = (obs_tp1, action_tp1)
+        else:
+            obs_action_tp1 = torch.cat((obs_tp1, action_tp1), -1)
 
         # estimate values with target nets;
         qt1_est, qt2_est = qt1(obs_action_tp1), qt2(obs_action_tp1)
