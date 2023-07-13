@@ -8,14 +8,14 @@ TODO:
 
 import numpy as np
 import torch
-from policy import *
-from distributions import batch_UT_trick_from_samples
+from .policy import *
+from .distributions import batch_UT_trick_from_samples
 from torch import nn
 from typing import Iterable
 import random
 from pathlib import Path
-from buffer_v2 import Buffer, sample_eval_path
-from vis_utils import save_metric_plots, see_one_episode, get_moving_avgs
+from .buffer_v2 import Buffer, sample_eval_path
+from .vis_utils import save_metric_plots, see_one_episode, get_moving_avgs
 import time
 import pickle
 from tqdm import tqdm
@@ -77,7 +77,7 @@ class SACAgentGraph(SACAgentBase):
         policy_lr,
         entropy_lb,
         temperature_lr,
-        **policy_kwargs      
+        **policy_kwargs,
     ):
         super(SACAgentGraph, self).__init__(
             name,
@@ -87,15 +87,15 @@ class SACAgentGraph(SACAgentBase):
             temperature_lr,
             **policy_kwargs,
         )
-    
+
     def sample_action(self, obs):
         policy_dist, graph_embeds = self.policy(obs)
         return policy_dist.sample(), graph_embeds
-    
+
     def sample_deterministic(self, obs):
         policy_dist, graph_embeds = self.policy(obs)
         return policy_dist.mean.detach(), graph_embeds
-    
+
     def get_policy_loss_and_temperature_loss(
         self, obs_t, qfunc1, qfunc2, UT_trick=False, with_entropy=False
     ):
@@ -113,13 +113,18 @@ class SACAgentGraph(SACAgentBase):
             else:
                 log_pi_integral = policy_density.log_prob_UT_trick().sum(-1)
             UT_trick_samples = policy_density.get_UT_trick_input()
-            q1_integral = batch_UT_trick_from_samples(qfunc1.net, qfunc1.gnn(obs_t), UT_trick_samples)
-            q2_integral = batch_UT_trick_from_samples(qfunc2.net, qfunc2.gnn(obs_t), UT_trick_samples)
+            q1_integral = batch_UT_trick_from_samples(
+                qfunc1.net, qfunc1.encoder(obs_t), UT_trick_samples
+            )
+            q2_integral = batch_UT_trick_from_samples(
+                qfunc2.net, qfunc2.encoder(obs_t), UT_trick_samples
+            )
             q_integral = torch.min(q1_integral, q2_integral).view(-1)
 
             # get policy_loss;
             self.policy_loss = (
-                np.exp(self.log_temperature.item()) * log_pi_integral - q_integral
+                np.exp(self.log_temperature.item()) * log_pi_integral
+                - q_integral
             ).mean()
 
             # get temperature loss;
@@ -179,7 +184,7 @@ class SACAgentMuJoCo(SACAgentBase):
         policy_density = self.policy(obs)
         action = policy_density.sample()
         return action
-    
+
     def sample_deterministic(self, obs):
         policy_density = self.policy(obs)
         return policy_density.mean.detach()
@@ -201,13 +206,18 @@ class SACAgentMuJoCo(SACAgentBase):
             else:
                 log_pi_integral = policy_density.log_prob_UT_trick().sum(-1)
             UT_trick_samples = policy_density.get_UT_trick_input()
-            q1_integral = batch_UT_trick_from_samples(qfunc1, obs_t, UT_trick_samples)
-            q2_integral = batch_UT_trick_from_samples(qfunc2, obs_t, UT_trick_samples)
+            q1_integral = batch_UT_trick_from_samples(
+                qfunc1, obs_t, UT_trick_samples
+            )
+            q2_integral = batch_UT_trick_from_samples(
+                qfunc2, obs_t, UT_trick_samples
+            )
             q_integral = torch.min(q1_integral, q2_integral).view(-1)
 
             # get policy_loss;
             self.policy_loss = (
-                np.exp(self.log_temperature.item()) * log_pi_integral - q_integral
+                np.exp(self.log_temperature.item()) * log_pi_integral
+                - q_integral
             ).mean()
 
             # get temperature loss;
@@ -291,21 +301,21 @@ def get_q_losses(
         policy_density, graph_embeds = agent.policy(obs_tp1)
     else:
         obs_action_t = torch.cat((obs_t, action_t), -1)
-        policy_density = agent.policy(obs_tp1)    
+        policy_density = agent.policy(obs_tp1)
     q1_est = qfunc1(obs_action_t).view(-1)
     q2_est = qfunc2(obs_action_t).view(-1)
 
     if UT_trick:
         # get (B, 2 * action_dim + 1, action_dim) samples;
         UT_trick_samples = policy_density.get_UT_trick_input()
-        # eval expectation of q-target functions by averaging over the 
+        # eval expectation of q-target functions by averaging over the
         # 2 * action_dim + 1 samples and get (B, 1) output;
         if for_graph:
             qt1_est = batch_UT_trick_from_samples(
-                qt1.net, qt1.gnn(obs_tp1), UT_trick_samples
+                qt1.net, qt1.encoder(obs_tp1), UT_trick_samples
             )
             qt2_est = batch_UT_trick_from_samples(
-                qt2.net, qt2.gnn(obs_tp1), UT_trick_samples
+                qt2.net, qt2.encoder(obs_tp1), UT_trick_samples
             )
         else:
             qt1_est = batch_UT_trick_from_samples(
@@ -322,10 +332,10 @@ def get_q_losses(
     else:
         # sample future action;
         action_tp1 = policy_density.sample()
-    
+
         # get log probs;
         if with_entropy:
-            log_probs = policy_density.entropy().sum(-1)
+            log_probs = policy_density.entropy().sum(-1).view(-1)
         else:
             log_probs = policy_density.log_prob(action_tp1).sum(-1).view(-1)
 
@@ -337,7 +347,7 @@ def get_q_losses(
 
         # estimate values with target nets;
         qt1_est, qt2_est = qt1(obs_action_tp1), qt2(obs_action_tp1)
-    
+
     # use the values from the target net that
     # had lower value predictions;
     q_target = (
@@ -391,8 +401,9 @@ def train_sac_one_epoch(
     qfunc2_losses: list,
     UT_trick=False,
     with_entropy=False,
-    eval_path_returns: list=None,
-    eval_path_lens: list=None,
+    for_graph=False,
+    eval_path_returns: list = None,
+    eval_path_lens: list = None,
 ):
     for _ in tqdm(range(num_iters)):
         # sample paths;
@@ -404,17 +415,25 @@ def train_sac_one_epoch(
 
         # sample paths with delta func policy;
         if eval_path_returns is not None and eval_path_lens is not None:
-            observations, actions, rewards, code = sample_eval_path(1000, env, agent, seed=buffer.seed-1)
+            observations, actions, rewards, code = sample_eval_path(
+                1000, env, agent, seed=buffer.seed - 1
+            )
             eval_path_returns.append(np.sum(rewards))
             eval_path_lens.append(len(actions))
-        
+
         # do the gradient updates;
         for _ in range(num_grad_steps):
-            obs_t, action_t, reward_t, obs_tp1, terminated_tp1 = buffer.sample(
-                batch_size
-            )
+            (
+                obs_t,
+                action_t,
+                reward_t,
+                obs_tp1,
+                terminated_tp1,
+            ) = buffer.sample(batch_size)
             # get temperature and policy loss;
-            agent.get_policy_loss_and_temperature_loss(obs_t, Q1, Q2, UT_trick, with_entropy)
+            agent.get_policy_loss_and_temperature_loss(
+                obs_t, Q1, Q2, UT_trick, with_entropy
+            )
 
             # value func updates;
             l1, l2 = get_q_losses(
@@ -431,6 +450,7 @@ def train_sac_one_epoch(
                 discount,
                 UT_trick,
                 with_entropy,
+                for_graph,
             )
 
             # qfunc losses housekeeping;
@@ -448,20 +468,20 @@ def train_sac_one_epoch(
             track_params(Q2t, Q2, tau)
 
 
-def save_metrics(save_returns_to, metric_names, metrics, agent_name, env_name, seed):
+def save_metrics(
+    save_returns_to, metric_names, metrics, agent_name, env_name, seed
+):
     now = time.time()
     new_dir = agent_name + f"-{env_name}-seed-{seed}-{now}"
     new_dir = save_returns_to / new_dir
     new_dir.mkdir(parents=True)
     save_returns_to = new_dir
     for metric_name, metric in zip(metric_names, metrics):
-        file_name = (
-            agent_name + f"-{env_name}-{metric_name}-seed-{seed}.pkl"
-        )
+        file_name = agent_name + f"-{env_name}-{metric_name}-seed-{seed}.pkl"
         file_name = save_returns_to / file_name
         with open(file_name, "wb") as f:
             pickle.dump(metric, f)
-            
+
     # save plots of the metrics;
     save_metric_plots(
         agent_name,
@@ -492,6 +512,7 @@ def train_sac(
     min_steps_to_presample=1000,
     UT_trick=False,
     with_entropy=False,
+    for_graph=False,
     **agent_policy_kwargs,
 ):
     # instantiate necessary objects;
@@ -503,8 +524,12 @@ def train_sac(
     obs_action_dim = obs_dim + action_dim
 
     # init 2 q nets;
-    Q1 = Qfunc(obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm)
-    Q2 = Qfunc(obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm)
+    Q1 = Qfunc(
+        obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm
+    )
+    Q2 = Qfunc(
+        obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm
+    )
     optimQ1 = torch.optim.Adam(Q1.parameters(), lr=qfunc_lr)
     optimQ2 = torch.optim.Adam(Q2.parameters(), lr=qfunc_lr)
 
@@ -525,35 +550,51 @@ def train_sac(
 
     # make agent;
     agent = agent(
-        **agent_policy_kwargs['agent_kwargs'], 
-        **agent_policy_kwargs['policy_kwargs']
+        **agent_policy_kwargs["agent_kwargs"],
+        **agent_policy_kwargs["policy_kwargs"],
     )
-    
+
     # whether entropy and UT are used;
-    agent.name = agent.name + f"-{agent.policy.name}-UT-{int(UT_trick)}-entropy-{int(with_entropy)}-buffer-size-{buffer_len}-epochs-{num_epochs}-iters-{num_iters}"
+    agent.name = (
+        agent.name
+        + f"-{agent.policy.name}-UT-{int(UT_trick)}-entropy-{int(with_entropy)}-buffer-size-{buffer_len}-epochs-{num_epochs}-iters-{num_iters}"
+    )
 
     # init replay buffer;
     qfunc1_losses, qfunc2_losses = [], []
     buffer = Buffer(buffer_len, obs_dim, action_dim, seed=seed)
-    
+
     # see if presampling needed.
     if min_steps_to_presample > 0:
-        buffer.collect_path(env, agent, 
-                            min_steps_to_presample)
-
+        buffer.collect_path(env, agent, min_steps_to_presample)
 
     eval_path_returns = []
     eval_path_lens = []
     # start running episodes;
     for _ in tqdm(range(num_epochs)):
         train_sac_one_epoch(
-            env, agent, Q1, Q2, Q1t, Q2t,
-            optimQ1, optimQ2, tau,
-            discount, num_iters, num_grad_steps,
-            num_steps_to_sample, buffer, batch_size,
-            qfunc1_losses, qfunc2_losses, 
-            UT_trick, with_entropy,
-            eval_path_returns, eval_path_lens
+            env,
+            agent,
+            Q1,
+            Q2,
+            Q1t,
+            Q2t,
+            optimQ1,
+            optimQ2,
+            tau,
+            discount,
+            num_iters,
+            num_grad_steps,
+            num_steps_to_sample,
+            buffer,
+            batch_size,
+            qfunc1_losses,
+            qfunc2_losses,
+            UT_trick,
+            with_entropy,
+            for_graph,
+            eval_path_returns,
+            eval_path_lens,
         )
 
     # optionally save for this seed from all episodes;
@@ -592,9 +633,9 @@ def train_sac(
             metrics,
             agent.name,
             env.spec.id,
-            seed
+            seed,
         )
-    
+
     # return the q funcs and the agent;
     return Q1, Q2, agent
 
@@ -612,23 +653,23 @@ if __name__ == "__main__":
     num_iters = 100  # iterations per epoch;
 
     env = gym.make("Ant-v2", max_episode_steps=T)
-    
+
     agent_policy_kwargs = {
-        'agent_kwargs': {
-            'name': "SACAgentMuJoCo",
-            'policy': GaussPolicy,
-            'policy_lr': 3e-4,
-            'entropy_lb': None,
-            'temperature_lr': 3e-4, 
+        "agent_kwargs": {
+            "name": "SACAgentMuJoCo",
+            "policy": GaussPolicy,
+            "policy_lr": 3e-4,
+            "entropy_lb": None,
+            "temperature_lr": 3e-4,
         },
-        'policy_kwargs': {
-            'obs_dim': env.observation_space.shape[0],
-            'action_dim': env.action_space.shape[0],
-            'hiddens': [256, 256],
-            'with_layer_norm': True
-        }
+        "policy_kwargs": {
+            "obs_dim": env.observation_space.shape[0],
+            "action_dim": env.action_space.shape[0],
+            "hiddens": [256, 256],
+            "with_layer_norm": True,
+        },
     }
-    
+
     Q1, Q2, agent = train_sac(
         env,
         SACAgentMuJoCo,
@@ -648,12 +689,11 @@ if __name__ == "__main__":
         min_steps_to_presample=1000,
         UT_trick=False,
         with_entropy=False,
-        **agent_policy_kwargs
+        for_graph=False,
+        **agent_policy_kwargs,
     )
 
     print(f"temperature is: {agent.log_temperature.exp()}")
 
-    env = gym.make(
-        "Ant-v2", max_episode_steps=1000, render_mode="human"
-    )
-    see_one_episode(env, agent, seed=0, save_to=TEST_OUTPUTS_PATH / 'bob.pkl')
+    env = gym.make("Ant-v2", max_episode_steps=1000, render_mode="human")
+    see_one_episode(env, agent, seed=0, save_to=TEST_OUTPUTS_PATH / "bob.pkl")
