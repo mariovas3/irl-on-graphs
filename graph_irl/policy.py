@@ -44,13 +44,14 @@ class GaussPolicy(nn.Module):
         two_actions=False,
     ):
         super(GaussPolicy, self).__init__()
-        self.name = (
-            "GaussPolicy" if self.encoder is None else "GraphGaussPolicy"
-        )
         self.two_actions = two_actions
 
         # set encoder;
         self.encoder = encoder
+
+        self.name = (
+            "GaussPolicy" if self.encoder is None else "GraphGaussPolicy"
+        )
 
         # init net;
         self.net = nn.Sequential(nn.LayerNorm(obs_dim))
