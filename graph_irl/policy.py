@@ -44,7 +44,9 @@ class GaussPolicy(nn.Module):
         two_actions=False,
     ):
         super(GaussPolicy, self).__init__()
-        self.name = "GaussPolicy"
+        self.name = (
+            "GaussPolicy" if self.encoder is None else "GraphGaussPolicy"
+        )
         self.two_actions = two_actions
 
         # set encoder;
@@ -99,7 +101,11 @@ class TanhGaussPolicy(nn.Module):
         two_actions=False,
     ):
         super(TanhGaussPolicy, self).__init__()
-        self.name = "TanhGaussPolicy"
+        self.name = (
+            "TanhGaussPolicy"
+            if self.encoder is None
+            else "GraphTanhGaussPolicy"
+        )
         self.gauss_dist = GaussPolicy(
             obs_dim,
             action_dim,
