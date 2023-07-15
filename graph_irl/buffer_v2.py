@@ -14,9 +14,13 @@ class Buffer:
         self.undiscounted_returns = []
         self.path_lens = []
         self.avg_rewards_per_episode = []
+        self.looped = False
 
     def add_sample(self, obs_t, action_t, reward_t, obs_tp1, terminal_tp1):
         idx = self.idx % self.max_size
+        if not self.looped and self.idx and not idx:
+            self.looped = True
+        self.idx = idx
         self.obs_t[idx] = obs_t
         self.action_t[idx] = action_t
         self.reward_t[idx] = reward_t
@@ -25,9 +29,9 @@ class Buffer:
         self.idx += 1
 
     def sample(self, batch_size):
-        assert batch_size <= self.idx
+        assert batch_size <= self.__len__()
         idxs = np.random.choice(
-            min(self.idx, self.max_size), size=batch_size, replace=False
+            self.__len__(), size=batch_size, replace=False
         )
         return (
             torch.tensor(self.obs_t[idxs], dtype=torch.float32),
@@ -38,7 +42,7 @@ class Buffer:
         )
 
     def __len__(self):
-        return min(self.idx, self.max_size)
+        return self.max_size if self.looped else self.idx
 
     def collect_path(
         self, env, agent, num_steps,
@@ -136,6 +140,7 @@ if __name__ == "__main__":
     buffer = Buffer(max_size, obs_dim, action_dim)
     returns = []
     agent = DummyAgent(env)
-    buffer.collect_path(env, agent, 100, returns)
+    buffer.collect_path(env, agent, 1200)
+    print(len(buffer))
     for _ in range(5):
         batch = buffer.sample(batch_size)
