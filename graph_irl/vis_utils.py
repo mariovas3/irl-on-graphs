@@ -28,6 +28,7 @@ def see_one_episode(env, agent, seed, save_to):
     with open(save_to, 'wb') as f:
         pickle.dump(obs_list, f)
         pickle.dump(action_list, f)
+    env.close()
     pygame.display.quit()
 
 
@@ -39,8 +40,18 @@ def save_metric_plots(agent_name, env_name, metric_names, metrics, path, seed):
     fig = plt.figure(figsize=(12, 8))
     for i, (metric_name, metric) in enumerate(zip(metric_names, metrics)):
         plt.subplot(rows, cols, i + 1)
-        plt.plot(metric)
-        plt.ylabel(metric_name)
+        ax = plt.gca()
+        ax.plot(metric)
+        ylow, yhigh = np.min(metric), np.max(metric)
+        yoffset = (yhigh - ylow) // 10
+        xlow, xhigh = 0, len(metric) + 5
+        ax.set_ylim(ylow, yhigh)
+        ax.set_ylabel(metric_name)
+        ax.set_yticks(np.arange(ylow-1.5 * yoffset, 
+                                yhigh+1.5 * yoffset, 
+                                yoffset))
+        ax.set_xticks(np.arange(xlow, xhigh, (xhigh - xlow) // 10))
+        ax.set_xticklabels(ax.get_xticks(), rotation=90)
     fig.tight_layout()
     plt.savefig(file_name)
 
