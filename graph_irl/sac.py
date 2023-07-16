@@ -8,17 +8,20 @@ TODO:
 
 import numpy as np
 import torch
-from .policy import *
-from .distributions import batch_UT_trick_from_samples
+from policy import *
+from distributions import batch_UT_trick_from_samples
 from torch import nn
 from typing import Iterable
 import random
 from pathlib import Path
-from .buffer_v2 import Buffer, sample_eval_path
-from .vis_utils import save_metric_plots, see_one_episode, get_moving_avgs
+from buffer_v2 import Buffer, sample_eval_path
+from vis_utils import *
 import time
 import pickle
 from tqdm import tqdm
+
+# path to save logs;
+TEST_OUTPUTS_PATH = Path(__file__).absolute().parent.parent / "test_output"
 
 
 class SACAgentBase:
@@ -395,6 +398,7 @@ def train_sac_one_epoch(
     num_iters,
     num_grad_steps,
     num_steps_to_sample,
+    num_eval_steps_to_sample,
     buffer,
     batch_size,
     qfunc1_losses: list,
@@ -416,7 +420,7 @@ def train_sac_one_epoch(
         # sample paths with delta func policy;
         if eval_path_returns is not None and eval_path_lens is not None:
             observations, actions, rewards, code = sample_eval_path(
-                1000, env, agent, seed=buffer.seed - 1
+                num_eval_steps_to_sample, env, agent, seed=buffer.seed - 1
             )
             eval_path_returns.append(np.sum(rewards))
             eval_path_lens.append(len(actions))
@@ -507,6 +511,7 @@ def train_sac(
     seed,
     save_returns_to: Path = None,
     num_steps_to_sample=500,
+    num_eval_steps_to_sample=500,
     num_grad_steps=500,
     num_epochs=100,
     min_steps_to_presample=1000,
@@ -586,6 +591,7 @@ def train_sac(
             num_iters,
             num_grad_steps,
             num_steps_to_sample,
+            num_eval_steps_to_sample,
             buffer,
             batch_size,
             qfunc1_losses,
@@ -605,12 +611,14 @@ def train_sac(
             "qfunc1-loss",
             "qfunc2-loss",
             "avg-reward",
-            "path_lens",
+            "path-lens",
+            "ma-path-lens-30",
             "undiscounted-returns",
-            "moving-avg-returns-30",
+            "ma-returns-30",
             "eval-path-returns",
             "eval-ma-returns-30",
             "eval-path-lens",
+            "eval-ma-path-lens-30",
         ]
         metrics = [
             agent.policy_losses,
@@ -619,11 +627,13 @@ def train_sac(
             qfunc2_losses,
             buffer.avg_rewards_per_episode,
             buffer.path_lens,
+            get_moving_avgs(buffer.path_lens, 30),
             buffer.undiscounted_returns,
             get_moving_avgs(buffer.undiscounted_returns, 30),
             eval_path_returns,
             get_moving_avgs(eval_path_returns, 30),
             eval_path_lens,
+            get_moving_avgs(eval_path_lens, 30),
         ]
 
         # save the metrics as numbers as well as plot;
@@ -644,11 +654,10 @@ if __name__ == "__main__":
     import gymnasium as gym
 
     # path to save logs;
-    TEST_OUTPUTS_PATH = Path(".").absolute().parent / "test_output"
     if not TEST_OUTPUTS_PATH.exists():
         TEST_OUTPUTS_PATH.mkdir()
 
-    T = 500  # max path length;
+    T = 3000  # max path length;
     num_epochs = 1
     num_iters = 100  # iterations per epoch;
 
@@ -677,17 +686,18 @@ if __name__ == "__main__":
         qfunc_hiddens=[256, 256],
         qfunc_layer_norm=True,
         qfunc_lr=3e-4,
-        buffer_len=20_000,
+        buffer_len=int(1e5),
         batch_size=250,
         discount=0.99,
         tau=0.1,
         seed=0,
         save_returns_to=TEST_OUTPUTS_PATH,
-        num_steps_to_sample=1000,
+        num_steps_to_sample=2 * T,
+        num_eval_steps_to_sample=T,
         num_grad_steps=500,
         num_epochs=num_epochs,
-        min_steps_to_presample=1000,
-        UT_trick=False,
+        min_steps_to_presample=T,
+        UT_trick=True,
         with_entropy=False,
         for_graph=False,
         **agent_policy_kwargs,
@@ -695,5 +705,7 @@ if __name__ == "__main__":
 
     print(f"temperature is: {agent.log_temperature.exp()}")
 
-    env = gym.make("Ant-v2", max_episode_steps=1000, render_mode="human")
+    env = gym.make(
+        "Ant-v2", max_episode_steps=max(T, 5000), render_mode="human"
+    )
     see_one_episode(env, agent, seed=0, save_to=TEST_OUTPUTS_PATH / "bob.pkl")
