@@ -28,3 +28,9 @@
 * There should be some budgeting there for allowing some edges and not others.
 * The policy, the reward function and the value functions should have their own GNN encoders. For the reward this is necessary since we don't want to let the policy gradients implicitly change the reward function (would be the case if the GNN was shared by the policy and the reward function).
 * For the sake of compatibility with the openai gym Env, the action in this graph setting will be $\tilde{a}=(a, Z)$.
+
+### Graph  Buffer:
+* The observations should be instances of `torch_geometric.data.Data`. The actions should be tuples `(idx1, idx2)` of length 2 containing the indexes of the nodes to be connected. Based on these indexes, `x_embeds[idx1], x_embeds[idx2]` should be passed to the `log_prob` method of the `TwoStageGaussDist` instance. The `x_embeds` will be computed anew for each batch during the gradient steps. The state will be the graph itself rather than its embedding from the GNN to allow training of the GNN, therefore. And the actions' interpretation is that we emitted vectors close to the embeddings of the selected vectors.
+    * Given this setup, I might need a new Graph Buffer class, to accommodate for these formats.
+* The alternative would be to store `(a1, a2)` - a tuple of two vectors for for the actions from when the path was sampled (some point in the past). These, however, would have been output based on a different encoding from the GNN, so are not in general guaranteed to map to the same node embeddings given the new parameters of the GNN.
+* Another alternative would be to store GNN embeddings as observations and then generate a gaussian based on the new params of the policy. This, however, does not train the GNN since we don't use it if we store embeddings for the observations.

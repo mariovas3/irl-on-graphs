@@ -1,3 +1,9 @@
+"""
+TODO:
+    (1): Implement a Graph Buffer following the 
+        description from the README.md file.
+"""
+
 import numpy as np
 import torch
 
