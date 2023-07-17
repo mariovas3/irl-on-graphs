@@ -1,3 +1,10 @@
+"""
+TODO:
+    (1): Implement Q function to work with the batch 
+        format defined in the README.
+"""
+
+
 import torch
 from torch import nn
 import torch.distributions as dists
@@ -114,7 +121,7 @@ class GaussPolicy(nn.Module):
         if self.encoder is not None:
             return (
                 GaussDist(
-                    dists.Normal(mus, sigmas), self.two_actions_vectors
+                    dists.Normal(mus, sigmas), self.two_action_vectors
                 ),
                 node_embeds,
             )
@@ -221,6 +228,10 @@ class Qfunc(nn.Module):
         if self.encoder is not None, then obs_action is (batch, action).
         """
         if self.encoder is not None:
-            obs = self.encoder(obs_action[0])
-            obs_action = torch.cat((obs, obs_action[-1]), -1)
+            batch, actions = obs_action
+            n_nodes = len(torch.unique(batch.batch))
+            action_idxs = actions + torch.arange(len(actions)).view(-1, 1) * n_nodes
+            obs, node_embeds = self.encoder(obs_action[0])
+            actions = node_embeds[action_idxs.view(-1)].view(-1, 2 * node_embeds.shape[-1])
+            obs_action = torch.cat((obs, actions), -1)
         return self.net(obs_action)
