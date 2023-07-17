@@ -17,7 +17,7 @@ class BufferBase:
         self.path_lens = []
         self.avg_rewards_per_episode = []
         self.looped = False
-    
+
     def add_sample(self, *args, **kwargs):
         pass
 
@@ -26,28 +26,26 @@ class BufferBase:
 
     def __len__(self):
         return self.max_size if self.looped else self.idx
-    
+
     def collect_path(self, env, agent, num_steps_to_collect):
         pass
 
 
 class GraphBuffer(BufferBase):
-    def __init__(self, max_size, 
-                 nodes: torch.Tensor, 
-                 seed=None):
+    def __init__(self, max_size, nodes: torch.Tensor, seed=None):
         super(GraphBuffer, self).__init__(max_size, seed)
         edge_index = torch.tensor([[], []], dtype=torch.long)
-        self.obs_t = [Data(x=nodes, edge_index=edge_index)
-                      for _ in range(self.max_size)]
+        self.obs_t = [
+            Data(x=nodes, edge_index=edge_index) for _ in range(self.max_size)
+        ]
         self.action_t = np.empty((max_size, 2), dtype=np.int64)
-        self.obs_tp1 = [Data(x=nodes, edge_index=edge_index)
-                      for _ in range(self.max_size)]
+        self.obs_tp1 = [
+            Data(x=nodes, edge_index=edge_index) for _ in range(self.max_size)
+        ]
         self.terminal_tp1 = np.empty((max_size,), dtype=np.int8)
-        self.reward_t = np.empty((max_size, ))
-    
-    def add_sample(self, obs_t, action_t, 
-                   reward_t, obs_tp1, 
-                   terminal_tp1):
+        self.reward_t = np.empty((max_size,))
+
+    def add_sample(self, obs_t, action_t, reward_t, obs_tp1, terminal_tp1):
         idx = self.idx % self.max_size
         if not self.looped and self.idx and not idx:
             self.looped = True
@@ -58,7 +56,7 @@ class GraphBuffer(BufferBase):
         self.obs_tp1[idx] = obs_tp1
         self.terminal_tp1[idx] = terminal_tp1
         self.idx += 1
-    
+
     def sample(self, batch_size):
         assert batch_size <= self.__len__()
         idxs = np.random.choice(
@@ -71,9 +69,12 @@ class GraphBuffer(BufferBase):
             Batch.from_data_list([self.obs_tp1[idx] for idx in idxs]),
             torch.tensor(self.terminal_tp1[idxs], dtype=torch.float32),
         )
-    
+
     def collect_path(
-        self, env, agent, num_steps_to_collect,
+        self,
+        env,
+        agent,
+        num_steps_to_collect,
     ):
         """
         Collect steps from MDP induced by env and agent.
@@ -83,22 +84,22 @@ class GraphBuffer(BufferBase):
             agent: Supports sample_action(obs) api.
             num_steps_to_collect: Number of (obs, action, reward, next_obs, terminated)
                 tuples to be added to the buffer.
-            returns: List where sampled returns are added.
-            avg_the_returns: Record avg reward per episode.
         """
         num_steps_to_collect = min(num_steps_to_collect, self.max_size)
         t = 0
         obs_t, info = env.reset(seed=self.seed)
         self.seed += 1
         avg_reward, num_rewards = 0.0, 0.0
-        undiscounted_return = 0.
+        undiscounted_return = 0.0
         while t < num_steps_to_collect:
             # sample action;
             (a1, a2), node_embeds = agent.sample_action(obs_t)
 
             # sample dynamics;
-            obs_tp1, reward, terminal, truncated, info = env.step(((a1.numpy(), a2.numpy()), node_embeds.detach().numpy()))
-            
+            obs_tp1, reward, terminal, truncated, info = env.step(
+                ((a1.numpy(), a2.numpy()), node_embeds.detach().numpy())
+            )
+
             # indexes of nodes to be connected;
             first, second = info["first"], info["second"]
             action_t = np.array([first, second])
@@ -108,10 +109,8 @@ class GraphBuffer(BufferBase):
 
             # house keeping for observed rewards.
             num_rewards += 1
-            
-            avg_reward = (
-                avg_reward + (reward - avg_reward) / num_rewards
-            )
+
+            avg_reward = avg_reward + (reward - avg_reward) / num_rewards
             undiscounted_return += reward
 
             # restart env if episode ended;
@@ -123,7 +122,7 @@ class GraphBuffer(BufferBase):
                 self.path_lens.append(num_rewards)
                 avg_reward = 0.0
                 num_rewards = 0.0
-                undiscounted_return = 0.
+                undiscounted_return = 0.0
             else:
                 obs_t = obs_tp1
             t += 1
@@ -164,7 +163,10 @@ class Buffer(BufferBase):
         )
 
     def collect_path(
-        self, env, agent, num_steps_to_collect,
+        self,
+        env,
+        agent,
+        num_steps_to_collect,
     ):
         """
         Collect steps from MDP induced by env and agent.
@@ -174,15 +176,13 @@ class Buffer(BufferBase):
             agent: Supports sample_action(obs) api.
             num_steps_to_collect: Number of (obs, action, reward, next_obs, terminated)
                 tuples to be added to the buffer.
-            returns: List where sampled returns are added.
-            avg_the_returns: Record avg reward per episode.
         """
         num_steps_to_collect = min(num_steps_to_collect, self.max_size)
         t = 0
         obs_t, info = env.reset(seed=self.seed)
         self.seed += 1
         avg_reward, num_rewards = 0.0, 0.0
-        undiscounted_return = 0.
+        undiscounted_return = 0.0
         while t < num_steps_to_collect:
             obs_t = torch.tensor(obs_t, dtype=torch.float32)
 
@@ -197,10 +197,8 @@ class Buffer(BufferBase):
 
             # house keeping for observed rewards.
             num_rewards += 1
-            
-            avg_reward = (
-                avg_reward + (reward - avg_reward) / num_rewards
-            )
+
+            avg_reward = avg_reward + (reward - avg_reward) / num_rewards
             undiscounted_return += reward
 
             # restart env if episode ended;
@@ -212,10 +210,33 @@ class Buffer(BufferBase):
                 self.path_lens.append(num_rewards)
                 avg_reward = 0.0
                 num_rewards = 0.0
-                undiscounted_return = 0.
+                undiscounted_return = 0.0
             else:
                 obs_t = obs_tp1
             t += 1
+
+
+def sample_eval_path_graph(T, env, agent, seed):
+    observations, actions, rewards = [], [], []
+    obs, info = env.reset(seed=seed)
+    observations.append(obs)
+    for _ in range(T):
+        (mus1, mus2), node_embeds = agent.sample_deterministic(obs)
+        new_obs, reward, terminated, truncated, info = env.step(
+            ((mus1.numpy(), mus2.numpy()), node_embeds.detach().numpy())
+        )
+        a = np.array([info["first"], info["second"]], dtype=np.int64)
+        actions.append(a)
+        observations.append(new_obs)
+        rewards.append(reward)
+        obs = new_obs
+        if terminated and not truncated:
+            return observations, actions, rewards, 0
+        if terminated and truncated:
+            return observations, actions, rewards, 1
+        if truncated:
+            return observations, actions, rewards, 2
+    return observations, actions, rewards, 2
 
 
 def sample_eval_path(T, env, agent, seed):
