@@ -43,17 +43,26 @@ class GaussInputDist:
 
 
 class GaussDist(GaussInputDist):
-    def __init__(self, diag_gauss):
+    def __init__(self, diag_gauss, two_action_vectors=False):
         super(GaussDist, self).__init__(diag_gauss)
+        self.two_action_vectors = two_action_vectors
 
     def log_prob(self, x):
         return self.diag_gauss.log_prob(x)
 
     def sample(self):
-        return self.diag_gauss.sample()
+        a = self.diag_gauss.sample()
+        mid = len(a) // 2
+        if self.two_action_vectors:
+            return a[:mid], a[mid:]
+        return a
 
     def rsample(self):
-        return self.diag_gauss.rsample()
+        a = self.diag_gauss.rsample()
+        mid = len(a) // 2
+        if self.two_action_vectors:
+            return a[:mid], a[mid:]
+        return a
 
     def log_prob_UT_trick(self):
         f_in = self.get_UT_trick_input().permute((1, 0, 2))
