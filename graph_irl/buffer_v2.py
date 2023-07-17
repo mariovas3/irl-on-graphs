@@ -6,21 +6,137 @@ TODO:
 
 import numpy as np
 import torch
+from torch_geometric.data import Data, Batch
 
 
-class Buffer:
-    def __init__(self, max_size, obs_dim, action_dim, seed=None):
+class BufferBase:
+    def __init__(self, max_size, seed=None):
+        self.seed = 0 if seed is None else seed
         self.idx, self.max_size = 0, max_size
+        self.undiscounted_returns = []
+        self.path_lens = []
+        self.avg_rewards_per_episode = []
+        self.looped = False
+    
+    def add_sample(self, *args, **kwargs):
+        pass
+
+    def sample(self, batch_size):
+        pass
+
+    def __len__(self):
+        return self.max_size if self.looped else self.idx
+    
+    def collect_path(self, env, agent, num_steps_to_collect):
+        pass
+
+
+class GraphBuffer(BufferBase):
+    def __init__(self, max_size, 
+                 nodes: torch.Tensor, 
+                 seed=None):
+        super(GraphBuffer, self).__init__(max_size, seed)
+        edge_index = torch.tensor([[], []], dtype=torch.long)
+        self.obs_t = [Data(x=nodes, edge_index=edge_index)
+                      for _ in range(self.max_size)]
+        self.action_t = np.empty((max_size, 2), dtype=np.int64)
+        self.obs_tp1 = [Data(x=nodes, edge_index=edge_index)
+                      for _ in range(self.max_size)]
+        self.terminal_tp1 = np.empty((max_size,), dtype=np.int8)
+        self.reward_t = np.empty((max_size, ))
+    
+    def add_sample(self, obs_t, action_t, 
+                   reward_t, obs_tp1, 
+                   terminal_tp1):
+        idx = self.idx % self.max_size
+        if not self.looped and self.idx and not idx:
+            self.looped = True
+        self.idx = idx
+        self.obs_t[idx] = obs_t
+        self.action_t[idx] = action_t
+        self.reward_t[idx] = reward_t
+        self.obs_tp1[idx] = obs_tp1
+        self.terminal_tp1[idx] = terminal_tp1
+        self.idx += 1
+    
+    def sample(self, batch_size):
+        assert batch_size <= self.__len__()
+        idxs = np.random.choice(
+            self.__len__(), size=batch_size, replace=False
+        )
+        return (
+            Batch.from_data_list([self.obs_t[idx] for idx in idxs]),
+            self.action_t[idxs],  # (B, 2) shape np.ndarray
+            torch.tensor(self.reward_t[idxs], dtype=torch.float32),
+            Batch.from_data_list([self.obs_tp1[idx] for idx in idxs]),
+            torch.tensor(self.terminal_tp1[idxs], dtype=torch.float32),
+        )
+    
+    def collect_path(
+        self, env, agent, num_steps_to_collect,
+    ):
+        """
+        Collect steps from MDP induced by env and agent.
+
+        Args:
+            env: Supports similar api to gymnasium.Env..
+            agent: Supports sample_action(obs) api.
+            num_steps_to_collect: Number of (obs, action, reward, next_obs, terminated)
+                tuples to be added to the buffer.
+            returns: List where sampled returns are added.
+            avg_the_returns: Record avg reward per episode.
+        """
+        num_steps_to_collect = min(num_steps_to_collect, self.max_size)
+        t = 0
+        obs_t, info = env.reset(seed=self.seed)
+        self.seed += 1
+        avg_reward, num_rewards = 0.0, 0.0
+        undiscounted_return = 0.
+        while t < num_steps_to_collect:
+            # sample action;
+            (a1, a2), node_embeds = agent.sample_action(obs_t)
+
+            # sample dynamics;
+            obs_tp1, reward, terminal, truncated, info = env.step(((a1.numpy(), a2.numpy()), node_embeds.detach().numpy()))
+            
+            # indexes of nodes to be connected;
+            first, second = info["first"], info["second"]
+            action_t = np.array([first, second])
+
+            # add sampled tuple to buffer;
+            self.add_sample(obs_t, action_t, reward, obs_tp1, terminal)
+
+            # house keeping for observed rewards.
+            num_rewards += 1
+            
+            avg_reward = (
+                avg_reward + (reward - avg_reward) / num_rewards
+            )
+            undiscounted_return += reward
+
+            # restart env if episode ended;
+            if terminal or truncated:
+                obs_t, info = env.reset(seed=self.seed)
+                self.seed += 1
+                self.undiscounted_returns.append(undiscounted_return)
+                self.avg_rewards_per_episode.append(avg_reward)
+                self.path_lens.append(num_rewards)
+                avg_reward = 0.0
+                num_rewards = 0.0
+                undiscounted_return = 0.
+            else:
+                obs_t = obs_tp1
+            t += 1
+
+
+class Buffer(BufferBase):
+    def __init__(self, max_size, obs_dim, action_dim, seed=None):
+        super(Buffer, self).__init__(max_size, seed)
         self.obs_t = np.empty((max_size, obs_dim))
         self.action_t = np.empty((max_size, action_dim))
         self.obs_tp1 = np.empty((max_size, obs_dim))
         self.terminal_tp1 = np.empty((max_size,))
         self.reward_t = np.empty((max_size,))
-        self.seed = 0 if seed is None else seed
-        self.undiscounted_returns = []
-        self.path_lens = []
-        self.avg_rewards_per_episode = []
-        self.looped = False
 
     def add_sample(self, obs_t, action_t, reward_t, obs_tp1, terminal_tp1):
         idx = self.idx % self.max_size
@@ -47,11 +163,8 @@ class Buffer:
             torch.tensor(self.terminal_tp1[idxs], dtype=torch.float32),
         )
 
-    def __len__(self):
-        return self.max_size if self.looped else self.idx
-
     def collect_path(
-        self, env, agent, num_steps,
+        self, env, agent, num_steps_to_collect,
     ):
         """
         Collect steps from MDP induced by env and agent.
@@ -59,18 +172,18 @@ class Buffer:
         Args:
             env: Supports similar api to gymnasium.Env..
             agent: Supports sample_action(obs) api.
-            num_steps: Number of (obs, action, reward, next_obs, terminated)
+            num_steps_to_collect: Number of (obs, action, reward, next_obs, terminated)
                 tuples to be added to the buffer.
             returns: List where sampled returns are added.
             avg_the_returns: Record avg reward per episode.
         """
-        num_steps = min(num_steps, self.max_size)
+        num_steps_to_collect = min(num_steps_to_collect, self.max_size)
         t = 0
         obs_t, info = env.reset(seed=self.seed)
         self.seed += 1
         avg_reward, num_rewards = 0.0, 0.0
         undiscounted_return = 0.
-        while t < num_steps:
+        while t < num_steps_to_collect:
             obs_t = torch.tensor(obs_t, dtype=torch.float32)
 
             # sample action;
