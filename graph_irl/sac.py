@@ -94,12 +94,13 @@ class SACAgentGraph(SACAgentBase):
         )
 
     def sample_action(self, obs):
-        policy_dist, graph_embeds = self.policy(obs)
-        return policy_dist.sample(), graph_embeds
+        policy_dist, node_embeds = self.policy(obs)
+        return policy_dist.sample(), node_embeds
 
     def sample_deterministic(self, obs):
-        policy_dist, graph_embeds = self.policy(obs)
-        return policy_dist.mean.detach(), graph_embeds
+        policy_dist, node_embeds = self.policy(obs)
+        mus1, mus2 = policy_dist.mean
+        return (mus1.detach(), mus2.detach()), node_embeds
 
     def get_policy_loss_and_temperature_loss(
         self, obs_t, qfunc1, qfunc2, UT_trick=False, with_entropy=False
@@ -110,7 +111,7 @@ class SACAgentGraph(SACAgentBase):
         qfunc2.requires_grad_(False)
 
         # get policy;
-        policy_density, graph_embeds = self.policy(obs_t)
+        policy_density, node_embeds = self.policy(obs_t)
 
         if UT_trick:
             if with_entropy:
@@ -303,7 +304,7 @@ def get_q_losses(
     # get predictions from q functions;
     if for_graph:
         obs_action_t = (obs_t, action_t)
-        policy_density, graph_embeds = agent.policy(obs_tp1)
+        policy_density, node_embeds = agent.policy(obs_tp1)
     else:
         obs_action_t = torch.cat((obs_t, action_t), -1)
         policy_density = agent.policy(obs_tp1)

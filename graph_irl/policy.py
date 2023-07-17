@@ -2,12 +2,11 @@ import torch
 from torch import nn
 import torch.distributions as dists
 from pathlib import Path
-from .distributions import TanhGauss, GaussDist
+from graph_irl.distributions import *
 from torch_geometric.nn import GCNConv, global_mean_pool
-from torch_geometric.utils import degree
 
 
-TEST_OUTPUTS_PATH = Path(".").absolute().parent / "test_output"
+TEST_OUTPUTS_PATH = Path(__file__).absolute().parent.parent / "test_output"
 if not TEST_OUTPUTS_PATH.exists():
     TEST_OUTPUTS_PATH.mkdir()
 
@@ -30,28 +29,12 @@ class GCN(nn.Module):
             x = torch.relu(f(x, edge_index))
             if self.with_layer_norm:
                 x = torch.layer_norm(x, (self.hiddens[i + 1],))
-        return global_mean_pool(x, batch.batch)
+        return global_mean_pool(x, batch.batch), x
 
 
-class GaussPolicy(nn.Module):
-    def __init__(
-        self,
-        obs_dim,
-        action_dim,
-        hiddens,
-        with_layer_norm=False,
-        encoder=None,
-        two_actions=False,
-    ):
-        super(GaussPolicy, self).__init__()
-        self.two_actions = two_actions
-
-        # set encoder;
-        self.encoder = encoder
-
-        self.name = (
-            "GaussPolicy" if self.encoder is None else "GraphGaussPolicy"
-        )
+class AmortisedGaussNet(nn.Module):
+    def __init__(self, obs_dim, action_dim, hiddens, with_layer_norm=True):
+        super(AmortisedGaussNet, self).__init__()
 
         # init net;
         self.net = nn.Sequential(nn.LayerNorm(obs_dim))
@@ -69,26 +52,103 @@ class GaussPolicy(nn.Module):
             # ReLU activation;
             self.net.append(nn.ReLU())
 
-        # add Affine layer for mean and stds for indep Gauss vector.
-        if two_actions:
+        # add mean and Cholesky of diag covariance net;
+        self.mu_net = nn.Linear(hiddens[-1], action_dim)
+        self.std_net = nn.Sequential(
+            nn.Linear(hiddens[-1], action_dim), nn.Softplus()
+        )
+
+    def forward(self, obs):
+        emb = self.net(obs)  # shared embedding for mean and std;
+        return self.mu_net(emb), torch.clamp(self.std_net(emb), 0.01, 4.0)
+
+
+class GaussPolicy(nn.Module):
+    def __init__(
+        self,
+        obs_dim,
+        action_dim,
+        hiddens,
+        with_layer_norm=False,
+        encoder=None,
+        two_action_vectors=False,
+    ):
+        """
+        Args:
+            obs_dim (int): Observation dimension if encoder is None,
+                otherwise it's the embedding dimension from the encoder.
+            action_dim (int): The dimension of the action.
+            hiddens (List[int]): Sizes of hidden layers for
+                amortised Gaussian net.
+            with_layer_norm (bool): Whether to put layer norm
+                transforms in the Amortised net.
+            encoder (nn.Module): Intended to be GNN instance.
+            two_action_vectors (bool): If True, output a single
+                action vector that has size 2 * action_dim.
+        """
+        super(GaussPolicy, self).__init__()
+        self.two_action_vectors = two_action_vectors
+
+        # set encoder;
+        self.encoder = encoder
+
+        self.name = (
+            "GaussPolicy" if self.encoder is None else "GraphGaussPolicy"
+        )
+
+        # get dimension for indep Gauss vector.
+        if two_action_vectors:
             out_dim = 2 * action_dim
         else:
             out_dim = action_dim
-        self.mu_net = nn.Linear(hiddens[-1], out_dim)
-        self.std_net = nn.Sequential(
-            nn.Linear(hiddens[-1], out_dim), nn.Softplus()
+
+        # init net;
+        self.net = AmortisedGaussNet(
+            obs_dim, out_dim, hiddens, with_layer_norm
         )
 
     def forward(self, obs):
         if self.encoder is not None:
-            obs = self.encoder(obs)  # (B, obs_dim)
-        emb = self.net(obs)  # shared embedding for mean and std;
-        mus, sigmas = self.mu_net(emb), torch.clamp(
-            self.std_net(emb), 0.01, 4.0
-        )
+            obs, node_embeds = self.encoder(obs)  # (B, obs_dim)
+        mus, sigmas = self.net(obs)
         if self.encoder is not None:
-            return GaussDist(dists.Normal(mus, sigmas)), obs
+            return (
+                GaussDist(
+                    dists.Normal(mus, sigmas), self.two_actions_vectors
+                ),
+                node_embeds,
+            )
         return GaussDist(dists.Normal(mus, sigmas))
+
+
+class TwoStageGaussPolicy(nn.Module):
+    def __init__(
+        self,
+        obs_dim,
+        action_dim,
+        hiddens1,
+        hiddens2,
+        encoder,
+        with_layer_norm=False,
+    ):
+        super(TwoStageGaussPolicy, self).__init__()
+        self.encoder = encoder
+        self.name = "TwoStageGaussPolicy"
+
+        self.net1 = AmortisedGaussNet(
+            obs_dim, action_dim, hiddens1, with_layer_norm
+        )
+        self.net2 = AmortisedGaussNet(
+            obs_dim + action_dim, action_dim, hiddens2, with_layer_norm
+        )
+
+    def forward(self, obs):
+        obs, node_embeds = self.encoder(obs)
+        mus, sigmas = self.net1(obs)
+        return (
+            TwoStageGaussDist(dists.Normal(mus, sigmas), obs, self.net2),
+            node_embeds,
+        )
 
 
 class TanhGaussPolicy(nn.Module):
@@ -102,6 +162,12 @@ class TanhGaussPolicy(nn.Module):
         two_actions=False,
     ):
         super(TanhGaussPolicy, self).__init__()
+        if two_actions:
+            raise NotImplementedError(
+                "Haven't implemented "
+                "TanhGaussPolicy for for "
+                "graphs yet."
+            )
         self.name = (
             "TanhGaussPolicy"
             if self.encoder is None
