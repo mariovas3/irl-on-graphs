@@ -28,13 +28,13 @@ class GaussInputDist:
         mus = self.diag_gauss.mean
         sigmas = self.diag_gauss.stddev
         B, D = mus.shape
- 
+
         # make to (B, D, D) shape;
         diags = sigmas.unsqueeze(1) * torch.eye(D)
- 
+
         # make to (B, 2D + 1, D) shape;
         diags = torch.cat((diags, torch.zeros((B, 1, D)), -diags), 1)
- 
+
         # return (B, 2D + 1, D) shape;
         return mus.unsqueeze(1) + offset * diags
 
@@ -58,7 +58,7 @@ class GaussDist(GaussInputDist):
     def log_prob_UT_trick(self):
         f_in = self.get_UT_trick_input().permute((1, 0, 2))
         return self.log_prob(f_in).mean(0)  # (B, D)
-    
+
     def entropy(self):
         return self.diag_gauss.entropy()
 
@@ -72,33 +72,33 @@ class TwoStageGaussDist(GaussInputDist):
     def log_prob(self, a1, a2):
         diag_gauss2 = self._get_a2_dist(a1)
         return self.diag_gauss.log_prob(a1) + diag_gauss2.log_prob(a2)
-    
+
     def sample(self):
         a1 = self.diag_gauss.sample()
         diag_gauss2 = self._get_a2_dist(a1)
         return a1.squeeze(), diag_gauss2.sample().squeeze()
-    
+
     def rsample(self):
         a1 = self.diag_gauss.rsample()
         diag_gauss2 = self._get_a2_dist(a1)
         return a1.squeeze(), diag_gauss2.rsample().squeeze()
-    
+
     def _get_a2_dist(self, a1):
         mus, sigmas = self.net(torch.cat((self.obs, a1), -1))
         return dists.Normal(mus, sigmas)
-    
+
     def _get_a2_dist_from_obs_a1(self, obs_a1):
         mus, sigmas = self.net(obs_a1)
         return dists.Normal(mus, sigmas)
-    
+
     def entropy(self):
         """
         Need to calculate:
             H[p(a1|s)] + E[H[p(a2|s, a1)]]_p(a1|s)
         Since p(a2|s, a1) = N(a2| mu(s, a1), sigma(s, a1)),
-        Calculating H[p(a2|s, a1)] is a function of a1 and is 
-        easy to calculate as Gaussian entropy. However, Calculating 
-        expectation of H[p(a2|s, a1)] wrt p(a1|s) is intractable 
+        Calculating H[p(a2|s, a1)] is a function of a1 and is
+        easy to calculate as Gaussian entropy. However, Calculating
+        expectation of H[p(a2|s, a1)] wrt p(a1|s) is intractable
         and would require some numerical trick - e.g., UT.
         """
         h1 = self.diag_gauss.entropy()
@@ -107,16 +107,17 @@ class TwoStageGaussDist(GaussInputDist):
         f = lambda x: self._get_a2_dist_from_obs_a1(x).entropy()
         h2_UT = batch_UT_trick_from_samples(f, self.obs, samples)
         return h1 + h2_UT
-    
+
     def log_prob_UT_trick(self):
-        raise NotImplementedError('(2D + 1) ^ 2 samples needed' 
-                                  ' -> too much compute')
-    
+        raise NotImplementedError(
+            "(2D + 1) ^ 2 samples needed" " -> too much compute"
+        )
+
     @property
     def mean(self):
         mus1 = self.diag_gauss.mean
         mus2, _ = self.net(torch.cat((self.obs, mus1), -1))
-        return mus1, mus2
+        return mus1.squeeze(), mus2.squeeze()
 
 
 class TanhGauss(GaussInputDist):
