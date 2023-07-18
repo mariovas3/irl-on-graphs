@@ -17,7 +17,7 @@ from torch_geometric.nn import global_mean_pool
 
 from graph_irl.policy import *
 from graph_irl.distributions import batch_UT_trick_from_samples
-from graph_irl.buffer_v2 import Buffer, sample_eval_path
+from graph_irl.buffer_v2 import *
 from graph_irl.vis_utils import *
 
 from typing import Iterable
@@ -436,9 +436,14 @@ def train_sac_one_epoch(
 
         # sample paths with delta func policy;
         if eval_path_returns is not None and eval_path_lens is not None:
-            observations, actions, rewards, code = sample_eval_path(
-                num_eval_steps_to_sample, env, agent, seed=buffer.seed - 1
-            )
+            if for_graph:
+                observations, actions, rewards, code = sample_eval_path_graph(
+                    num_eval_steps_to_sample, env, agent, seed=buffer.seed - 1
+                )              
+            else:  
+                observations, actions, rewards, code = sample_eval_path(
+                    num_eval_steps_to_sample, env, agent, seed=buffer.seed - 1
+                )
             eval_path_returns.append(np.sum(rewards))
             eval_path_lens.append(len(actions))
 
@@ -535,32 +540,48 @@ def train_sac(
     UT_trick=False,
     with_entropy=False,
     for_graph=False,
+    qfunc1_encoder=None,
+    qfunc2_encoder=None,
+    qfunc1t_encoder=None,
+    qfunc2t_encoder=None,
+    buffer_instance=None,
     **agent_policy_kwargs,
 ):
     # instantiate necessary objects;
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
-    obs_dim = env.observation_space.shape[0]
-    action_dim = env.action_space.shape[0]
-    obs_action_dim = obs_dim + action_dim
+    if for_graph:
+        obs_dim = qfunc1_encoder.hiddens[-1]
+        action_dim = obs_dim
+        obs_action_dim = obs_dim * 3
+    else:
+        obs_dim = env.observation_space.shape[0]
+        action_dim = env.action_space.shape[0]
+        obs_action_dim = obs_dim + action_dim
+    if for_graph:
+        assert qfunc1_encoder is not None and qfunc2_encoder is not None
 
     # init 2 q nets;
     Q1 = Qfunc(
-        obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm
+        obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm, 
+        encoder=qfunc1_encoder,
     )
     Q2 = Qfunc(
-        obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm
+        obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm,
+        encoder=qfunc2_encoder,
     )
     optimQ1 = torch.optim.Adam(Q1.parameters(), lr=qfunc_lr)
     optimQ2 = torch.optim.Adam(Q2.parameters(), lr=qfunc_lr)
 
     # init 2 target qnets with same parameters as q1 and q2;
     Q1t = Qfunc(
-        obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm
+        obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm,
+        encoder=qfunc1t_encoder
     )
     Q2t = Qfunc(
-        obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm
+        obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm,
+        encoder=qfunc2t_encoder
     )
     load_params_in_net(Q1t, Q1.parameters())
     load_params_in_net(Q2t, Q2.parameters())
@@ -584,7 +605,10 @@ def train_sac(
 
     # init replay buffer;
     qfunc1_losses, qfunc2_losses = [], []
-    buffer = Buffer(buffer_len, obs_dim, action_dim, seed=seed)
+    if buffer_instance is not None:
+        buffer = buffer_instance
+    else:
+        buffer = Buffer(buffer_len, obs_dim, action_dim, seed=seed)
 
     # see if presampling needed.
     if min_steps_to_presample > 0:

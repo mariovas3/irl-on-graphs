@@ -12,6 +12,7 @@ from scipy.spatial import KDTree
 import torch
 from typing import Callable
 from torch_geometric.data import Data
+from collections import namedtuple
 
 
 class GraphEnv:
@@ -23,6 +24,7 @@ class GraphEnv:
         num_expert_steps: int,
         max_repeats: int,
         drop_repeats_or_self_loops: bool = False,
+        id: str=None,
     ):
         """
         Args:
@@ -40,6 +42,8 @@ class GraphEnv:
                 be given in the info['self_loop']
                 or info['is_repeated'].
         """
+        self.spec = namedtuple("spec", "id")
+        self.spec.id = id if id is not None else "GraphEnv"
         self.x = x
         self.max_episode_steps = max_episode_steps
         self.num_expert_steps = num_expert_steps
@@ -64,6 +68,7 @@ class GraphEnv:
         Also the seed parameter is given for compatibility but is not
         used.
         """
+        self.reward_fn.reset()
         data = Data(
             x=self.x, edge_index=torch.tensor([[], []], dtype=torch.long)
         )
