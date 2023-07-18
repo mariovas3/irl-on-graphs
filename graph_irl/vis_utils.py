@@ -43,7 +43,7 @@ def save_metric_plots(agent_name, env_name, metric_names, metrics, path, seed):
         ax = plt.gca()
         ax.plot(metric)
         ylow, yhigh = np.min(metric), np.max(metric)
-        yoffset = (yhigh - ylow) // 10
+        yoffset = max((yhigh - ylow) / 10, .1)
         xlow, xhigh = 0, len(metric) + 5
         ax.set_ylim(ylow, yhigh)
         ax.set_ylabel(metric_name)
