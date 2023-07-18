@@ -222,16 +222,31 @@ class Qfunc(nn.Module):
 
         # Q-func maps to scalar;
         self.net.append(nn.Linear(hiddens[-1], 1))
+    
+    def _get_action_vector_from_idx(self, 
+                                    node_embeds, 
+                                    action_idxs,
+                                    batch_idxs):
+        n_nodes = node_embeds.shape[0] // len(torch.unique(batch_idxs))
+        action_idxs = action_idxs + torch.arange(len(action_idxs)).view(-1, 1) * n_nodes
+        # return shape is (B, 2 * node_embed_dim)
+        return node_embeds[action_idxs.view(-1)].view(-1, 2 * node_embeds.shape[-1])
 
-    def forward(self, obs_action):
+    def forward(self, obs_action, action_is_index=False):
         """
-        if self.encoder is not None, then obs_action is (batch, action).
+        If self.encoder is not None, then obs_action is (batch, actions).
+
+        If action_is_index is True, then the actions 
+            are a tensor of shape (B, 2) saying which nodes to connect.
         """
         if self.encoder is not None:
             batch, actions = obs_action
-            n_nodes = len(torch.unique(batch.batch))
-            action_idxs = actions + torch.arange(len(actions)).view(-1, 1) * n_nodes
-            obs, node_embeds = self.encoder(obs_action[0])
-            actions = node_embeds[action_idxs.view(-1)].view(-1, 2 * node_embeds.shape[-1])
+            obs, node_embeds = self.encoder(batch)
+            if action_is_index:
+                actions = self._get_action_vector_from_idx(
+                    node_embeds, actions, batch.batch
+                )
+            else:
+                actions = torch.cat(actions, -1)
             obs_action = torch.cat((obs, actions), -1)
         return self.net(obs_action)

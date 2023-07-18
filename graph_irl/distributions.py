@@ -52,16 +52,16 @@ class GaussDist(GaussInputDist):
 
     def sample(self):
         a = self.diag_gauss.sample()
-        mid = len(a) // 2
+        mid = a.shape[-1] // 2
         if self.two_action_vectors:
-            return a[:mid], a[mid:]
+            return a[:, :mid].squeeze(), a[:, mid:].squeeze()
         return a
 
     def rsample(self):
         a = self.diag_gauss.rsample()
-        mid = len(a) // 2
+        mid = a.shape[-1] // 2
         if self.two_action_vectors:
-            return a[:mid], a[mid:]
+            return a[:, :mid].squeeze(), a[:, mid:].squeeze()
         return a
 
     def log_prob_UT_trick(self):
@@ -115,6 +115,7 @@ class TwoStageGaussDist(GaussInputDist):
         samples = super().get_UT_trick_input()
         f = lambda x: self._get_a2_dist_from_obs_a1(x).entropy()
         h2_UT = batch_UT_trick_from_samples(f, self.obs, samples)
+        # returns (B, D) shape;
         return h1 + h2_UT
 
     def log_prob_UT_trick(self):
