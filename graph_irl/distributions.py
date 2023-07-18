@@ -47,20 +47,39 @@ class GaussDist(GaussInputDist):
         super(GaussDist, self).__init__(diag_gauss)
         self.two_action_vectors = two_action_vectors
 
-    def log_prob(self, x):
-        return self.diag_gauss.log_prob(x)
+    def log_prob(self, *x):
+        if self.two_action_vectors:
+            x = torch.cat(x, -1)
+            return self.diag_gauss.log_prob(x)
+        return self.diag_gauss.log_prob(*x)
+    
+    @property
+    def mean(self):
+        mus = super().mean
+        if self.two_action_vectors:
+            mid = mus.shape[-1] // 2
+            return mus[:, :mid].squeeze(), mus[:, mid:].squeeze()
+        return mus
+    
+    @property
+    def stddev(self):
+        sigmas = super().stddev
+        if self.two_action_vectors:
+            mid = sigmas.shape[-1] // 2
+            return sigmas[:, :mid].squeeze(), sigmas[:, mid:].squeeze()
+        return sigmas
 
     def sample(self):
         a = self.diag_gauss.sample()
-        mid = a.shape[-1] // 2
         if self.two_action_vectors:
+            mid = a.shape[-1] // 2
             return a[:, :mid].squeeze(), a[:, mid:].squeeze()
         return a
 
     def rsample(self):
         a = self.diag_gauss.rsample()
-        mid = a.shape[-1] // 2
         if self.two_action_vectors:
+            mid = a.shape[-1] // 2
             return a[:, :mid].squeeze(), a[:, mid:].squeeze()
         return a
 
