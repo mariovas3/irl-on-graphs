@@ -7,7 +7,7 @@ sys.path.append(str(p))
 from graph_irl.graph_rl_utils import GraphEnv
 from graph_irl.policy import *
 from graph_irl.buffer_v2 import GraphBuffer, sample_eval_path_graph
-from graph_irl.sac import SACAgentGraph, get_q_losses
+from graph_irl.sac import *
 
 import random
 import numpy as np
@@ -24,13 +24,20 @@ if __name__ == "__main__":
     encoder_hiddens = [20, 20]
     encoder = GCN(x.shape[-1], encoder_hiddens, with_layer_norm=True)
 
+    # define reward fn
+    def reward_fn(data, first, second):
+        diff = abs(first - second)
+        if diff != 1:
+            return -100
+        return 1
+
     # env setup:
     max_episode_steps = 80
     num_expert_steps = 16
     max_repeats = 50
     env = GraphEnv(
         x,
-        lambda data: data.x.mean(),
+        reward_fn,
         max_episode_steps,
         num_expert_steps,
         max_repeats,
@@ -79,16 +86,25 @@ if __name__ == "__main__":
         print(graph)
     print(buffer.terminal_tp1[:17])
 
+    # collect eval path;
+    obs, actions, rewards, code = sample_eval_path_graph(100, env, agent, 0)
+    print("eval path:", len(rewards), sep='\n')
+    for g in obs:
+        print(g)
+
+    # sample batch;
     obs_t, action_t, reward_t, obs_tp1, terminated_tp1 = buffer.sample(
         batch_size
     )
 
+    # test policy loss and temperature loss
+    # and q func losses;
     encoder1 = GCN(x.shape[-1], encoder_hiddens, with_layer_norm=True)
     encoder2 = GCN(x.shape[-1], encoder_hiddens, with_layer_norm=True)
     Q1 = Qfunc(3 * encoder_hiddens[-1], [31, 31], with_layer_norm=True, encoder=encoder1)
     Q2 = Qfunc(3 * encoder_hiddens[-1], [31, 31], with_layer_norm=True, encoder=encoder2)
-    Qt1 = Qfunc(3 * encoder_hiddens[-1], [31, 31], with_layer_norm=True)
-    Qt2 = Qfunc(3 * encoder_hiddens[-1], [31, 31], with_layer_norm=True)
+    Q1t = Qfunc(3 * encoder_hiddens[-1], [31, 31], with_layer_norm=True)
+    Q2t = Qfunc(3 * encoder_hiddens[-1], [31, 31], with_layer_norm=True)
 
 
     # test policy loss and temperature loss;
@@ -98,7 +114,7 @@ if __name__ == "__main__":
     print(agent.policy_loss, agent.temperature_loss, sep='\n', end='\n\n')
     
     l1, l2 = get_q_losses(
-        Q1, Q2, Qt1, Qt2,
+        Q1, Q2, Q1t, Q2t,
         obs_t, action_t, reward_t, obs_tp1, terminated_tp1,
         agent, discount=.99, UT_trick=False, with_entropy=True, 
         for_graph=True,
