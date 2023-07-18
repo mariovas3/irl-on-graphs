@@ -1,5 +1,7 @@
 """
 TODO:
+    (1): Implement the policy and temperature loss in the SAC graph
+        agent. Currently needs the Qfunc to be implemented.
     * Implement GNN and train sac on graph task;
     * Maybe wrap the train loops for sac in a policy training
       class, to be easy to train for several iterations in the 
@@ -10,6 +12,8 @@ import random
 import numpy as np
 import torch
 from torch import nn
+
+from torch_geometric.nn import global_mean_pool
 
 from graph_irl.policy import *
 from graph_irl.distributions import batch_UT_trick_from_samples
@@ -114,6 +118,10 @@ class SACAgentGraph(SACAgentBase):
         policy_density, node_embeds = self.policy(obs_t)
 
         if UT_trick:
+            # raise NotImplementedError("UT trick not implemented for the "
+            #                           "TwoStageGauss Policy. "
+            #                           "The cost is quadratic in "
+            #                           "action dimension.")
             if with_entropy:
                 log_pi_integral = policy_density.entropy().sum(-1)
             else:
@@ -140,15 +148,15 @@ class SACAgentGraph(SACAgentBase):
             ).mean()
         else:
             # do reparam trick;
-            repr_trick = policy_density.rsample()
+            repr_trick1, repr_trick2 = policy_density.rsample()
 
             # get log prob for policy optimisation;
             if with_entropy:
                 log_prob = policy_density.entropy().sum(-1)
             else:
-                log_prob = policy_density.log_prob(repr_trick).sum(-1)
+                log_prob = policy_density.log_prob(repr_trick1, repr_trick2).sum(-1)
 
-            qfunc_in = (obs_t, repr_trick)
+            qfunc_in = (obs_t, (repr_trick1, repr_trick2))
             q_est = torch.min(qfunc1(qfunc_in), qfunc2(qfunc_in)).view(-1)
 
             # get loss for policy;
@@ -308,8 +316,10 @@ def get_q_losses(
     else:
         obs_action_t = torch.cat((obs_t, action_t), -1)
         policy_density = agent.policy(obs_tp1)
-    q1_est = qfunc1(obs_action_t).view(-1)
-    q2_est = qfunc2(obs_action_t).view(-1)
+    # the action_is_index boolean will only be considered
+    # if self.encoder is not None;
+    q1_est = qfunc1(obs_action_t, action_is_index=True).view(-1)
+    q2_est = qfunc2(obs_action_t, action_is_index=True).view(-1)
 
     if UT_trick:
         # get (B, 2 * action_dim + 1, action_dim) samples;
@@ -343,16 +353,20 @@ def get_q_losses(
         if with_entropy:
             log_probs = policy_density.entropy().sum(-1).view(-1)
         else:
-            log_probs = policy_density.log_prob(action_tp1).sum(-1).view(-1)
+            if for_graph:
+                log_probs = policy_density.log_prob(*action_tp1).sum(-1).view(-1)
+            else:
+                log_probs = policy_density.log_prob(action_tp1).sum(-1).view(-1)
 
         # input for target nets;
         if for_graph:
-            obs_action_tp1 = (obs_tp1, action_tp1)
+            obs_tp1 = global_mean_pool(node_embeds, obs_tp1.batch)
+            obs_action_tp1 = torch.cat((obs_tp1,) + action_tp1, -1)
+            qt1_est, qt2_est = qt1.net(obs_action_tp1), qt2.net(obs_action_tp1)
         else:
             obs_action_tp1 = torch.cat((obs_tp1, action_tp1), -1)
-
-        # estimate values with target nets;
-        qt1_est, qt2_est = qt1(obs_action_tp1), qt2(obs_action_tp1)
+            # estimate values with target nets;
+            qt1_est, qt2_est = qt1(obs_action_tp1), qt2(obs_action_tp1)
 
     # use the values from the target net that
     # had lower value predictions;
@@ -360,8 +374,7 @@ def get_q_losses(
         torch.min(qt1_est, qt2_est).view(-1)
         - agent.log_temperature.exp() * log_probs
     )
-    # print(q_target.dtype)
-    # print(reward_t.dtype, (1-terminated_tp1.int()).dtype, (discount * q_target).dtype)
+    
     q_target = (
         reward_t + (1 - terminated_tp1.int()) * discount * q_target
     ).detach()
