@@ -156,8 +156,9 @@ class SACAgentGraph(SACAgentBase):
             else:
                 log_prob = policy_density.log_prob(repr_trick1, repr_trick2).sum(-1)
 
-            qfunc_in = (obs_t, (repr_trick1, repr_trick2))
-            q_est = torch.min(qfunc1(qfunc_in), qfunc2(qfunc_in)).view(-1)
+            obs_t = global_mean_pool(node_embeds, obs_t.batch)
+            qfunc_in = torch.cat((obs_t, repr_trick1, repr_trick2), -1)
+            q_est = torch.min(qfunc1.net(qfunc_in), qfunc2.net(qfunc_in)).view(-1)
 
             # get loss for policy;
             self.policy_loss = (
