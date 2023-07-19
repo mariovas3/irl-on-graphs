@@ -495,7 +495,8 @@ def train_sac_one_epoch(
 
 
 def save_metrics(
-    save_returns_to, metric_names, metrics, agent_name, env_name, seed
+    save_returns_to, metric_names, metrics, agent_name, env_name, seed, 
+    config=None,
 ):
     now = time.time()
     new_dir = agent_name + f"-{env_name}-seed-{seed}-{now}"
@@ -507,6 +508,10 @@ def save_metrics(
         file_name = save_returns_to / file_name
         with open(file_name, "wb") as f:
             pickle.dump(metric, f)
+    if config is not None:
+        file_name = save_returns_to / 'config.pkl'
+        with open(file_name, 'wb') as f:
+            pickle.dump(config, f)
 
     # save plots of the metrics;
     save_metric_plots(
@@ -545,6 +550,7 @@ def train_sac(
     qfunc1t_encoder=None,
     qfunc2t_encoder=None,
     buffer_instance=None,
+    config=None,
     **agent_policy_kwargs,
 ):
     # instantiate necessary objects;
@@ -685,6 +691,7 @@ def train_sac(
             agent.name,
             env.spec.id,
             seed,
+            config,
         )
 
     # return the q funcs and the agent;
