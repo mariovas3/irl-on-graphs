@@ -113,6 +113,7 @@ class SACAgentGraph(SACAgentBase):
         # and reparam trick action and choose min for policy loss;
         qfunc1.requires_grad_(False)
         qfunc2.requires_grad_(False)
+        self.policy.train()
 
         # get policy;
         policy_density, node_embeds = self.policy(obs_t)
@@ -123,7 +124,7 @@ class SACAgentGraph(SACAgentBase):
             #                           "The cost is quadratic in "
             #                           "action dimension.")
             if with_entropy:
-                log_pi_integral = policy_density.entropy().sum(-1)
+                log_pi_integral =  - policy_density.entropy().sum(-1)
             else:
                 log_pi_integral = policy_density.log_prob_UT_trick().sum(-1)
             UT_trick_samples = policy_density.get_UT_trick_input()
@@ -152,11 +153,11 @@ class SACAgentGraph(SACAgentBase):
 
             # get log prob for policy optimisation;
             if with_entropy:
-                log_prob = policy_density.entropy().sum(-1)
+                log_prob = - policy_density.entropy().sum(-1)
             else:
                 log_prob = policy_density.log_prob(repr_trick1, repr_trick2).sum(-1)
 
-            obs_t = global_mean_pool(node_embeds, obs_t.batch)
+            obs_t = global_mean_pool(node_embeds, obs_t.batch).detach()  # pretend this was input with no grad tracking;
             qfunc_in = torch.cat((obs_t, repr_trick1, repr_trick2), -1)
             q_est = torch.min(qfunc1.net(qfunc_in), qfunc2.net(qfunc_in)).view(-1)
 
@@ -211,13 +212,14 @@ class SACAgentMuJoCo(SACAgentBase):
         # and reparam trick action and choose min for policy loss;
         qfunc1.requires_grad_(False)
         qfunc2.requires_grad_(False)
+        self.policy.train()
 
         # get policy;
         policy_density = self.policy(obs_t)
 
         if UT_trick:
             if with_entropy:
-                log_pi_integral = policy_density.entropy().sum(-1)
+                log_pi_integral = - policy_density.entropy().sum(-1)
             else:
                 log_pi_integral = policy_density.log_prob_UT_trick().sum(-1)
             UT_trick_samples = policy_density.get_UT_trick_input()
@@ -246,7 +248,7 @@ class SACAgentMuJoCo(SACAgentBase):
 
             # get log prob for policy optimisation;
             if with_entropy:
-                log_prob = policy_density.entropy().sum(-1)
+                log_prob = - policy_density.entropy().sum(-1)
             else:
                 log_prob = policy_density.log_prob(repr_trick).sum(-1)
 
@@ -314,6 +316,7 @@ def get_q_losses(
     if for_graph:
         obs_action_t = (obs_t, action_t)
         policy_density, node_embeds = agent.policy(obs_tp1)
+        node_embeds = node_embeds.detach()  # use embeds only as inputs;
     else:
         obs_action_t = torch.cat((obs_t, action_t), -1)
         policy_density = agent.policy(obs_tp1)
@@ -343,7 +346,7 @@ def get_q_losses(
             )
         # get negative entropy by using the UT trick;
         if with_entropy:
-            log_probs = policy_density.entropy().sum(-1)
+            log_probs = - policy_density.entropy().sum(-1)
         else:
             log_probs = policy_density.log_prob_UT_trick().sum(-1)
     else:
@@ -352,7 +355,7 @@ def get_q_losses(
 
         # get log probs;
         if with_entropy:
-            log_probs = policy_density.entropy().sum(-1).view(-1)
+            log_probs = - policy_density.entropy().sum(-1).view(-1)
         else:
             if for_graph:
                 log_probs = policy_density.log_prob(*action_tp1).sum(-1).view(-1)
