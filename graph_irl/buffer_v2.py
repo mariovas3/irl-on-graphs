@@ -216,9 +216,11 @@ class Buffer(BufferBase):
             t += 1
 
 
-def sample_eval_path_graph(T, env, agent, seed):
+def sample_eval_path_graph(T, env, agent, seed, verbose=False):
     observations, actions, rewards = [], [], []
     obs, info = env.reset(seed=seed)
+    if verbose:
+        env.reward_fn.verbose()
     observations.append(obs)
     for _ in range(T):
         (mus1, mus2), node_embeds = agent.sample_deterministic(obs)
