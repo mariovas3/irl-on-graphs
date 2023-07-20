@@ -19,12 +19,14 @@ if not TEST_OUTPUTS_PATH.exists():
 
 
 class GCN(nn.Module):
-    def __init__(self, in_dim, hiddens, with_layer_norm=False):
+    def __init__(self, in_dim, hiddens, with_layer_norm=False, 
+                 final_tanh=False):
         super(GCN, self).__init__()
         self.net = nn.ModuleList()
         hiddens = [in_dim] + hiddens
         self.hiddens = hiddens
         self.with_layer_norm = with_layer_norm
+        self.final_tanh = final_tanh
         for i in range(len(hiddens) - 1):
             self.net.add_module(
                 f"GCNCov{i+1}", GCNConv(hiddens[i], hiddens[i + 1])
@@ -36,6 +38,8 @@ class GCN(nn.Module):
             x = torch.relu(f(x, edge_index))
             if self.with_layer_norm:
                 x = torch.layer_norm(x, (self.hiddens[i + 1],))
+                if self.final_tanh:
+                    x = torch.tanh(x)
         return global_mean_pool(x, batch.batch), x
 
 
