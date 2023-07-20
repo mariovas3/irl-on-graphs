@@ -25,22 +25,29 @@ if __name__ == "__main__":
     encoder = GCN(x.shape[-1], encoder_hiddens, with_layer_norm=True)
 
     # define reward fn
-    def reward_fn(data, first, second):
-        diff = abs(first - second)
-        if diff != 1:
-            return -100
-        return 1
+    class Reward:
+        def reset(self):
+            pass
 
+        def __call__(self, data, first, second):
+            diff = abs(first - second)
+            if diff != 1:
+                return -100
+            return 1
+
+    reward_fn = Reward()
     # env setup:
     max_episode_steps = 80
     num_expert_steps = 16
     max_repeats = 50
+    max_self_loops = 50
     env = GraphEnv(
         x,
         reward_fn,
         max_episode_steps,
         num_expert_steps,
         max_repeats,
+        max_self_loops,
         drop_repeats_or_self_loops=False,
     )
 
