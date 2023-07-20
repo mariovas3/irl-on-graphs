@@ -85,6 +85,7 @@ class GraphBuffer(BufferBase):
             num_steps_to_collect: Number of (obs, action, reward, next_obs, terminated)
                 tuples to be added to the buffer.
         """
+        agent.policy.eval()
         num_steps_to_collect = min(num_steps_to_collect, self.max_size)
         t = 0
         obs_t, info = env.reset(seed=self.seed)
@@ -177,6 +178,7 @@ class Buffer(BufferBase):
             num_steps_to_collect: Number of (obs, action, reward, next_obs, terminated)
                 tuples to be added to the buffer.
         """
+        agent.policy.eval()
         num_steps_to_collect = min(num_steps_to_collect, self.max_size)
         t = 0
         obs_t, info = env.reset(seed=self.seed)
@@ -219,6 +221,7 @@ class Buffer(BufferBase):
 def sample_eval_path_graph(T, env, agent, seed, verbose=False):
     observations, actions, rewards = [], [], []
     obs, info = env.reset(seed=seed)
+    agent.policy.eval()
     if verbose:
         env.reward_fn.verbose()
     observations.append(obs)
@@ -242,6 +245,7 @@ def sample_eval_path_graph(T, env, agent, seed, verbose=False):
 
 
 def sample_eval_path(T, env, agent, seed):
+    agent.policy.eval()
     observations, actions, rewards = [], [], []
     obs, info = env.reset(seed=seed)
     observations.append(obs)
