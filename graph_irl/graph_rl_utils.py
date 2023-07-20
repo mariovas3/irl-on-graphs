@@ -23,8 +23,10 @@ class GraphEnv:
         max_episode_steps: int,
         num_expert_steps: int,
         max_repeats: int,
+        max_self_loops: int,
         drop_repeats_or_self_loops: bool = False,
         id: str=None,
+        reward_fn_termination: bool=False,
     ):
         """
         Args:
@@ -49,6 +51,8 @@ class GraphEnv:
         self.num_expert_steps = num_expert_steps
         self.drop_repeats_or_self_loops = drop_repeats_or_self_loops
         self.max_repeats = max_repeats
+        self.max_self_loops = max_self_loops
+        self.reward_fn_termination = reward_fn_termination
         # reward fn should have its own GNN encoder;
         # due to deterministic transitions, make reward
         # state dependent only, since S x A -> S deterministically.
@@ -59,6 +63,7 @@ class GraphEnv:
         self.unique_edges = set()
         self.steps_done = 0
         self.repeats_done = 0
+        self.self_loops_done = 0
         self.terminated, self.truncated = False, False
         self.num_self_loops = 0
 
@@ -76,14 +81,22 @@ class GraphEnv:
         self.unique_edges = set()
         self.steps_done = 0
         self.repeats_done = 0
+        self.self_loops_done = 0
         self.terminated, self.truncated = False, False
         self.num_self_loops = 0
         return data, None
+    
+    def _get_edge_hash(self, first, second):
+        if first > second:
+            return second, first
+        return first, second
 
     def _update_info_terminals(self, info):
         self.terminated = (
-            self.steps_done >= self.num_expert_steps
+            len(self.unique_edges) >= self.num_expert_steps
             or self.repeats_done >= self.max_repeats
+            or self.self_loops_done >= self.max_self_loops
+            or (self.reward_fn_termination and self.reward_fn.should_terminate)
         )
         self.truncated = self.steps_done >= self.max_episode_steps
 
@@ -92,13 +105,14 @@ class GraphEnv:
             self.steps_done >= self.num_expert_steps
         )
         info["max_repeats_reached"] = self.repeats_done >= self.max_repeats
+        info['max_self_loops_reached'] = self.self_loops_done >= self.max_self_loops
         info["truncated"] = self.truncated
         info["episode_truncation_length_reached"] = (
             self.steps_done >= self.max_episode_steps
         )
         info["steps_done"] = self.steps_done
         info["repeats_done"] = self.repeats_done
-        info["num_self_loops"] = self.num_self_loops
+        info['self_loops_done'] = self.self_loops_done
 
     def step(self, action):
         """Returns (observation, terminated, truncated, None)."""
@@ -108,13 +122,14 @@ class GraphEnv:
             "terminated": False,
             "expert_episode_length_reached": False,
             "max_repeats_reached": False,
+            "max_self_loops_reached": False,
             "truncated": False,
             "episode_truncation_length_reached": False,
             "self_loop": False,
             "is_repeat": False,
             "steps_done": self.steps_done,
             "repeats_done": self.repeats_done,
-            "num_self_loops": self.num_self_loops,
+            "self_loops_done": self.self_loops_done,
             "first": None,
             "second": None,
         }
@@ -143,24 +158,26 @@ class GraphEnv:
         info["first"] = first
         info["second"] = second
 
+        # calculate reward;
+        reward = self.reward_fn(data, first, second)
+
+        # if self loop;
         if first == second:
-            self.num_self_loops += 1
+            self.self_loops_done += 1
             info["self_loop"] = True
             if self.drop_repeats_or_self_loops:
                 self.steps_done -= 1
             self._update_info_terminals(info)
             return (
                 data,
-                self.reward_fn(data, first, second),
+                reward,
                 self.terminated,
                 self.truncated,
                 info,
             )
 
-        if (first, second) in self.unique_edges or (
-            second,
-            first,
-        ) in self.unique_edges:
+        # if repeated edge;
+        if self._get_edge_hash(first, second) in self.unique_edges:
             self.repeats_done += 1
             info["is_repeat"] = True
             if self.drop_repeats_or_self_loops:
@@ -168,7 +185,7 @@ class GraphEnv:
             self._update_info_terminals(info)
             return (
                 data,
-                self.reward_fn(data, first, second),
+                reward,
                 self.terminated,
                 self.truncated,
                 info,
@@ -187,16 +204,15 @@ class GraphEnv:
             self.edge_index = data.edge_index
 
             # add edge to set of edges;
-            self.unique_edges.add((first, second))
-            self.unique_edges.add((second, first))
-
+            self.unique_edges.add(self._get_edge_hash(first, second))
+        
         # update info;
         self._update_info_terminals(info)
 
         # reward fn should have its own encoder GNN;
         return (
             data,
-            self.reward_fn(data, first, second),
+            reward,
             self.terminated,
             self.truncated,
             info,
