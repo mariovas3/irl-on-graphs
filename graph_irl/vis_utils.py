@@ -5,6 +5,11 @@ from math import sqrt
 import time
 import torch
 import pickle
+import networkx as nx
+from pathlib import Path
+
+TESTS_DIR_PATH = Path(__file__).absolute().parent.parent / 'tests'
+print(TESTS_DIR_PATH)
 
 
 def see_one_episode(env, agent, seed, save_to):
@@ -32,13 +37,41 @@ def see_one_episode(env, agent, seed, save_to):
     pygame.display.quit()
 
 
+def vis_graph_building(edge_index):
+    edges = []
+    unique_edges = set()
+    for first, second in zip(*edge_index):
+        if first > second:
+            first, second = second, first
+        if (first, second) in unique_edges:
+            continue
+        edges.append((first, second))
+        unique_edges.add((first, second))
+        
+    fig = plt.figure(figsize=(12, 8))
+    G = nx.Graph()
+    # G.add_nodes_from(range(n_nodes))
+    steps = len(edges)
+    rows = int(sqrt(steps))
+    cols = int(steps / rows) + (1 if steps % rows else 0)
+    for i in range(steps):
+        plt.subplot(rows, cols, i+1)
+        G.add_node(edges[i][0])
+        G.add_node(edges[i][1])
+        G.add_edge(*edges[i])
+        nx.draw_networkx(G)
+    fig.tight_layout()
+    file_name = TESTS_DIR_PATH / f'last_episode_{len(edges)}_edges.png'
+    plt.savefig(file_name)
+
+
 def save_metric_plots(agent_name, env_name, metric_names, metrics, path, seed):
     file_name = agent_name + f"-{env_name}-metric-plots-seed-{seed}.png"
     file_name = path / file_name
     rows = int(sqrt(len(metrics)))
     cols = int(len(metrics) / rows) + (1 if len(metrics) % rows else 0)
     fig = plt.figure(figsize=(12, 8))
-    for i, (metric_name, metric) in enumerate(zip(metric_names, metrics)):
+    for i, (metric_name, metric) in enumerate(sorted(zip(metric_names, metrics), key=lambda x: x[0])):
         plt.subplot(rows, cols, i + 1)
         ax = plt.gca()
         ax.plot(metric)
@@ -54,6 +87,7 @@ def save_metric_plots(agent_name, env_name, metric_names, metrics, path, seed):
         ax.set_xticklabels(ax.get_xticks(), rotation=90)
     fig.tight_layout()
     plt.savefig(file_name)
+    plt.close()
 
 
 def visualise_episode(env, agent, seed, T=None):
