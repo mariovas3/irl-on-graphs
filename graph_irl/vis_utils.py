@@ -83,7 +83,7 @@ def save_metric_plots(agent_name, env_name, metric_names, metrics, path, seed):
         ax.set_yticks(np.arange(ylow-1.5 * yoffset, 
                                 yhigh+1.5 * yoffset, 
                                 yoffset))
-        ax.set_xticks(np.arange(xlow, xhigh, (xhigh - xlow) // 10))
+        ax.set_xticks(np.arange(xlow, xhigh, (xhigh - xlow) / 10))
         ax.set_xticklabels(ax.get_xticks(), rotation=90)
     fig.tight_layout()
     plt.savefig(file_name)
