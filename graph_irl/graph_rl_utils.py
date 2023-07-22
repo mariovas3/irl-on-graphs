@@ -44,10 +44,10 @@ class GraphEnv:
                 be given in the info['self_loop']
                 or info['is_repeated'].
         """
-        self.spec = namedtuple("spec", "id")
+        self.spec = namedtuple("spec", "id max_episode_steps")
         self.spec.id = id if id is not None else "GraphEnv"
         self.x = x
-        self.max_episode_steps = max_episode_steps
+        self.spec.max_episode_steps = max_episode_steps
         self.num_expert_steps = num_expert_steps
         self.drop_repeats_or_self_loops = drop_repeats_or_self_loops
         self.max_repeats = max_repeats
@@ -98,7 +98,7 @@ class GraphEnv:
             or self.self_loops_done >= self.max_self_loops
             or (self.reward_fn_termination and self.reward_fn.should_terminate)
         )
-        self.truncated = self.steps_done >= self.max_episode_steps
+        self.truncated = self.steps_done >= self.spec.max_episode_steps
 
         info["terminated"] = self.terminated
         info["expert_episode_length_reached"] = (
@@ -108,7 +108,7 @@ class GraphEnv:
         info['max_self_loops_reached'] = self.self_loops_done >= self.max_self_loops
         info["truncated"] = self.truncated
         info["episode_truncation_length_reached"] = (
-            self.steps_done >= self.max_episode_steps
+            self.steps_done >= self.spec.max_episode_steps
         )
         info["steps_done"] = self.steps_done
         info["repeats_done"] = self.repeats_done
