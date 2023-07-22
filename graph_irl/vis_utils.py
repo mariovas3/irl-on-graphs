@@ -37,7 +37,7 @@ def see_one_episode(env, agent, seed, save_to):
     pygame.display.quit()
 
 
-def vis_graph_building(edge_index):
+def vis_graph_building(edge_index, save_to):
     edges = []
     unique_edges = set()
     for first, second in zip(*edge_index):
@@ -48,9 +48,9 @@ def vis_graph_building(edge_index):
         edges.append((first, second))
         unique_edges.add((first, second))
         
-    fig = plt.figure(figsize=(12, 8))
     G = nx.Graph()
-    # G.add_nodes_from(range(n_nodes))
+    fig = plt.figure(figsize=(12, 8))
+
     steps = len(edges)
     rows = int(sqrt(steps))
     cols = int(steps / rows) + (1 if steps % rows else 0)
@@ -61,12 +61,13 @@ def vis_graph_building(edge_index):
         G.add_edge(*edges[i])
         nx.draw_networkx(G)
     fig.tight_layout()
-    file_name = TESTS_DIR_PATH / f'last_episode_{len(edges)}_edges.png'
+    file_name = save_to / f'last_episode_{len(edges)}_edges.png'
     plt.savefig(file_name)
+    plt.close()
 
 
-def save_metric_plots(agent_name, env_name, metric_names, metrics, path, seed):
-    file_name = agent_name + f"-{env_name}-metric-plots-seed-{seed}.png"
+def save_metric_plots(metric_names, metrics, path, seed):
+    file_name = f"metric-plots-seed-{seed}.png"
     file_name = path / file_name
     rows = int(sqrt(len(metrics)))
     cols = int(len(metrics) / rows) + (1 if len(metrics) % rows else 0)
