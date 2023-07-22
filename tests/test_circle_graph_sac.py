@@ -51,6 +51,7 @@ class CircleGraphReward:
         self.should_terminate = False
         self.sum_degrees = 0
         self._verbose = False
+        self.component_reduction_bonus = 2.
         # self.nx_graph = Graph()
 
     def _dfs(self, i, visited):
@@ -117,6 +118,8 @@ class CircleGraphReward:
         first_reward = self.edge_bonus * (2 - self.degrees[first]) ** 3 
         second_reward = self.edge_bonus * (2 - self.degrees[second]) ** 3
         component_bonus = (n_comp_old - self.n_components_last) * self.component_reduction_bonus
+        if component_bonus > 0:
+            self.component_reduction_bonus += 2.
         # if first_reward < 0:
             # first_reward *= 2
         # if second_reward < 0:
@@ -188,7 +191,7 @@ if __name__ == "__main__":
             name="SACAgentGraph",
             policy='TwoStageGaussPolicy',
             policy_lr=3e-4,
-            entropy_lb=1.,
+            entropy_lb=encoder_hiddens[-1],
             temperature_lr=3e-4,
         ),
         qfunc_kwargs=dict(
