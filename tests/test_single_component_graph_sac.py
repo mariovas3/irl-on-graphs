@@ -7,7 +7,6 @@ sys.path.append(str(p))
 from graph_irl.sac import *
 from graph_irl.graph_rl_utils import GraphEnv
 from graph_irl.buffer_v2 import GraphBuffer
-from graph_irl.vis_utils import vis_graph_building
 
 from torch_geometric.data import Data
 
@@ -120,12 +119,12 @@ if __name__ == "__main__":
     config = dict(
         buffer_kwargs=dict(
             max_size=10_000,
-            nodes='identity',
+            nodes='gaussian',
         ),
         general_kwargs=dict(
             buffer_len=10_000,
             n_nodes=n_nodes,
-            nodes='identity',
+            nodes='gaussian',
             num_steps_to_sample=5 * n_nodes,
             min_steps_to_presample=5 * n_nodes,
             batch_size=min(10 * n_nodes, 100),
@@ -141,7 +140,7 @@ if __name__ == "__main__":
             verbose=True,
         ),
         env_kwargs=dict(
-            x='identity',
+            x='gaussian',
             reward_fn='circle_reward',
             max_episode_steps=n_nodes,
             num_expert_steps=n_nodes,
@@ -197,7 +196,6 @@ if __name__ == "__main__":
                 config['env_kwargs']['max_self_loops'] = int(1e8)
     
     # create the node features;
-    nodes = torch.eye(config['general_kwargs']['n_nodes'])
     nodes = torch.randn((n_nodes, n_nodes))
 
     # instantiate buffer;
