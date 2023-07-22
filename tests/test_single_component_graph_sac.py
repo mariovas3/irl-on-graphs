@@ -138,6 +138,7 @@ if __name__ == "__main__":
             UT_trick=False,
             with_entropy=False,
             for_graph=True,
+            verbose=True,
         ),
         env_kwargs=dict(
             x='identity',
@@ -292,9 +293,6 @@ if __name__ == "__main__":
         qfunc2t_encoder=qfunc2t_encoder,
         buffer_instance=buffer,
         config=config,
+        verbose=config['general_kwargs']['verbose'],
         **agent_policy_kwargs,
     )
-
-    obs, _, rewards, code = sample_eval_path_graph(n_nodes, env, agent, seed=0, verbose=True)
-    print(code, obs[-1].edge_index.tolist(), rewards, sep='\n')
-    vis_graph_building(obs[-1].edge_index.tolist())
