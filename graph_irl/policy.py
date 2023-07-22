@@ -22,24 +22,43 @@ class GCN(nn.Module):
     def __init__(self, in_dim, hiddens, with_layer_norm=False, 
                  final_tanh=False):
         super(GCN, self).__init__()
-        self.net = nn.ModuleList()
-        hiddens = [in_dim] + hiddens
+        
+        # set attributes from constructor;
         self.hiddens = hiddens
         self.with_layer_norm = with_layer_norm
         self.final_tanh = final_tanh
-        for i in range(len(hiddens) - 1):
+
+        # init network;
+        self.net = nn.ModuleList()
+        
+        # create a dummy list for ease of creating net;
+        temp = [in_dim] + hiddens
+        
+        for i in range(len(temp)-1):
             self.net.add_module(
-                f"GCNCov{i+1}", GCNConv(hiddens[i], hiddens[i + 1])
+                f"GCNCov{i}", GCNConv(temp[i], temp[i + 1])
             )
 
     def forward(self, batch):
         x, edge_index = batch.x, batch.edge_index
         for i, f in enumerate(self.net):
-            x = torch.relu(f(x, edge_index))
-            if self.with_layer_norm:
-                x = torch.layer_norm(x, (self.hiddens[i + 1],))
+            # GNN pass;
+            x = f(x, edge_index)
+            
+            # activation follow-up;
+            if i == len(self.net) - 1:
                 if self.final_tanh:
                     x = torch.tanh(x)
+                else:
+                    x = torch.relu(x)
+            else:
+                x = torch.relu(x)
+            
+            # see if layer norm is needed;
+            if self.with_layer_norm:
+                x = torch.layer_norm(x, (self.hiddens[i],))
+        # return avg node embedding for each graph in the batch;
+        # together with node embeddings;
         return global_mean_pool(x, batch.batch), x
 
 
@@ -176,7 +195,7 @@ class TanhGaussPolicy(nn.Module):
         if two_actions:
             raise NotImplementedError(
                 "Haven't implemented "
-                "TanhGaussPolicy for for "
+                "TanhGaussPolicy for "
                 "graphs yet."
             )
         self.name = (
