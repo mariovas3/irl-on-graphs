@@ -11,9 +11,6 @@ from graph_irl.vis_utils import vis_graph_building
 
 from torch_geometric.data import Data
 
-# from networkx import Graph
-# from networkx.algorithms.components import number_connected_components as ncc
-
 import random
 import numpy as np
 import torch
@@ -25,11 +22,12 @@ torch.manual_seed(0)
 
 class CircleGraphReward:
     def __init__(self, n_nodes):
-        self.component_reduction_bonus = 2.
+        # set input attributes;
         self.n_nodes = n_nodes
-        self.edge_bonus = 5.
         
-        # self.nx_graph = Graph()
+        # initialise attributes;
+        self.edge_bonus = 5.
+        self.component_reduction_bonus = 2.
         self.degrees = np.zeros(n_nodes, dtype=np.int64)
         self.adj_list = [[] for _ in range(n_nodes)]
         self.edge_set = set()
@@ -43,6 +41,7 @@ class CircleGraphReward:
         self._verbose = True
     
     def reset(self):
+        self.component_reduction_bonus = 2.
         self.degrees = np.zeros(self.n_nodes, dtype=np.int64)
         self.adj_list = [[] for _ in range(self.n_nodes)]
         self.edge_set = set()
@@ -51,8 +50,6 @@ class CircleGraphReward:
         self.should_terminate = False
         self.sum_degrees = 0
         self._verbose = False
-        self.component_reduction_bonus = 2.
-        # self.nx_graph = Graph()
 
     def _dfs(self, i, visited):
         if not visited[i]:
@@ -61,7 +58,6 @@ class CircleGraphReward:
                 self._dfs(nei, visited)
     
     def _count_graph_components(self):
-        # return ncc(self.nx_graph)
         visited = np.zeros(self.n_nodes, dtype=np.int8)
         n_components = 0
         for i in range(self.n_nodes):
@@ -78,7 +74,6 @@ class CircleGraphReward:
             if self._verbose:
                 print("self-loop")
             return - 100
-            # return - self.component_reduction_bonus
         
         # keep edges in ascending order in indexes;
         if first > second:
@@ -90,7 +85,6 @@ class CircleGraphReward:
             if self._verbose:
                 print("repeated edge")
             return - 100
-            # return - self.component_reduction_bonus
         
         # increment degrees of relevant nodes from new edge;
         self.degrees[first] += 1
@@ -99,7 +93,6 @@ class CircleGraphReward:
 
         # add new edge to edge set;
         self.edge_set.add((first, second))
-        # self.nx_graph.add_edge(first, second)
 
         # update adjacency list;
         self.adj_list[first].append(second)
@@ -108,24 +101,15 @@ class CircleGraphReward:
         n_comp_old = self.n_components_last
         self.n_components_last = self._count_graph_components()
 
-        # if self.degrees[first] > 2 or self.degrees[second] > 2:
-            # self.degree_gt3 = True
-            # self.should_terminate = True
-            # if self._verbose:
-                # print("degree_gte3")
-            # return - 100
         
-        first_reward = self.edge_bonus * (2 - self.degrees[first]) ** 3 
-        second_reward = self.edge_bonus * (2 - self.degrees[second]) ** 3
         component_bonus = (n_comp_old - self.n_components_last) * self.component_reduction_bonus
+        degree_penalty = 0
+        if self.degrees[first] > 2 or self.degrees[second] > 2:
+            degree_penalty = - 60
+            self.should_terminate = True
         if component_bonus > 0:
             self.component_reduction_bonus += 2.
-        # if first_reward < 0:
-            # first_reward *= 2
-        # if second_reward < 0:
-            # second_reward *= 2
-        # reward = first_reward + second_reward + component_bonus
-        reward = component_bonus
+        reward = degree_penalty + component_bonus
         if self._verbose:
             print("add edge")
         return reward #+ (100 if self.sum_degrees == 2 * self.n_nodes else 0)
@@ -137,27 +121,28 @@ if __name__ == "__main__":
     config = dict(
         buffer_kwargs=dict(
             max_size=10_000,
-            nodes='identity',
+            nodes='gaussian',
         ),
         general_kwargs=dict(
             buffer_len=10_000,
             n_nodes=n_nodes,
-            nodes='identity',
+            nodes='gaussian',
             num_steps_to_sample=5 * n_nodes,
             min_steps_to_presample=5 * n_nodes,
             batch_size=min(10 * n_nodes, 100),
             num_iters=100,
             num_epochs=10,
-            num_grad_steps=1, #min(10 * n_nodes, 100),
+            num_grad_steps=1,
             seed=0,
             discount=0.99,
             tau=0.005,
             UT_trick=False,
             with_entropy=False,
             for_graph=True,
+            verbose=True,
         ),
         env_kwargs=dict(
-            x='identity',
+            x='gaussian',
             reward_fn='circle_reward',
             max_episode_steps=n_nodes,
             num_expert_steps=n_nodes,
@@ -213,7 +198,6 @@ if __name__ == "__main__":
                 config['env_kwargs']['max_self_loops'] = int(1e8)
     
     # create the node features;
-    nodes = torch.eye(config['general_kwargs']['n_nodes'])
     nodes = torch.randn((n_nodes, n_nodes))
 
     # instantiate buffer;
@@ -309,9 +293,6 @@ if __name__ == "__main__":
         qfunc2t_encoder=qfunc2t_encoder,
         buffer_instance=buffer,
         config=config,
+        verbose=config['general_kwargs']['verbose'],
         **agent_policy_kwargs,
     )
-
-    obs, _, rewards, code = sample_eval_path_graph(n_nodes, env, agent, seed=0, verbose=True)
-    print(code, obs[-1].edge_index.tolist(), rewards, sep='\n')
-    vis_graph_building(obs[-1].edge_index.tolist())
