@@ -499,15 +499,27 @@ def train_sac_one_epoch(
 
 def save_metrics(
     save_returns_to, metric_names, metrics, agent_name, env_name, seed, 
-    config=None,
+    config=None, edge_index=None, last_eval_rewards=None,
 ):
     now = time.time()
     new_dir = agent_name + f"-{env_name}-seed-{seed}-{now}"
     new_dir = save_returns_to / new_dir
     new_dir.mkdir(parents=True)
     save_returns_to = new_dir
+    
+    # illustrate the graph building stages if edge_index supplied;
+    if edge_index is not None:
+        vis_graph_building(edge_index, save_returns_to)
+    
+    # save rewards from last eval episode if given;
+    if last_eval_rewards is not None:
+        file_name = save_returns_to / "last-eval-episode-rewards.pkl"
+        with open(file_name, 'wb') as f:
+            pickle.dump(last_eval_rewards, f)
+    
+    # save pickle files;
     for metric_name, metric in zip(metric_names, metrics):
-        file_name = agent_name + f"-{env_name}-{metric_name}-seed-{seed}.pkl"
+        file_name = f"{metric_name}-seed-{seed}.pkl"
         file_name = save_returns_to / file_name
         with open(file_name, "wb") as f:
             pickle.dump(metric, f)
@@ -518,8 +530,6 @@ def save_metrics(
 
     # save plots of the metrics;
     save_metric_plots(
-        agent_name,
-        env_name,
         metric_names,
         metrics,
         save_returns_to,
@@ -554,6 +564,7 @@ def train_sac(
     qfunc2t_encoder=None,
     buffer_instance=None,
     config=None,
+    verbose=False,
     **agent_policy_kwargs,
 ):
     # instantiate necessary objects;
@@ -686,6 +697,17 @@ def train_sac(
             get_moving_avgs(eval_path_lens, 30),
         ]
 
+        # see if graph will be visualised;
+        edge_index, last_eval_rewards = None, None
+        if for_graph:
+            obs, _, rewards, code = sample_eval_path_graph(
+                env.spec.max_episode_steps, env, agent, seed, verbose=verbose
+            )
+            if verbose:
+                print(f"code from sampling eval episode: {code}")
+            edge_index = obs[-1].edge_index.tolist()
+            last_eval_rewards = rewards
+        
         # save the metrics as numbers as well as plot;
         save_metrics(
             save_returns_to,
@@ -695,6 +717,8 @@ def train_sac(
             env.spec.id,
             seed,
             config,
+            edge_index=edge_index,
+            last_eval_rewards=last_eval_rewards,
         )
 
     # return the q funcs and the agent;
