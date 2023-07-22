@@ -121,15 +121,16 @@ class CircleGraphReward:
             # first_reward *= 2
         # if second_reward < 0:
             # second_reward *= 2
-        reward = first_reward + second_reward + component_bonus
+        # reward = first_reward + second_reward + component_bonus
+        reward = component_bonus
         if self._verbose:
             print("add edge")
-        return reward + (100 if self.sum_degrees == 2 * self.n_nodes else 0)
+        return reward #+ (100 if self.sum_degrees == 2 * self.n_nodes else 0)
 
 
 if __name__ == "__main__":
     n_nodes = 10
-    encoder_hiddens = [2, 2]
+    encoder_hiddens = [16, 16, 2]
     config = dict(
         buffer_kwargs=dict(
             max_size=10_000,
@@ -143,11 +144,11 @@ if __name__ == "__main__":
             min_steps_to_presample=5 * n_nodes,
             batch_size=min(10 * n_nodes, 100),
             num_iters=100,
-            num_epochs=1,
-            num_grad_steps=min(10 * n_nodes, 100),
+            num_epochs=10,
+            num_grad_steps=1, #min(10 * n_nodes, 100),
             seed=0,
             discount=0.99,
-            tau=0.1,
+            tau=0.005,
             UT_trick=False,
             with_entropy=False,
             for_graph=True,
@@ -155,7 +156,7 @@ if __name__ == "__main__":
         env_kwargs=dict(
             x='identity',
             reward_fn='circle_reward',
-            max_episode_steps=2 * n_nodes,
+            max_episode_steps=n_nodes,
             num_expert_steps=n_nodes,
             max_repeats=1000,
             max_self_loops=1000,
