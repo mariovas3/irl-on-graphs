@@ -26,7 +26,7 @@ if __name__ == "__main__":
         TEST_OUTPUTS_PATH.mkdir()
 
     T = 3000  # max path length;
-    num_epochs = 1
+    num_epochs = 10
     num_iters = 100  # iterations per epoch;
 
     env = gym.make("Ant-v2", max_episode_steps=T)
@@ -57,12 +57,12 @@ if __name__ == "__main__":
         buffer_len=int(1e5),
         batch_size=250,
         discount=0.99,
-        tau=0.1,
+        tau=0.005,
         seed=0,
         save_returns_to=TEST_OUTPUTS_PATH,
-        num_steps_to_sample=2 * T,
+        num_steps_to_sample=T,
         num_eval_steps_to_sample=T,
-        num_grad_steps=500,
+        num_grad_steps=1,
         num_epochs=num_epochs,
         min_steps_to_presample=T,
         UT_trick=False,
