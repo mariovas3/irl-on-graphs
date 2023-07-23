@@ -113,81 +113,82 @@ class SingleComponentGraphReward:
         return reward
 
 
-if __name__ == "__main__":
-    n_nodes = 10
-    encoder_hiddens = [16, 16, 2]
-    config = dict(
-        buffer_kwargs=dict(
-            max_size=10_000,
-            nodes='gaussian',
-        ),
-        general_kwargs=dict(
-            buffer_len=10_000,
-            n_nodes=n_nodes,
-            nodes='gaussian',
-            num_steps_to_sample=5 * n_nodes,
-            min_steps_to_presample=5 * n_nodes,
-            batch_size=min(10 * n_nodes, 100),
-            num_iters=100,
-            num_epochs=10,
-            num_grad_steps=1,
-            seed=0,
-            discount=0.99,
-            tau=0.005,
-            UT_trick=False,
-            with_entropy=False,
-            for_graph=True,
-            verbose=True,
-        ),
-        env_kwargs=dict(
-            x='gaussian',
-            reward_fn='circle_reward',
-            max_episode_steps=n_nodes,
-            num_expert_steps=n_nodes,
-            max_repeats=1000,
-            max_self_loops=1000,
-            drop_repeats_or_self_loops=False,
-            reward_fn_termination=True,
-        ),
-        encoder_kwargs=dict(
-            encoder_hiddens=encoder_hiddens,
-            with_layer_norm=False,
-            final_tanh=True,
-        ),
-        gauss_policy_kwargs= dict(
-            obs_dim=encoder_hiddens[-1],
-            action_dim=encoder_hiddens[-1],
-            hiddens=[256, 256],
-            with_layer_norm=True,
-            encoder="GCN",
-            two_action_vectors=True,
-        ),
-        tsg_policy_kwargs=dict(
-            obs_dim=encoder_hiddens[-1],
-            action_dim=encoder_hiddens[-1],
-            hiddens1=[256, 256],
-            hiddens2=[256,],
-            encoder="GCN",
-            with_layer_norm=True,
-        ),
-        agent_kwargs=dict(
-            name="SACAgentGraph",
-            policy='TwoStageGaussPolicy',
-            policy_lr=3e-4,
-            entropy_lb=encoder_hiddens[-1],
-            temperature_lr=3e-4,
-        ),
-        qfunc_kwargs=dict(
-            qfunc_hiddens=[256, 256],
-            qfunc_layer_norm=True,
-            qfunc_lr=3e-4,
-            qfunc1_encoder='GCN',
-            qfunc2_encoder='GCN',
-            qfunc1t_encoder='GCN',
-            qfunc2t_encoder='GCN',
-        ),
-    )
+n_nodes = 10
+encoder_hiddens = [16, 16, 2]
+config = dict(
+    buffer_kwargs=dict(
+        max_size=10_000,
+        nodes='gaussian',
+    ),
+    general_kwargs=dict(
+        buffer_len=10_000,
+        n_nodes=n_nodes,
+        nodes='gaussian',
+        num_steps_to_sample=5 * n_nodes,
+        min_steps_to_presample=5 * n_nodes,
+        batch_size=min(10 * n_nodes, 100),
+        num_iters=100,
+        num_epochs=10,
+        num_grad_steps=1,
+        seed=0,
+        discount=0.99,
+        tau=0.005,
+        UT_trick=False,
+        with_entropy=False,
+        for_graph=True,
+        verbose=True,
+    ),
+    env_kwargs=dict(
+        x='gaussian',
+        reward_fn='circle_reward',
+        max_episode_steps=n_nodes,
+        num_expert_steps=n_nodes,
+        max_repeats=1000,
+        max_self_loops=1000,
+        drop_repeats_or_self_loops=False,
+        reward_fn_termination=True,
+    ),
+    encoder_kwargs=dict(
+        encoder_hiddens=encoder_hiddens,
+        with_layer_norm=False,
+        final_tanh=True,
+    ),
+    gauss_policy_kwargs= dict(
+        obs_dim=encoder_hiddens[-1],
+        action_dim=encoder_hiddens[-1],
+        hiddens=[256, 256],
+        with_layer_norm=True,
+        encoder="GCN",
+        two_action_vectors=True,
+    ),
+    tsg_policy_kwargs=dict(
+        obs_dim=encoder_hiddens[-1],
+        action_dim=encoder_hiddens[-1],
+        hiddens1=[256, 256],
+        hiddens2=[256,],
+        encoder="GCN",
+        with_layer_norm=True,
+    ),
+    agent_kwargs=dict(
+        name="SACAgentGraph",
+        policy='TwoStageGaussPolicy',
+        policy_lr=3e-4,
+        entropy_lb=encoder_hiddens[-1],
+        temperature_lr=3e-4,
+    ),
+    qfunc_kwargs=dict(
+        qfunc_hiddens=[256, 256],
+        qfunc_layer_norm=True,
+        qfunc_lr=3e-4,
+        qfunc1_encoder='GCN',
+        qfunc2_encoder='GCN',
+        qfunc1t_encoder='GCN',
+        qfunc2t_encoder='GCN',
+    ),
+)
 
+
+if __name__ == "__main__":
     # see if a path to a config file was supplied;
     if len(sys.argv) > 1:
         with open(sys.argv[1], 'rb') as f:
