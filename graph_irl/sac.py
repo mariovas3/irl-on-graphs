@@ -510,6 +510,9 @@ def save_metrics(
     # illustrate the graph building stages if edge_index supplied;
     if edge_index is not None:
         vis_graph_building(edge_index, save_returns_to)
+        file_name = save_returns_to / "edge-index.pkl"
+        with open(file_name, 'wb') as f:
+            pickle.dump(edge_index, f)
     
     # save rewards from last eval episode if given;
     if last_eval_rewards is not None:
