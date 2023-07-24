@@ -23,10 +23,10 @@ class SingleComponentGraphReward:
     def __init__(self, n_nodes):
         # set input attributes;
         self.n_nodes = n_nodes
-        
+
         # initialise attributes;
-        self.edge_bonus = 5.
-        self.component_reduction_bonus = 2.
+        self.edge_bonus = 5.0
+        self.component_reduction_bonus = 2.0
         self.degrees = np.zeros(n_nodes, dtype=np.int64)
         self.adj_list = [[] for _ in range(n_nodes)]
         self.edge_set = set()
@@ -35,12 +35,12 @@ class SingleComponentGraphReward:
         self.should_terminate = False
         self.sum_degrees = 0
         self._verbose = False
-    
+
     def verbose(self):
         self._verbose = True
-    
+
     def reset(self):
-        self.component_reduction_bonus = 2.
+        self.component_reduction_bonus = 2.0
         self.degrees = np.zeros(self.n_nodes, dtype=np.int64)
         self.adj_list = [[] for _ in range(self.n_nodes)]
         self.edge_set = set()
@@ -55,7 +55,7 @@ class SingleComponentGraphReward:
             visited[i] = 1
             for nei in self.adj_list[i]:
                 self._dfs(nei, visited)
-    
+
     def _count_graph_components(self):
         visited = np.zeros(self.n_nodes, dtype=np.int8)
         n_components = 0
@@ -64,27 +64,33 @@ class SingleComponentGraphReward:
                 n_components += 1
                 self._dfs(i, visited)
         return n_components
-    
-    def __call__(self, data: Data, first: int, second: int):
+
+    def __call__(self, obs_action, action_is_index=False):
+        """The action_is_index is here only for compatibility reasons."""
         assert not self.should_terminate
+
+        # idxs should be (1, 2) shape torch.tensor;
+        data, idxs = obs_action
+        first, second = idxs.view(-1).tolist()
+
         # if self-loop reward is -100;
         if first == second:
             self.should_terminate = True
             if self._verbose:
                 print("self-loop")
-            return - 100
-        
+            return -100
+
         # keep edges in ascending order in indexes;
         if first > second:
             first, second = second, first
-        
+
         # if the edge is a repeat, reward is -100;
         if (first, second) in self.edge_set:
             self.should_terminate = True
             if self._verbose:
                 print("repeated edge")
-            return - 100
-        
+            return -100
+
         # increment degrees of relevant nodes from new edge;
         self.degrees[first] += 1
         self.degrees[second] += 1
@@ -99,14 +105,16 @@ class SingleComponentGraphReward:
 
         n_comp_old = self.n_components_last
         self.n_components_last = self._count_graph_components()
-        
-        component_bonus = (n_comp_old - self.n_components_last) * self.component_reduction_bonus
-        
+
+        component_bonus = (
+            n_comp_old - self.n_components_last
+        ) * self.component_reduction_bonus
+
         # if number of components decreased,
         # increase component reduction bonus for next time;
         if component_bonus > 0:
-            self.component_reduction_bonus += 2.
-        
+            self.component_reduction_bonus += 2.0
+
         reward = component_bonus
         if self._verbose:
             print("add edge")
@@ -118,12 +126,12 @@ encoder_hiddens = [16, 16, 2]
 config = dict(
     buffer_kwargs=dict(
         max_size=10_000,
-        nodes='gaussian',
+        nodes="gaussian",
     ),
     general_kwargs=dict(
         buffer_len=10_000,
         n_nodes=n_nodes,
-        nodes='gaussian',
+        nodes="gaussian",
         num_steps_to_sample=5 * n_nodes,
         min_steps_to_presample=5 * n_nodes,
         batch_size=min(10 * n_nodes, 100),
@@ -139,8 +147,8 @@ config = dict(
         verbose=True,
     ),
     env_kwargs=dict(
-        x='gaussian',
-        reward_fn='circle_reward',
+        x="gaussian",
+        reward_fn="circle_reward",
         max_episode_steps=n_nodes,
         num_expert_steps=n_nodes,
         max_repeats=1000,
@@ -153,7 +161,7 @@ config = dict(
         with_layer_norm=False,
         final_tanh=True,
     ),
-    gauss_policy_kwargs= dict(
+    gauss_policy_kwargs=dict(
         obs_dim=encoder_hiddens[-1],
         action_dim=encoder_hiddens[-1],
         hiddens=[256, 256],
@@ -165,13 +173,15 @@ config = dict(
         obs_dim=encoder_hiddens[-1],
         action_dim=encoder_hiddens[-1],
         hiddens1=[256, 256],
-        hiddens2=[256,],
+        hiddens2=[
+            256,
+        ],
         encoder="GCN",
         with_layer_norm=True,
     ),
     agent_kwargs=dict(
         name="SACAgentGraph",
-        policy='TwoStageGaussPolicy',
+        policy="TwoStageGaussPolicy",
         policy_lr=3e-4,
         entropy_lb=encoder_hiddens[-1],
         temperature_lr=3e-4,
@@ -180,10 +190,10 @@ config = dict(
         qfunc_hiddens=[256, 256],
         qfunc_layer_norm=True,
         qfunc_lr=3e-4,
-        qfunc1_encoder='GCN',
-        qfunc2_encoder='GCN',
-        qfunc1t_encoder='GCN',
-        qfunc2t_encoder='GCN',
+        qfunc1_encoder="GCN",
+        qfunc2_encoder="GCN",
+        qfunc1t_encoder="GCN",
+        qfunc2t_encoder="GCN",
     ),
 )
 
@@ -191,107 +201,120 @@ config = dict(
 if __name__ == "__main__":
     # see if a path to a config file was supplied;
     if len(sys.argv) > 1:
-        with open(sys.argv[1], 'rb') as f:
+        with open(sys.argv[1], "rb") as f:
             config = pickle.load(f)
-            if 'max_self_loops' not in config['env_kwargs']:
-                config['env_kwargs']['max_self_loops'] = int(1e8)
-    
+            if "max_self_loops" not in config["env_kwargs"]:
+                config["env_kwargs"]["max_self_loops"] = int(1e8)
+
     # create the node features;
     nodes = torch.randn((n_nodes, n_nodes))
 
     # instantiate buffer;
     buffer = GraphBuffer(
-        max_size=config['buffer_kwargs']['max_size'],
+        max_size=config["buffer_kwargs"]["max_size"],
         nodes=nodes,
-        seed=config['general_kwargs']['seed'],
+        seed=config["general_kwargs"]["seed"],
     )
 
     # instantiate reward;
-    reward_fn = SingleComponentGraphReward(config['general_kwargs']['n_nodes'])
+    reward_fn = SingleComponentGraphReward(
+        config["general_kwargs"]["n_nodes"]
+    )
 
     # env setup;
     env = GraphEnv(
         x=nodes,
         reward_fn=reward_fn,
-        max_episode_steps=config['general_kwargs']['n_nodes'],
-        num_expert_steps=config['general_kwargs']['n_nodes'],
-        max_repeats=config['env_kwargs']['max_repeats'],
-        max_self_loops=config['env_kwargs']['max_self_loops'],
-        drop_repeats_or_self_loops=config['env_kwargs']['drop_repeats_or_self_loops'],
-        reward_fn_termination=config['env_kwargs']['reward_fn_termination'],
+        max_episode_steps=config["general_kwargs"]["n_nodes"],
+        num_expert_steps=config["general_kwargs"]["n_nodes"],
+        max_repeats=config["env_kwargs"]["max_repeats"],
+        max_self_loops=config["env_kwargs"]["max_self_loops"],
+        drop_repeats_or_self_loops=config["env_kwargs"][
+            "drop_repeats_or_self_loops"
+        ],
+        reward_fn_termination=config["env_kwargs"]["reward_fn_termination"],
     )
     print(env.spec.id)
 
     # encoder setup;
-    encoder = GCN(nodes.shape[-1],        
-                config['encoder_kwargs']['encoder_hiddens'],  
-                with_layer_norm=config['encoder_kwargs']['with_layer_norm'],
-                final_tanh=config['encoder_kwargs']['final_tanh'],
-            )
-    qfunc1_encoder = GCN(nodes.shape[-1], 
-                config['encoder_kwargs']['encoder_hiddens'],  
-                with_layer_norm=config['encoder_kwargs']['with_layer_norm'],
-                final_tanh=config['encoder_kwargs']['final_tanh'],
-            )
-    qfunc2_encoder = GCN(nodes.shape[-1], 
-                config['encoder_kwargs']['encoder_hiddens'],  
-                with_layer_norm=config['encoder_kwargs']['with_layer_norm'],
-                final_tanh=config['encoder_kwargs']['final_tanh'],
-            )
-    qfunc1t_encoder = GCN(nodes.shape[-1],
-                 config['encoder_kwargs']['encoder_hiddens'], 
-                 with_layer_norm=config['encoder_kwargs']['with_layer_norm'],
-                 final_tanh=config['encoder_kwargs']['final_tanh'],
-            )
-    qfunc2t_encoder = GCN(nodes.shape[-1],
-                 config['encoder_kwargs']['encoder_hiddens'], 
-                 with_layer_norm=config['encoder_kwargs']['with_layer_norm'],
-                 final_tanh=config['encoder_kwargs']['final_tanh'],
-            )
+    encoder = GCN(
+        nodes.shape[-1],
+        config["encoder_kwargs"]["encoder_hiddens"],
+        with_layer_norm=config["encoder_kwargs"]["with_layer_norm"],
+        final_tanh=config["encoder_kwargs"]["final_tanh"],
+    )
+    qfunc1_encoder = GCN(
+        nodes.shape[-1],
+        config["encoder_kwargs"]["encoder_hiddens"],
+        with_layer_norm=config["encoder_kwargs"]["with_layer_norm"],
+        final_tanh=config["encoder_kwargs"]["final_tanh"],
+    )
+    qfunc2_encoder = GCN(
+        nodes.shape[-1],
+        config["encoder_kwargs"]["encoder_hiddens"],
+        with_layer_norm=config["encoder_kwargs"]["with_layer_norm"],
+        final_tanh=config["encoder_kwargs"]["final_tanh"],
+    )
+    qfunc1t_encoder = GCN(
+        nodes.shape[-1],
+        config["encoder_kwargs"]["encoder_hiddens"],
+        with_layer_norm=config["encoder_kwargs"]["with_layer_norm"],
+        final_tanh=config["encoder_kwargs"]["final_tanh"],
+    )
+    qfunc2t_encoder = GCN(
+        nodes.shape[-1],
+        config["encoder_kwargs"]["encoder_hiddens"],
+        with_layer_norm=config["encoder_kwargs"]["with_layer_norm"],
+        final_tanh=config["encoder_kwargs"]["final_tanh"],
+    )
 
     # policy setup for GaussPolicy like GraphOpt;
-    gauss_policy_kwargs = config['gauss_policy_kwargs'].copy()
-    gauss_policy_kwargs['encoder'] = encoder
+    gauss_policy_kwargs = config["gauss_policy_kwargs"].copy()
+    gauss_policy_kwargs["encoder"] = encoder
 
     # policy setup for TwoStageGaussPolicy;
-    tsg_policy_kwargs = config['tsg_policy_kwargs'].copy()
-    tsg_policy_kwargs['encoder'] = encoder
+    tsg_policy_kwargs = config["tsg_policy_kwargs"].copy()
+    tsg_policy_kwargs["encoder"] = encoder
 
     # setup agent;
-    agent_kwargs = config['agent_kwargs'].copy()
-    agent_kwargs['policy'] = TwoStageGaussPolicy
+    agent_kwargs = config["agent_kwargs"].copy()
+    agent_kwargs["policy"] = TwoStageGaussPolicy
     agent_policy_kwargs = dict(
         agent_kwargs=agent_kwargs,
         policy_kwargs=tsg_policy_kwargs,
     )
-    
+
     Q1, Q2, agent = train_sac(
         env=env,
         agent=SACAgentGraph,
-        num_iters=config['general_kwargs']['num_iters'],
-        qfunc_hiddens=config['qfunc_kwargs']['qfunc_hiddens'],
-        qfunc_layer_norm=config['qfunc_kwargs']['qfunc_layer_norm'],
-        qfunc_lr=config['qfunc_kwargs']['qfunc_lr'],
-        buffer_len=config['buffer_kwargs']['max_size'],
-        batch_size=config['general_kwargs']['batch_size'],
-        discount=config['general_kwargs']['discount'],
-        tau=config['general_kwargs']['tau'],
-        seed=config['general_kwargs']['seed'],
+        num_iters=config["general_kwargs"]["num_iters"],
+        qfunc_hiddens=config["qfunc_kwargs"]["qfunc_hiddens"],
+        qfunc_layer_norm=config["qfunc_kwargs"]["qfunc_layer_norm"],
+        qfunc_lr=config["qfunc_kwargs"]["qfunc_lr"],
+        buffer_len=config["buffer_kwargs"]["max_size"],
+        batch_size=config["general_kwargs"]["batch_size"],
+        discount=config["general_kwargs"]["discount"],
+        tau=config["general_kwargs"]["tau"],
+        seed=config["general_kwargs"]["seed"],
         save_returns_to=TEST_OUTPUTS_PATH,
-        num_steps_to_sample=config['general_kwargs']['num_steps_to_sample'],
-        num_eval_steps_to_sample=config['general_kwargs']['num_steps_to_sample'],
-        num_grad_steps=config['general_kwargs']['num_grad_steps'],
-        num_epochs=config['general_kwargs']['num_epochs'],
-        min_steps_to_presample=config['general_kwargs']['min_steps_to_presample'],
-        UT_trick=config['general_kwargs']['UT_trick'],
-        with_entropy=config['general_kwargs']['with_entropy'],
-        for_graph=config['general_kwargs']['for_graph'], 
+        num_steps_to_sample=config["general_kwargs"]["num_steps_to_sample"],
+        num_eval_steps_to_sample=config["general_kwargs"][
+            "num_steps_to_sample"
+        ],
+        num_grad_steps=config["general_kwargs"]["num_grad_steps"],
+        num_epochs=config["general_kwargs"]["num_epochs"],
+        min_steps_to_presample=config["general_kwargs"][
+            "min_steps_to_presample"
+        ],
+        UT_trick=config["general_kwargs"]["UT_trick"],
+        with_entropy=config["general_kwargs"]["with_entropy"],
+        for_graph=config["general_kwargs"]["for_graph"],
         qfunc1_encoder=qfunc1_encoder,
         qfunc2_encoder=qfunc2_encoder,
         qfunc1t_encoder=qfunc1_encoder,
         qfunc2t_encoder=qfunc2t_encoder,
         buffer_instance=buffer,
         config=config,
-        verbose=config['general_kwargs']['verbose'],
+        verbose=config["general_kwargs"]["verbose"],
         **agent_policy_kwargs,
     )

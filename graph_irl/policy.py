@@ -10,6 +10,7 @@ from torch import nn
 import torch.distributions as dists
 from pathlib import Path
 from graph_irl.distributions import *
+from graph_irl.graph_rl_utils import get_action_vector_from_idx
 from torch_geometric.nn import GCNConv, global_mean_pool
 
 
@@ -19,10 +20,11 @@ if not TEST_OUTPUTS_PATH.exists():
 
 
 class GCN(nn.Module):
-    def __init__(self, in_dim, hiddens, with_layer_norm=False, 
-                 final_tanh=False):
+    def __init__(
+        self, in_dim, hiddens, with_layer_norm=False, final_tanh=False
+    ):
         super(GCN, self).__init__()
-        
+
         # set attributes from constructor;
         self.hiddens = hiddens
         self.with_layer_norm = with_layer_norm
@@ -30,21 +32,19 @@ class GCN(nn.Module):
 
         # init network;
         self.net = nn.ModuleList()
-        
+
         # create a dummy list for ease of creating net;
         temp = [in_dim] + hiddens
-        
-        for i in range(len(temp)-1):
-            self.net.add_module(
-                f"GCNCov{i}", GCNConv(temp[i], temp[i + 1])
-            )
+
+        for i in range(len(temp) - 1):
+            self.net.add_module(f"GCNCov{i}", GCNConv(temp[i], temp[i + 1]))
 
     def forward(self, batch):
         x, edge_index = batch.x, batch.edge_index
         for i, f in enumerate(self.net):
             # GNN pass;
             x = f(x, edge_index)
-            
+
             # activation follow-up;
             if i == len(self.net) - 1:
                 if self.final_tanh:
@@ -53,7 +53,7 @@ class GCN(nn.Module):
                     x = torch.relu(x)
             else:
                 x = torch.relu(x)
-            
+
             # see if layer norm is needed;
             if self.with_layer_norm:
                 x = torch.layer_norm(x, (self.hiddens[i],))
@@ -143,9 +143,7 @@ class GaussPolicy(nn.Module):
         mus, sigmas = self.net(obs)
         if self.encoder is not None:
             return (
-                GaussDist(
-                    dists.Normal(mus, sigmas), self.two_action_vectors
-                ),
+                GaussDist(dists.Normal(mus, sigmas), self.two_action_vectors),
                 node_embeds,
             )
         return GaussDist(dists.Normal(mus, sigmas))
@@ -194,9 +192,7 @@ class TanhGaussPolicy(nn.Module):
         super(TanhGaussPolicy, self).__init__()
         if two_actions:
             raise NotImplementedError(
-                "Haven't implemented "
-                "TanhGaussPolicy for "
-                "graphs yet."
+                "Haven't implemented " "TanhGaussPolicy for " "graphs yet."
             )
         self.name = (
             "TanhGaussPolicy"
@@ -245,28 +241,19 @@ class Qfunc(nn.Module):
 
         # Q-func maps to scalar;
         self.net.append(nn.Linear(hiddens[-1], 1))
-    
-    def _get_action_vector_from_idx(self, 
-                                    node_embeds, 
-                                    action_idxs,
-                                    batch_idxs):
-        n_nodes = node_embeds.shape[0] // len(torch.unique(batch_idxs))
-        action_idxs = action_idxs + torch.arange(len(action_idxs)).view(-1, 1) * n_nodes
-        # return shape is (B, 2 * node_embed_dim)
-        return node_embeds[action_idxs.view(-1)].view(-1, 2 * node_embeds.shape[-1])
 
     def forward(self, obs_action, action_is_index=False):
         """
         If self.encoder is not None, then obs_action is (batch, actions).
 
-        If action_is_index is True, then the actions 
+        If action_is_index is True, then the actions
             are a tensor of shape (B, 2) saying which nodes to connect.
         """
         if self.encoder is not None:
             batch, actions = obs_action
             obs, node_embeds = self.encoder(batch)
             if action_is_index:
-                actions = self._get_action_vector_from_idx(
+                actions = get_action_vector_from_idx(
                     node_embeds, actions, batch.batch
                 )
             else:

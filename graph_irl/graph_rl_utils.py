@@ -25,8 +25,8 @@ class GraphEnv:
         max_repeats: int,
         max_self_loops: int,
         drop_repeats_or_self_loops: bool = False,
-        id: str=None,
-        reward_fn_termination: bool=False,
+        id: str = None,
+        reward_fn_termination: bool = False,
     ):
         """
         Args:
@@ -85,7 +85,7 @@ class GraphEnv:
         self.terminated, self.truncated = False, False
         self.num_self_loops = 0
         return data, None
-    
+
     def _get_edge_hash(self, first, second):
         if first > second:
             return second, first
@@ -96,7 +96,9 @@ class GraphEnv:
             len(self.unique_edges) >= self.num_expert_steps
             or self.repeats_done >= self.max_repeats
             or self.self_loops_done >= self.max_self_loops
-            or (self.reward_fn_termination and self.reward_fn.should_terminate)
+            or (
+                self.reward_fn_termination and self.reward_fn.should_terminate
+            )
         )
         self.truncated = self.steps_done >= self.spec.max_episode_steps
 
@@ -105,14 +107,16 @@ class GraphEnv:
             self.steps_done >= self.num_expert_steps
         )
         info["max_repeats_reached"] = self.repeats_done >= self.max_repeats
-        info['max_self_loops_reached'] = self.self_loops_done >= self.max_self_loops
+        info["max_self_loops_reached"] = (
+            self.self_loops_done >= self.max_self_loops
+        )
         info["truncated"] = self.truncated
         info["episode_truncation_length_reached"] = (
             self.steps_done >= self.spec.max_episode_steps
         )
         info["steps_done"] = self.steps_done
         info["repeats_done"] = self.repeats_done
-        info['self_loops_done'] = self.self_loops_done
+        info["self_loops_done"] = self.self_loops_done
 
     def step(self, action):
         """Returns (observation, terminated, truncated, None)."""
@@ -134,7 +138,7 @@ class GraphEnv:
             "second": None,
         }
 
-        # unpack action;
+        # unpack action; a1 and a2 are numpy arrays;
         (a1, a2), node_embeds = action
 
         # a1 and a2 should be flattened;
@@ -159,7 +163,8 @@ class GraphEnv:
         info["second"] = second
 
         # calculate reward;
-        reward = self.reward_fn(data, first, second)
+        idxs = torch.tensor([[first, second]], dtype=torch.long)
+        reward = self.reward_fn((data, idxs), action_is_index=True)
 
         # if self loop;
         if first == second:
@@ -205,7 +210,7 @@ class GraphEnv:
 
             # add edge to set of edges;
             self.unique_edges.add(self._get_edge_hash(first, second))
-        
+
         # update info;
         self._update_info_terminals(info)
 
@@ -217,3 +222,30 @@ class GraphEnv:
             self.truncated,
             info,
         )
+
+
+def get_action_vector_from_idx(node_embeds, action_idxs, batch_idxs):
+    """
+    For each graph according to batch_idxs, return the node
+    embeddings according to the indexes in action_idxs.
+    Assumes all graphs in the batch have the same number of
+    nodes.
+
+    Args:
+        node_embeds (torch.Tensor): Tensor of node embeddings.
+        action_idxs (torch.Tensor): Indexes of shape (B, 2) where
+            B is the size of the batch and for each graph we
+            select 2 node embeddings.
+        batch_idxs (torch.Tensor): The batch attribute of
+            torch_geometric.data.Data or torch_geometric.data.Batch
+            object.
+    """
+    num_graphs = 1 if batch_idxs is None else len(torch.unique(batch_idxs))
+    n_nodes = node_embeds.shape[0] // num_graphs
+    action_idxs = (
+        action_idxs + torch.arange(len(action_idxs)).view(-1, 1) * n_nodes
+    )
+    # return shape is (B, 2 * node_embed_dim)
+    return node_embeds[action_idxs.view(-1)].view(
+        -1, 2 * node_embeds.shape[-1]
+    )

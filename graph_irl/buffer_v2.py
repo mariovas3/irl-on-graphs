@@ -64,7 +64,7 @@ class GraphBuffer(BufferBase):
         )
         return (
             Batch.from_data_list([self.obs_t[idx] for idx in idxs]),
-            torch.from_numpy(self.action_t[idxs]),  # (B, 2) shape np.ndarray
+            torch.from_numpy(self.action_t[idxs]),  # (B, 2) shape tensor
             torch.tensor(self.reward_t[idxs], dtype=torch.float32),
             Batch.from_data_list([self.obs_tp1[idx] for idx in idxs]),
             torch.tensor(self.terminal_tp1[idxs], dtype=torch.float32),

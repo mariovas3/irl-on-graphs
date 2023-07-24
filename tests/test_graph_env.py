@@ -12,6 +12,7 @@ from graph_irl.sac import *
 import random
 import numpy as np
 import torch
+
 random.seed(0)
 np.random.seed(0)
 torch.manual_seed(0)
@@ -29,7 +30,10 @@ if __name__ == "__main__":
         def reset(self):
             pass
 
-        def __call__(self, data, first, second):
+        def __call__(self, obs_action, action_is_index=False):
+            """The action_is_index is here only for compatibility reasons."""
+            data, idxs = obs_action
+            first, second = idxs.view(-1).tolist()
             diff = abs(first - second)
             if diff != 1:
                 return -100
@@ -63,14 +67,14 @@ if __name__ == "__main__":
 
     # policy setup for GaussPolicy like GraphOpt;
     gauss_policy_kwargs = {
-        'obs_dim': encoder_hiddens[-1],
-        'action_dim': encoder_hiddens[-1],
-        'hiddens': [30, 30],
-        'with_layer_norm': True,
-        'encoder': encoder,
-        'two_action_vectors': True,
+        "obs_dim": encoder_hiddens[-1],
+        "action_dim": encoder_hiddens[-1],
+        "hiddens": [30, 30],
+        "with_layer_norm": True,
+        "encoder": encoder,
+        "two_action_vectors": True,
     }
-    
+
     # make agent;
     agent = SACAgentGraph(
         name="SACAgentGraph",
@@ -89,13 +93,13 @@ if __name__ == "__main__":
 
     # collect graph path;
     buffer.collect_path(env, agent, num_steps_to_collect)
-    for graph in buffer.obs_t[:17]:
+    for graph in buffer.obs_tp1[:25]:
         print(graph)
-    print(buffer.terminal_tp1[:17])
+    print(buffer.terminal_tp1[:25])
 
     # collect eval path;
     obs, actions, rewards, code = sample_eval_path_graph(100, env, agent, 0)
-    print("eval path:", len(rewards), sep='\n')
+    print("eval path:", len(rewards), sep="\n")
     for g in obs:
         print(g)
 
@@ -108,22 +112,41 @@ if __name__ == "__main__":
     # and q func losses;
     encoder1 = GCN(x.shape[-1], encoder_hiddens, with_layer_norm=True)
     encoder2 = GCN(x.shape[-1], encoder_hiddens, with_layer_norm=True)
-    Q1 = Qfunc(3 * encoder_hiddens[-1], [31, 31], with_layer_norm=True, encoder=encoder1)
-    Q2 = Qfunc(3 * encoder_hiddens[-1], [31, 31], with_layer_norm=True, encoder=encoder2)
+    Q1 = Qfunc(
+        3 * encoder_hiddens[-1],
+        [31, 31],
+        with_layer_norm=True,
+        encoder=encoder1,
+    )
+    Q2 = Qfunc(
+        3 * encoder_hiddens[-1],
+        [31, 31],
+        with_layer_norm=True,
+        encoder=encoder2,
+    )
     Q1t = Qfunc(3 * encoder_hiddens[-1], [31, 31], with_layer_norm=True)
     Q2t = Qfunc(3 * encoder_hiddens[-1], [31, 31], with_layer_norm=True)
-
 
     # test policy loss and temperature loss;
     agent.get_policy_loss_and_temperature_loss(
         obs_t, Q1, Q2, UT_trick=False, with_entropy=False
     )
-    print(agent.policy_loss, agent.temperature_loss, sep='\n', end='\n\n')
-    
+    print(agent.policy_loss, agent.temperature_loss, sep="\n", end="\n\n")
+
     l1, l2 = get_q_losses(
-        Q1, Q2, Q1t, Q2t,
-        obs_t, action_t, reward_t, obs_tp1, terminated_tp1,
-        agent, discount=.99, UT_trick=False, with_entropy=True, 
+        Q1,
+        Q2,
+        Q1t,
+        Q2t,
+        obs_t,
+        action_t,
+        reward_t,
+        obs_tp1,
+        terminated_tp1,
+        agent,
+        discount=0.99,
+        UT_trick=False,
+        with_entropy=True,
         for_graph=True,
     )
-    print(l1, l2, sep='\n', end='\n\n')
+    print(l1, l2, sep="\n", end="\n\n")
