@@ -29,7 +29,8 @@
     * $J=\frac{1}{N}\sum_{n=1}^N\log p(\tau_n)\exp r_{\psi}(\tau_n) - \log Z(\psi)$.
     * $J = \frac{1}{N}\sum_{n=1}^{N} \log p(\tau_n) + r_{\psi}(\tau_n) - \log Z(\psi)$.
     * $\nabla_{\psi}J=\frac{1}{N}\sum_{n=1}^N\nabla_{\psi}r_{\psi}(\tau_n) - \nabla_{\psi}\log Z(\psi)$.
-    * $\nabla_{\psi}J=\frac{1}{N}\sum_{n=1}^N\nabla_{\psi}r_{\psi}(\tau_n) -\mathbb{E}_{\tau\sim \pi^{r_{\psi}}}[\nabla_{\psi}r_{\psi}(\tau)]$.
+    * $\nabla_{\psi}J=\frac{1}{N}\sum_{n=1}^N\nabla_{\psi}r_{\psi}(\tau_n) - \mathbb{E}_{\tau\sim p(\tau|\pi^{r_{\psi}})}[\nabla_{\psi}r_{\psi}(\tau)]$.
+    <!-- * $\nabla_{\psi}J=\frac{1}{N}\sum_{n=1}^N\nabla_{\psi}r_{\psi}(\tau_n) -\mathbb{E}_{\tau\sim \pi^{r_{\psi}}}[\nabla_{\psi}r_{\psi}(\tau)]$. -->
 * Setting the above grad to $0$ leads to expected reward grads matching. If the reward func is dot product of features and $\psi$ we get expected feature matching and the interpretation is the same as the expected suff stat matching from ExpFam dist of soft opt trajectories.
 * The tough part about the above is that after each update of $\psi$ one needs to re-fit the policy to the new reward - that's expensive.
 * Instead of this, the GCL paper proposes only few grad steps for the policy and then use it to sample a trajectory which will be importance weighted to get unbiased estimate of the expectation under the true $\pi^{r_{\psi}}$.
