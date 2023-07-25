@@ -365,6 +365,7 @@ def get_q_losses(
         # input for target nets;
         if for_graph:
             obs_tp1 = global_mean_pool(node_embeds, obs_tp1.batch)
+            # action_tp1 = (a1, a2) -> tuple of action vectors;
             obs_action_tp1 = torch.cat((obs_tp1,) + action_tp1, -1)
             qt1_est, qt2_est = qt1.net(obs_action_tp1), qt2.net(obs_action_tp1)
         else:
