@@ -8,6 +8,7 @@ TODO:
       IRL setting.
 """
 
+import math
 import random
 import numpy as np
 import torch
@@ -56,6 +57,7 @@ class SACAgentBase:
         self.policy_loss = None
         self.policy_losses = []
         self.temperature_losses = []
+        self.temperatures = [math.exp(self.log_temperature.item())]
 
     def sample_action(self, obs):
         pass
@@ -76,6 +78,10 @@ class SACAgentBase:
         self.temperature_optim.zero_grad()
         self.temperature_loss.backward()
         self.temperature_optim.step()
+        
+        # add new temperature to list;
+        self.temperatures.append(math.exp(self.log_temperature.item()))
+
 
 
 class SACAgentGraph(SACAgentBase):
@@ -684,6 +690,7 @@ def train_sac(
             "eval-ma-returns-30",
             "eval-path-lens",
             "eval-ma-path-lens-30",
+            "temperatures",
         ]
         metrics = [
             agent.policy_losses,
@@ -699,6 +706,7 @@ def train_sac(
             get_moving_avgs(eval_path_returns, 30),
             eval_path_lens,
             get_moving_avgs(eval_path_lens, 30),
+            agent.temperatures,
         ]
 
         # see if graph will be visualised;
