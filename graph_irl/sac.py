@@ -1,16 +1,15 @@
 """
 TODO:
-    (1): Implement the policy and temperature loss in the SAC graph
-        agent. Currently needs the Qfunc to be implemented.
-    * Implement GNN and train sac on graph task;
-    * Maybe wrap the train loops for sac in a policy training
-      class, to be easy to train for several iterations in the 
-      IRL setting.
+    (1): Put all relevant items for the sac agent training in a 
+        class and implement a train method so that I can choose 
+        how much to train the sac agent. This will be helpful for 
+        the IRL task.
 """
 
 import math
 import random
 import numpy as np
+
 import torch
 from torch import nn
 
@@ -31,33 +30,100 @@ from tqdm import tqdm
 TEST_OUTPUTS_PATH = Path(__file__).absolute().parent.parent / "test_output"
 
 
+def track_params(Q1t, Q1, tau):
+    """
+    Updates parameters of Q1t to be:
+    Q1t = Q1 * tau + Q1t * (1 - tau).
+    """
+    theta = nn.utils.parameters_to_vector(Q1.parameters()) * tau + (
+        1 - tau
+    ) * nn.utils.parameters_to_vector(Q1t.parameters())
+
+    # load theta as the new params of Q1;
+    nn.utils.vector_to_parameters(theta, Q1t.parameters())
+
+
 class SACAgentBase:
     def __init__(
         self,
         name,
-        policy,
-        policy_lr,
+        policy_constructor,
+        qfunc_constructor,
+        env_constructor,
+        buffer_constructor,
         entropy_lb,
+        policy_lr,
         temperature_lr,
-        **policy_kwargs,
-    ):
+        qfunc_lr,
+        tau,
+        discount,
+        **kwargs,
+    ):  
         self.name = name
-        self.policy = policy(**policy_kwargs)
+
+        # training params;
+        self.seed = kwargs['training_kwargs']['seed']
+        self.num_iters = kwargs['training_kwargs']['num_iters']
+        self.num_steps_to_sample = kwargs['training_kwargs']['num_steps_to_sample']
+        self.num_grad_steps = kwargs['training_kwargs']['num_grad_steps']
+        self.batch_size = kwargs['training_kwargs']['batch_size']
+        self.num_eval_steps_to_sample = kwargs['training_kwargs']['num_eval_steps_to_sample']
+        self.min_steps_to_presample = kwargs['training_kwargs']['min_steps_to_presample']
+
+        if self.seed is not None:
+            random.seed(self.seed)
+            np.random.seed(self.seed)
+            torch.manual_seed(self.seed)
+
+        # instantiate necessary items;
+        self.policy = policy_constructor(**kwargs['policy_kwargs'])
+        self.Q1 = qfunc_constructor(**kwargs['Q1_kwargs'])
+        self.Q2 = qfunc_constructor(**kwargs['Q2_kwargs'])
+        self.Q1t = qfunc_constructor(**kwargs['Q1t_kwargs'])
+        self.Q2t = qfunc_constructor(**kwargs['Q2t_kwargs'])
+        
+        # don't track grads for target q funcs
+        # and set them in eval mode;
+        self.Q1t.requires_grad_(False)
+        self.Q2t.requires_grad_(False)
+        self.Q1t.eval()
+        self.Q2t.eval()
+
+        # instantiate remaining utilities;
+        self.buffer = buffer_constructor(**kwargs['buffer_kwargs'])
+        self.env = env_constructor(**kwargs['env_kwargs'])
+        self.log_temperature = torch.tensor(0.0, requires_grad=True)
+        self.entropy_lb = (
+            entropy_lb if entropy_lb else -kwargs['policy_kwargs']['action_dim']
+        )
+        self.tau = tau
+        self.discount = discount
+
+        # instantiate the optimisers;
         self.policy_optim = torch.optim.Adam(
             self.policy.parameters(), lr=policy_lr
         )
-        self.log_temperature = torch.tensor(0.0, requires_grad=True)
         self.temperature_optim = torch.optim.Adam(
             [self.log_temperature], lr=temperature_lr
         )
-        self.entropy_lb = (
-            entropy_lb if entropy_lb else -policy_kwargs["action_dim"]
+        self.Q1_optim = torch.optim.Adam(
+            self.Q1.parameters(), lr=qfunc_lr
         )
+        self.Q2_optim = torch.optim.Adam(
+            self.Q2.parameters(), lr=qfunc_lr
+        )
+        
+        # loss variables;
         self.temperature_loss = None
         self.policy_loss = None
+        self.Q1_loss, self.Q2_loss = None, None
+        
+        # bookkeeping metrics;
         self.policy_losses = []
         self.temperature_losses = []
+        self.Q1_losses, self.Q2_losses = [], []
         self.temperatures = [math.exp(self.log_temperature.item())]
+        self.eval_path_returns, self.eval_path_lens = [], []
 
     def sample_action(self, obs):
         pass
@@ -68,7 +134,14 @@ class SACAgentBase:
     def get_policy_loss_and_temperature_loss(self, *args, **kwargs):
         pass
 
-    def update_policy_and_temperature(self):
+    def get_q_losses(self, *args, **kwargs):
+        pass
+
+    def track_qfunc_params(self):
+        track_params(self.Q1t, self.Q1, self.tau)
+        track_params(self.Q2t, self.Q2, self.tau)
+
+    def update_parameters(self):
         # update policy params;
         self.policy_optim.zero_grad()
         self.policy_loss.backward()
@@ -82,26 +155,126 @@ class SACAgentBase:
         # add new temperature to list;
         self.temperatures.append(math.exp(self.log_temperature.item()))
 
+        # update qfunc1
+        self.Q1_optim.zero_grad()
+        self.Q1_loss.backward()
+        self.Q1_optim.step()
+
+        # update qfunc2
+        self.Q2_optim.zero_grad()
+        self.Q2_loss.backward()
+        self.Q2_optim.step()
+    
+    def check_presample(self):
+        if self.min_steps_to_presample:
+            self.buffer.collect_path(
+                self.env, self, self.min_steps_to_presample
+            )
+            self.min_steps_to_presample = 0
+    
+    def train_one_epoch(self, *args, **kwargs):
+        pass
+
+    def train_k_epochs(self, k, *args, 
+                       save_to=None, config=None, vis_graph=False,
+                       **kwargs):
+        for _ in range(k):
+            self.train_one_epoch(*args, **kwargs)
+        if save_to is not None:
+            metric_names = [
+                "policy-loss",
+                "temperature-loss",
+                "qfunc1-loss",
+                "qfunc2-loss",
+                "avg-reward",
+                "path-lens",
+                "ma-path-lens-30",
+                "undiscounted-returns",
+                "ma-returns-30",
+                "eval-path-returns",
+                "eval-ma-returns-30",
+                "eval-path-lens",
+                "eval-ma-path-lens-30",
+                "temperatures",
+            ]
+            metrics = [
+                self.policy_losses,
+                self.temperature_losses,
+                self.Q1_losses,
+                self.Q2_losses,
+                self.buffer.avg_rewards_per_episode,
+                self.buffer.path_lens,
+                get_moving_avgs(self.buffer.path_lens, 30),
+                self.buffer.undiscounted_returns,
+                get_moving_avgs(self.buffer.undiscounted_returns, 30),
+                self.eval_path_returns,
+                get_moving_avgs(self.eval_path_returns, 30),
+                self.eval_path_lens,
+                get_moving_avgs(self.eval_path_lens, 30),
+                self.temperatures,
+            ]
+
+            edge_index, last_eval_rewards = None, None
+            if vis_graph:
+                obs, _, rewards, code = sample_eval_path_graph(
+                    self.env.spec.max_episode_steps,
+                    self.env,
+                    self,
+                    self.seed,
+                    verbose=True
+                )
+                print(f"code from sampling eval episode: {code}")
+                edge_index = obs[-1].edge_index.tolist()
+                last_eval_rewards = rewards
+
+            save_metrics(
+                save_to,
+                metric_names,
+                metrics,
+                self.name,
+                self.env.spec.id,
+                self.seed,
+                config,
+                edge_index=edge_index,
+                last_eval_rewards=last_eval_rewards,
+            )
+        
 
 
 class SACAgentGraph(SACAgentBase):
     def __init__(
         self,
         name,
-        policy,
-        policy_lr,
+        policy_constructor,
+        qfunc_constructor,
+        env_constructor,
+        buffer_constructor,
         entropy_lb,
+        policy_lr,
         temperature_lr,
-        **policy_kwargs,
+        qfunc_lr,
+        tau,
+        discount,
+        UT_trick=False,
+        with_entropy=False,
+        **kwargs,
     ):
         super(SACAgentGraph, self).__init__(
             name,
-            policy,
-            policy_lr,
+            policy_constructor,
+            qfunc_constructor,
+            env_constructor,
+            buffer_constructor,
             entropy_lb,
+            policy_lr,
             temperature_lr,
-            **policy_kwargs,
+            qfunc_lr,
+            tau,
+            discount,
+            **kwargs,
         )
+        self.UT_trick = UT_trick
+        self.with_entropy = with_entropy
 
     def sample_action(self, obs):
         policy_dist, node_embeds = self.policy(obs)
@@ -112,33 +285,33 @@ class SACAgentGraph(SACAgentBase):
         mus1, mus2 = policy_dist.mean
         return (mus1.detach(), mus2.detach()), node_embeds
 
-    def get_policy_loss_and_temperature_loss(
-        self, obs_t, qfunc1, qfunc2, UT_trick=False, with_entropy=False
-    ):
+    def get_policy_loss_and_temperature_loss(self, obs_t):
         # freeze q-nets and eval at current observation
         # and reparam trick action and choose min for policy loss;
-        qfunc1.requires_grad_(False)
-        qfunc2.requires_grad_(False)
+        self.Q1.requires_grad_(False)
+        self.Q2.requires_grad_(False)
+        self.Q1.eval()
+        self.Q2.eval()
         self.policy.train()
 
         # get policy;
         policy_density, node_embeds = self.policy(obs_t)
 
-        if UT_trick:
+        if self.UT_trick:
             # raise NotImplementedError("UT trick not implemented for the "
             #                           "TwoStageGauss Policy. "
             #                           "The cost is quadratic in "
             #                           "action dimension.")
-            if with_entropy:
+            if self.with_entropy:
                 log_pi_integral =  - policy_density.entropy().sum(-1)
             else:
                 log_pi_integral = policy_density.log_prob_UT_trick().sum(-1)
             UT_trick_samples = policy_density.get_UT_trick_input()
             q1_integral = batch_UT_trick_from_samples(
-                qfunc1.net, qfunc1.encoder(obs_t), UT_trick_samples
+                self.Q1.net, self.Q1.encoder(obs_t), UT_trick_samples
             )
             q2_integral = batch_UT_trick_from_samples(
-                qfunc2.net, qfunc2.encoder(obs_t), UT_trick_samples
+                self.Q2.net, self.Q2.encoder(obs_t), UT_trick_samples
             )
             q_integral = torch.min(q1_integral, q2_integral).view(-1)
 
@@ -158,18 +331,18 @@ class SACAgentGraph(SACAgentBase):
             repr_trick1, repr_trick2 = policy_density.rsample()
 
             # get log prob for policy optimisation;
-            if with_entropy:
+            if self.with_entropy:
                 log_prob = - policy_density.entropy().sum(-1)
             else:
                 log_prob = policy_density.log_prob(repr_trick1, repr_trick2).sum(-1)
 
             obs_t = global_mean_pool(node_embeds, obs_t.batch).detach()  # pretend this was input with no grad tracking;
             qfunc_in = torch.cat((obs_t, repr_trick1, repr_trick2), -1)
-            q_est = torch.min(qfunc1.net(qfunc_in), qfunc2.net(qfunc_in)).view(-1)
+            q_est = torch.min(self.Q1.net(qfunc_in), self.Q2.net(qfunc_in)).view(-1)
 
             # get loss for policy;
             self.policy_loss = (
-                np.exp(self.log_temperature.item()) * log_prob - q_est
+                math.exp(self.log_temperature.item()) * log_prob - q_est
             ).mean()
 
             # get temperature loss;
@@ -181,26 +354,170 @@ class SACAgentGraph(SACAgentBase):
         # housekeeping;
         self.policy_losses.append(self.policy_loss.item())
         self.temperature_losses.append(self.temperature_loss.item())
+    
+    def get_q_losses(
+            self,
+            obs_t,
+            action_t,
+            reward_t,
+            obs_tp1,
+            terminated_tp1,
+    ):
+        self.Q1.requires_grad_(True)
+        self.Q2.requires_grad_(True)
+        self.Q1.train()
+        self.Q2.train()
+    
+        # get predictions from q functions;
+        obs_action_t = (obs_t, action_t)
+        policy_density, node_embeds = self.policy(obs_tp1)
+        node_embeds = node_embeds.detach()  # use embeds only as inputs;
+        
+        # the action_is_index boolean will only be considered
+        # if self.encoder is not None;
+        q1_est = self.Q1(obs_action_t, action_is_index=True).view(-1)
+        q2_est = self.Q2(obs_action_t, action_is_index=True).view(-1)
+    
+        if self.UT_trick:
+            # get (B, 2 * action_dim + 1, action_dim) samples;
+            UT_trick_samples = policy_density.get_UT_trick_input()
+            
+            # eval expectation of q-target functions by averaging over the
+            # 2 * action_dim + 1 samples and get (B, 1) output;
+            qt1_est = batch_UT_trick_from_samples(
+                self.Qt1.net, self.Qt1.encoder(obs_tp1), UT_trick_samples
+            )
+            qt2_est = batch_UT_trick_from_samples(
+                self.Qt2.net, self.Qt2.encoder(obs_tp1), UT_trick_samples
+            )
+
+            # get negative entropy by using the UT trick;
+            if self.with_entropy:
+                log_probs = - policy_density.entropy().sum(-1)
+            else:
+                log_probs = policy_density.log_prob_UT_trick().sum(-1)
+        else:
+            # sample future action;
+            action_tp1 = policy_density.sample()
+    
+            # get log probs;
+            if self.with_entropy:
+                log_probs = - policy_density.entropy().sum(-1).view(-1)
+            else:         
+                log_probs = policy_density.log_prob(*action_tp1).sum(-1).view(-1)
+            
+            # input for target nets;
+            obs_tp1 = global_mean_pool(node_embeds, obs_tp1.batch)
+            # action_tp1 = (a1, a2) -> tuple of action vectors;
+            obs_action_tp1 = torch.cat((obs_tp1,) + action_tp1, -1)
+            qt1_est, qt2_est = self.Qt1.net(obs_action_tp1), self.Qt2.net(obs_action_tp1)
+        
+        # use the values from the target net that
+        # had lower value predictions;
+        q_target = (
+            torch.min(qt1_est, qt2_est).view(-1)
+            - self.log_temperature.exp() * log_probs
+        )
+        
+        q_target = (
+            reward_t + (1 - terminated_tp1.int()) * self.discount * q_target
+        ).detach()
+    
+        # loss for first q func;
+        self.Q1_loss = nn.MSELoss()(q1_est, q_target)
+    
+        # loss for second q func;
+        self.Q2_loss = nn.MSELoss()(q2_est, q_target)
+    
+        self.Q1_losses.append(self.Q1_loss.item())
+        self.Q2_losses.append(self.Q2_losses.item())
+    
+    def train_one_epoch(self):
+        # presample if needed;
+        self.check_presample()
+
+        for _ in tqdm(range(self.num_iters)):
+            # sample paths;
+            self.buffer.collect_path(
+                self.env,
+                self,
+                self.num_steps_to_sample,
+            )
+    
+            # sample paths with delta func policy;
+            observations, actions, rewards, code = sample_eval_path_graph(
+                self.num_eval_steps_to_sample, 
+                self.env, 
+                self, 
+                seed=self.buffer.seed - 1
+            )
+            self.eval_path_returns.append(np.sum(rewards))
+            self.eval_path_lens.append(len(actions))
+    
+            # do the gradient updates;
+            for _ in range(self.num_grad_steps):
+                (
+                    obs_t,
+                    action_t,
+                    reward_t,
+                    obs_tp1,
+                    terminated_tp1,
+                ) = self.buffer.sample(self.batch_size)
+
+                # get temperature and policy loss;
+                self.get_policy_loss_and_temperature_loss(obs_t)
+    
+                # value func updates;
+                self.get_q_losses(
+                    obs_t,
+                    action_t,
+                    reward_t,
+                    obs_tp1,
+                    terminated_tp1,
+                )
+    
+                # grad step on policy, temperature, Q1 and Q2;
+                self.update_parameters()
+    
+                # target q funcs update;
+                self.track_qfunc_params()
+        
 
 
 class SACAgentMuJoCo(SACAgentBase):
     def __init__(
         self,
         name,
-        policy,
-        policy_lr,
+        policy_constructor,
+        qfunc_constructor,
+        env_constructor,
+        buffer_constructor,
         entropy_lb,
+        policy_lr,
         temperature_lr,
-        **policy_kwargs,
+        qfunc_lr,
+        tau,
+        discount,
+        UT_trick=False,
+        with_entropy=False,
+        **kwargs,
     ):
         super(SACAgentMuJoCo, self).__init__(
             name,
-            policy,
-            policy_lr,
+            policy_constructor,
+            qfunc_constructor,
+            env_constructor,
+            buffer_constructor,
             entropy_lb,
+            policy_lr,
             temperature_lr,
-            **policy_kwargs,
+            qfunc_lr,
+            tau,
+            discount,
+            **kwargs,
         )
+        self.UT_trick = UT_trick
+        self.with_entropy = with_entropy
 
     def sample_action(self, obs):
         policy_density = self.policy(obs)
@@ -211,35 +528,35 @@ class SACAgentMuJoCo(SACAgentBase):
         policy_density = self.policy(obs)
         return policy_density.mean.detach()
 
-    def get_policy_loss_and_temperature_loss(
-        self, obs_t, qfunc1, qfunc2, UT_trick=False, with_entropy=False
-    ):
+    def get_policy_loss_and_temperature_loss(self, obs_t):
         # freeze q-nets and eval at current observation
         # and reparam trick action and choose min for policy loss;
-        qfunc1.requires_grad_(False)
-        qfunc2.requires_grad_(False)
+        self.Q1.requires_grad_(False)
+        self.Q2.requires_grad_(False)
+        self.Q1.eval()
+        self.Q2.eval()
         self.policy.train()
 
         # get policy;
         policy_density = self.policy(obs_t)
 
-        if UT_trick:
-            if with_entropy:
+        if self.UT_trick:
+            if self.with_entropy:
                 log_pi_integral = - policy_density.entropy().sum(-1)
             else:
                 log_pi_integral = policy_density.log_prob_UT_trick().sum(-1)
             UT_trick_samples = policy_density.get_UT_trick_input()
             q1_integral = batch_UT_trick_from_samples(
-                qfunc1, obs_t, UT_trick_samples
+                self.Q1, obs_t, UT_trick_samples
             )
             q2_integral = batch_UT_trick_from_samples(
-                qfunc2, obs_t, UT_trick_samples
+                self.Q2, obs_t, UT_trick_samples
             )
             q_integral = torch.min(q1_integral, q2_integral).view(-1)
 
             # get policy_loss;
             self.policy_loss = (
-                np.exp(self.log_temperature.item()) * log_pi_integral
+                math.exp(self.log_temperature.item()) * log_pi_integral
                 - q_integral
             ).mean()
 
@@ -253,13 +570,13 @@ class SACAgentMuJoCo(SACAgentBase):
             repr_trick = policy_density.rsample()
 
             # get log prob for policy optimisation;
-            if with_entropy:
+            if self.with_entropy:
                 log_prob = - policy_density.entropy().sum(-1)
             else:
                 log_prob = policy_density.log_prob(repr_trick).sum(-1)
 
             qfunc_in = torch.cat((obs_t, repr_trick), -1)
-            q_est = torch.min(qfunc1(qfunc_in), qfunc2(qfunc_in)).view(-1)
+            q_est = torch.min(self.Q1(qfunc_in), self.Q2(qfunc_in)).view(-1)
 
             # get loss for policy;
             self.policy_loss = (
@@ -275,233 +592,131 @@ class SACAgentMuJoCo(SACAgentBase):
         # housekeeping;
         self.policy_losses.append(self.policy_loss.item())
         self.temperature_losses.append(self.temperature_loss.item())
-
-
-def track_params(Q1t, Q1, tau):
-    """
-    Updates parameters of Q1t to be:
-    Q1t = Q1 * tau + Q1t * (1 - tau).
-    """
-    theta = nn.utils.parameters_to_vector(Q1.parameters()) * tau + (
-        1 - tau
-    ) * nn.utils.parameters_to_vector(Q1t.parameters())
-
-    # load theta as the new params of Q1;
-    nn.utils.vector_to_parameters(theta, Q1t.parameters())
-
-
-def load_params_in_net(net: nn.Module, parameters: Iterable):
-    """
-    Loads parameters in the layers of net.
-    """
-    nn.utils.vector_to_parameters(
-        nn.utils.parameters_to_vector(parameters), net.parameters()
-    )
-
-
-def get_q_losses(
-    qfunc1,
-    qfunc2,
-    qt1,
-    qt2,
-    obs_t,
-    action_t,
-    reward_t,
-    obs_tp1,
-    terminated_tp1,
-    agent,
-    discount,
-    UT_trick=False,
-    with_entropy=False,
-    for_graph=False,
-):
-    qfunc1.requires_grad_(True)
-    qfunc2.requires_grad_(True)
-
-    # get predictions from q functions;
-    if for_graph:
-        obs_action_t = (obs_t, action_t)
-        policy_density, node_embeds = agent.policy(obs_tp1)
-        node_embeds = node_embeds.detach()  # use embeds only as inputs;
-    else:
+    
+    def get_q_losses(
+            self,
+            obs_t,
+            action_t,
+            reward_t,
+            obs_tp1,
+            terminated_tp1,
+    ):
+        self.Q1.requires_grad_(True)
+        self.Q2.requires_grad_(True)
+        self.Q1.train()
+        self.Q2.train()
+    
+        # get predictions from q functions;
         obs_action_t = torch.cat((obs_t, action_t), -1)
-        policy_density = agent.policy(obs_tp1)
-    # the action_is_index boolean will only be considered
-    # if self.encoder is not None;
-    q1_est = qfunc1(obs_action_t, action_is_index=True).view(-1)
-    q2_est = qfunc2(obs_action_t, action_is_index=True).view(-1)
-
-    if UT_trick:
-        # get (B, 2 * action_dim + 1, action_dim) samples;
-        UT_trick_samples = policy_density.get_UT_trick_input()
-        # eval expectation of q-target functions by averaging over the
-        # 2 * action_dim + 1 samples and get (B, 1) output;
-        if for_graph:
+        policy_density = self.policy(obs_tp1)
+        
+        # the action_is_index boolean will only be considered
+        # if self.encoder is not None;
+        q1_est = self.Q1(obs_action_t, action_is_index=True).view(-1)
+        q2_est = self.Q2(obs_action_t, action_is_index=True).view(-1)
+    
+        if self.UT_trick:
+            # get (B, 2 * action_dim + 1, action_dim) samples;
+            UT_trick_samples = policy_density.get_UT_trick_input()
+            
+            # eval expectation of q-target functions by averaging over the
+            # 2 * action_dim + 1 samples and get (B, 1) output;
             qt1_est = batch_UT_trick_from_samples(
-                qt1.net, qt1.encoder(obs_tp1), UT_trick_samples
+                self.Qt1, obs_tp1, UT_trick_samples
             )
             qt2_est = batch_UT_trick_from_samples(
-                qt2.net, qt2.encoder(obs_tp1), UT_trick_samples
+                self.Qt2, obs_tp1, UT_trick_samples
             )
+            # get negative entropy by using the UT trick;
+            if self.with_entropy:
+                log_probs = - policy_density.entropy().sum(-1)
+            else:
+                log_probs = policy_density.log_prob_UT_trick().sum(-1)
         else:
-            qt1_est = batch_UT_trick_from_samples(
-                qt1, obs_tp1, UT_trick_samples
-            )
-            qt2_est = batch_UT_trick_from_samples(
-                qt2, obs_tp1, UT_trick_samples
-            )
-        # get negative entropy by using the UT trick;
-        if with_entropy:
-            log_probs = - policy_density.entropy().sum(-1)
-        else:
-            log_probs = policy_density.log_prob_UT_trick().sum(-1)
-    else:
-        # sample future action;
-        action_tp1 = policy_density.sample()
-
-        # get log probs;
-        if with_entropy:
-            log_probs = - policy_density.entropy().sum(-1).view(-1)
-        else:
-            if for_graph:
-                log_probs = policy_density.log_prob(*action_tp1).sum(-1).view(-1)
+            # sample future action;
+            action_tp1 = policy_density.sample()
+    
+            # get log probs;
+            if self.with_entropy:
+                log_probs = - policy_density.entropy().sum(-1).view(-1)
             else:
                 log_probs = policy_density.log_prob(action_tp1).sum(-1).view(-1)
-
-        # input for target nets;
-        if for_graph:
-            obs_tp1 = global_mean_pool(node_embeds, obs_tp1.batch)
-            # action_tp1 = (a1, a2) -> tuple of action vectors;
-            obs_action_tp1 = torch.cat((obs_tp1,) + action_tp1, -1)
-            qt1_est, qt2_est = qt1.net(obs_action_tp1), qt2.net(obs_action_tp1)
-        else:
+    
+            # input for target nets;
             obs_action_tp1 = torch.cat((obs_tp1, action_tp1), -1)
             # estimate values with target nets;
-            qt1_est, qt2_est = qt1(obs_action_tp1), qt2(obs_action_tp1)
-
-    # use the values from the target net that
-    # had lower value predictions;
-    q_target = (
-        torch.min(qt1_est, qt2_est).view(-1)
-        - agent.log_temperature.exp() * log_probs
-    )
+            qt1_est, qt2_est = self.Qt1(obs_action_tp1), self.Qt2(obs_action_tp1)
     
-    q_target = (
-        reward_t + (1 - terminated_tp1.int()) * discount * q_target
-    ).detach()
-
-    # loss for first q func;
-    loss_q1 = nn.MSELoss()(q1_est, q_target)
-
-    # loss for second q func;
-    loss_q2 = nn.MSELoss()(q2_est, q_target)
-
-    return loss_q1, loss_q2
-
-
-def update_q_funcs(loss_q1, loss_q2, optim_q1, optim_q2):
-    # update first q func;
-    optim_q1.zero_grad()
-    loss_q1.backward()
-    optim_q1.step()
-
-    # update second q func;
-    optim_q2.zero_grad()
-    loss_q2.backward()
-    optim_q2.step()
-
-
-def train_sac_one_epoch(
-    env,
-    agent,
-    Q1,
-    Q2,
-    Q1t,
-    Q2t,
-    optimQ1,
-    optimQ2,
-    tau,
-    discount,
-    num_iters,
-    num_grad_steps,
-    num_steps_to_sample,
-    num_eval_steps_to_sample,
-    buffer,
-    batch_size,
-    qfunc1_losses: list,
-    qfunc2_losses: list,
-    UT_trick=False,
-    with_entropy=False,
-    for_graph=False,
-    eval_path_returns: list = None,
-    eval_path_lens: list = None,
-):
-    for _ in tqdm(range(num_iters)):
-        # sample paths;
-        buffer.collect_path(
-            env,
-            agent,
-            num_steps_to_sample,
+        # use the values from the target net that
+        # had lower value predictions;
+        q_target = (
+            torch.min(qt1_est, qt2_est).view(-1)
+            - agent.log_temperature.exp() * log_probs
         )
+        
+        q_target = (
+            reward_t + (1 - terminated_tp1.int()) * self.discount * q_target
+        ).detach()
+    
+        # loss for first q func;
+        self.Q1_loss = nn.MSELoss()(q1_est, q_target)
+    
+        # loss for second q func;
+        self.Q2_loss = nn.MSELoss()(q2_est, q_target)
 
-        # sample paths with delta func policy;
-        if eval_path_returns is not None and eval_path_lens is not None:
-            if for_graph:
-                observations, actions, rewards, code = sample_eval_path_graph(
-                    num_eval_steps_to_sample, env, agent, seed=buffer.seed - 1
-                )              
-            else:  
-                observations, actions, rewards, code = sample_eval_path(
-                    num_eval_steps_to_sample, env, agent, seed=buffer.seed - 1
+        # bookkeeping;
+        self.Q1_losses.append(self.Q1_loss.item())
+        self.Q2_losses.append(self.Q2_loss.item())
+    
+    def train_one_epoch(self):
+        # presample if needed;
+        self.check_presample()
+        
+        for _ in tqdm(range(self.num_iters)):
+            # sample paths;
+            self.buffer.collect_path(
+                self.env,
+                self,
+                self.num_steps_to_sample,
+            )
+    
+            # sample paths with delta func policy;
+            observations, actions, rewards, code = sample_eval_path(
+                self.num_eval_steps_to_sample, 
+                self.env, 
+                self, 
+                seed=self.buffer.seed - 1
+            )
+            self.eval_path_returns.append(np.sum(rewards))
+            self.eval_path_lens.append(len(actions))
+    
+            # do the gradient updates;
+            for _ in range(self.num_grad_steps):
+                (
+                    obs_t,
+                    action_t,
+                    reward_t,
+                    obs_tp1,
+                    terminated_tp1,
+                ) = self.buffer.sample(self.batch_size)
+
+                # get temperature and policy loss;
+                self.get_policy_loss_and_temperature_loss(obs_t)
+    
+                # value func updates;
+                self.get_q_losses(
+                    obs_t,
+                    action_t,
+                    reward_t,
+                    obs_tp1,
+                    terminated_tp1,
                 )
-            eval_path_returns.append(np.sum(rewards))
-            eval_path_lens.append(len(actions))
-
-        # do the gradient updates;
-        for _ in range(num_grad_steps):
-            (
-                obs_t,
-                action_t,
-                reward_t,
-                obs_tp1,
-                terminated_tp1,
-            ) = buffer.sample(batch_size)
-            # get temperature and policy loss;
-            agent.get_policy_loss_and_temperature_loss(
-                obs_t, Q1, Q2, UT_trick, with_entropy
-            )
-
-            # value func updates;
-            l1, l2 = get_q_losses(
-                Q1,
-                Q2,
-                Q1t,
-                Q2t,
-                obs_t,
-                action_t,
-                reward_t,
-                obs_tp1,
-                terminated_tp1,
-                agent,
-                discount,
-                UT_trick,
-                with_entropy,
-                for_graph,
-            )
-
-            # qfunc losses housekeeping;
-            qfunc1_losses.append(l1.item())
-            qfunc2_losses.append(l2.item())
-
-            # grad step on policy and temperature;
-            agent.update_policy_and_temperature()
-
-            # grad steps on q funcs;
-            update_q_funcs(l1, l2, optimQ1, optimQ2)
-
-            # target q funcs update;
-            track_params(Q1t, Q1, tau)
-            track_params(Q2t, Q2, tau)
+    
+                # grad step on policy, temperature, Q1 and Q2;
+                self.update_parameters()
+    
+                # target q funcs update;
+                self.track_qfunc_params()
 
 
 def save_metrics(
@@ -545,193 +760,3 @@ def save_metrics(
         save_returns_to,
         seed,
     )
-
-
-def train_sac(
-    env,
-    agent,
-    num_iters,
-    qfunc_hiddens,
-    qfunc_layer_norm,
-    qfunc_lr,
-    buffer_len,
-    batch_size,
-    discount,
-    tau,
-    seed,
-    save_returns_to: Path = None,
-    num_steps_to_sample=500,
-    num_eval_steps_to_sample=500,
-    num_grad_steps=500,
-    num_epochs=100,
-    min_steps_to_presample=1000,
-    UT_trick=False,
-    with_entropy=False,
-    for_graph=False,
-    qfunc1_encoder=None,
-    qfunc2_encoder=None,
-    qfunc1t_encoder=None,
-    qfunc2t_encoder=None,
-    buffer_instance=None,
-    config=None,
-    verbose=False,
-    **agent_policy_kwargs,
-):
-    # instantiate necessary objects;
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    if for_graph:
-        obs_dim = qfunc1_encoder.hiddens[-1]
-        action_dim = obs_dim
-        obs_action_dim = obs_dim * 3
-    else:
-        obs_dim = env.observation_space.shape[0]
-        action_dim = env.action_space.shape[0]
-        obs_action_dim = obs_dim + action_dim
-    if for_graph:
-        assert qfunc1_encoder is not None and qfunc2_encoder is not None
-
-    # init 2 q nets;
-    Q1 = Qfunc(
-        obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm, 
-        encoder=qfunc1_encoder,
-    )
-    Q2 = Qfunc(
-        obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm,
-        encoder=qfunc2_encoder,
-    )
-    optimQ1 = torch.optim.Adam(Q1.parameters(), lr=qfunc_lr)
-    optimQ2 = torch.optim.Adam(Q2.parameters(), lr=qfunc_lr)
-
-    # init 2 target qnets with same parameters as q1 and q2;
-    Q1t = Qfunc(
-        obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm,
-        encoder=qfunc1t_encoder
-    )
-    Q2t = Qfunc(
-        obs_action_dim, qfunc_hiddens, with_layer_norm=qfunc_layer_norm,
-        encoder=qfunc2t_encoder
-    )
-    load_params_in_net(Q1t, Q1.parameters())
-    load_params_in_net(Q2t, Q2.parameters())
-
-    # target nets only track params of q-nets;
-    # don't optimise them explicitly;
-    Q1t.requires_grad_(False)
-    Q2t.requires_grad_(False)
-
-    # make agent;
-    agent = agent(
-        **agent_policy_kwargs["agent_kwargs"],
-        **agent_policy_kwargs["policy_kwargs"],
-    )
-
-    # whether entropy and UT are used;
-    agent.name = (
-        agent.name
-        + f"-{agent.policy.name}-UT-{int(UT_trick)}-entropy-{int(with_entropy)}-buffer-size-{buffer_len}-epochs-{num_epochs}-iters-{num_iters}"
-    )
-
-    # init replay buffer;
-    qfunc1_losses, qfunc2_losses = [], []
-    if buffer_instance is not None:
-        buffer = buffer_instance
-    else:
-        buffer = Buffer(buffer_len, obs_dim, action_dim, seed=seed)
-
-    # see if presampling needed.
-    if min_steps_to_presample > 0:
-        buffer.collect_path(env, agent, min_steps_to_presample)
-
-    eval_path_returns = []
-    eval_path_lens = []
-    # start running episodes;
-    for _ in tqdm(range(num_epochs)):
-        train_sac_one_epoch(
-            env,
-            agent,
-            Q1,
-            Q2,
-            Q1t,
-            Q2t,
-            optimQ1,
-            optimQ2,
-            tau,
-            discount,
-            num_iters,
-            num_grad_steps,
-            num_steps_to_sample,
-            num_eval_steps_to_sample,
-            buffer,
-            batch_size,
-            qfunc1_losses,
-            qfunc2_losses,
-            UT_trick,
-            with_entropy,
-            for_graph,
-            eval_path_returns,
-            eval_path_lens,
-        )
-
-    # optionally save for this seed from all episodes;
-    if save_returns_to:
-        metric_names = [
-            "policy-loss",
-            "temperature-loss",
-            "qfunc1-loss",
-            "qfunc2-loss",
-            "avg-reward",
-            "path-lens",
-            "ma-path-lens-30",
-            "undiscounted-returns",
-            "ma-returns-30",
-            "eval-path-returns",
-            "eval-ma-returns-30",
-            "eval-path-lens",
-            "eval-ma-path-lens-30",
-            "temperatures",
-        ]
-        metrics = [
-            agent.policy_losses,
-            agent.temperature_losses,
-            qfunc1_losses,
-            qfunc2_losses,
-            buffer.avg_rewards_per_episode,
-            buffer.path_lens,
-            get_moving_avgs(buffer.path_lens, 30),
-            buffer.undiscounted_returns,
-            get_moving_avgs(buffer.undiscounted_returns, 30),
-            eval_path_returns,
-            get_moving_avgs(eval_path_returns, 30),
-            eval_path_lens,
-            get_moving_avgs(eval_path_lens, 30),
-            agent.temperatures,
-        ]
-
-        # see if graph will be visualised;
-        edge_index, last_eval_rewards = None, None
-        if for_graph:
-            obs, _, rewards, code = sample_eval_path_graph(
-                env.spec.max_episode_steps, env, agent, seed, verbose=verbose
-            )
-            if verbose:
-                print(f"code from sampling eval episode: {code}")
-            edge_index = obs[-1].edge_index.tolist()
-            last_eval_rewards = rewards
-        
-        # save the metrics as numbers as well as plot;
-        save_metrics(
-            save_returns_to,
-            metric_names,
-            metrics,
-            agent.name,
-            env.spec.id,
-            seed,
-            config,
-            edge_index=edge_index,
-            last_eval_rewards=last_eval_rewards,
-        )
-
-    # return the q funcs and the agent;
-    return Q1, Q2, agent
