@@ -328,6 +328,7 @@ if __name__ == "__main__":
 
     agent = SACAgentGraph(
         **agent_kwargs,
+        # cache_best_policy=True,
         UT_trick=config["extra_info_kwargs"]["UT_trick"],
         with_entropy=config["extra_info_kwargs"]["with_entropy"],
         **sac_agent_kwargs,
