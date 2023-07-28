@@ -8,8 +8,6 @@ from graph_irl.sac import *
 from graph_irl.graph_rl_utils import GraphEnv
 from graph_irl.buffer_v2 import GraphBuffer
 
-from torch_geometric.data import Data
-
 import random
 import numpy as np
 import torch
@@ -128,27 +126,27 @@ config = dict(
         max_size=10_000,
         nodes="gaussian",
     ),
-    general_kwargs=dict(
-        buffer_len=10_000,
+    training_kwargs=dict(
+        seed=0,
+        num_iters=100,
+        num_steps_to_sample=5 * n_nodes,
+        num_grad_steps=1,
+        batch_size=min(10 * n_nodes, 100),
+        num_eval_steps_to_sample=5 * n_nodes,
+        min_steps_to_presample=5 * n_nodes,
+    ),
+    extra_info_kwargs=dict(
         n_nodes=n_nodes,
         nodes="gaussian",
-        num_steps_to_sample=5 * n_nodes,
-        min_steps_to_presample=5 * n_nodes,
-        batch_size=min(10 * n_nodes, 100),
-        num_iters=100,
         num_epochs=10,
-        num_grad_steps=1,
-        seed=0,
-        discount=0.99,
-        tau=0.005,
         UT_trick=False,
         with_entropy=False,
         for_graph=True,
-        verbose=True,
+        vis_graph=True,
     ),
     env_kwargs=dict(
-        x="gaussian",
-        reward_fn="circle_reward",
+        nodes="gaussian",
+        reward_fn="SingleComponentGraphReward",
         max_episode_steps=n_nodes,
         num_expert_steps=n_nodes,
         max_repeats=1000,
@@ -173,29 +171,39 @@ config = dict(
         obs_dim=encoder_hiddens[-1],
         action_dim=encoder_hiddens[-1],
         hiddens1=[256, 256],
-        hiddens2=[
-            256,
-        ],
+        hiddens2=[256],
         encoder="GCN",
         with_layer_norm=True,
     ),
     agent_kwargs=dict(
         name="SACAgentGraph",
-        policy="TwoStageGaussPolicy",
-        policy_lr=3e-4,
+        policy_constructor="TwoStageGaussPolicy",
+        qfunc_constructor="Qfunc",
+        env_constructor="GraphEnv",
+        buffer_constructor="GraphBuffer",
         entropy_lb=encoder_hiddens[-1],
+        policy_lr=3e-4,
         temperature_lr=3e-4,
+        qfunc_lr=3e-4,
+        tau=0.005,
+        discount=0.99,
+        save_to=str(TEST_OUTPUTS_PATH),
     ),
     qfunc_kwargs=dict(
-        qfunc_hiddens=[256, 256],
-        qfunc_layer_norm=True,
-        qfunc_lr=3e-4,
-        qfunc1_encoder="GCN",
-        qfunc2_encoder="GCN",
-        qfunc1t_encoder="GCN",
-        qfunc2t_encoder="GCN",
+        obs_action_dim=3 * encoder_hiddens[-1],
+        hiddens=[256, 256],
+        with_layer_norm=True,
+        encoder="GCN",
     ),
 )
+
+constructors = {
+    "TwoStageGaussPolicy": TwoStageGaussPolicy,
+    "GaussPolicy": GaussPolicy,
+    "Qfunc": Qfunc,
+    "GraphEnv": GraphEnv,
+    "GraphBuffer": GraphBuffer,
+}
 
 
 if __name__ == "__main__":
@@ -209,32 +217,10 @@ if __name__ == "__main__":
     # create the node features;
     nodes = torch.randn((n_nodes, n_nodes))
 
-    # instantiate buffer;
-    buffer = GraphBuffer(
-        max_size=config["buffer_kwargs"]["max_size"],
-        nodes=nodes,
-        seed=config["general_kwargs"]["seed"],
-    )
-
     # instantiate reward;
     reward_fn = SingleComponentGraphReward(
-        config["general_kwargs"]["n_nodes"]
+        config["extra_info_kwargs"]["n_nodes"]
     )
-
-    # env setup;
-    env = GraphEnv(
-        x=nodes,
-        reward_fn=reward_fn,
-        max_episode_steps=config["general_kwargs"]["n_nodes"],
-        num_expert_steps=config["general_kwargs"]["n_nodes"],
-        max_repeats=config["env_kwargs"]["max_repeats"],
-        max_self_loops=config["env_kwargs"]["max_self_loops"],
-        drop_repeats_or_self_loops=config["env_kwargs"][
-            "drop_repeats_or_self_loops"
-        ],
-        reward_fn_termination=config["env_kwargs"]["reward_fn_termination"],
-    )
-    print(env.spec.id)
 
     # encoder setup;
     encoder = GCN(
@@ -276,45 +262,79 @@ if __name__ == "__main__":
     tsg_policy_kwargs = config["tsg_policy_kwargs"].copy()
     tsg_policy_kwargs["encoder"] = encoder
 
-    # setup agent;
-    agent_kwargs = config["agent_kwargs"].copy()
-    agent_kwargs["policy"] = TwoStageGaussPolicy
-    agent_policy_kwargs = dict(
-        agent_kwargs=agent_kwargs,
-        policy_kwargs=tsg_policy_kwargs,
+    # select policies from config['agent_kwargs']['policy_constructor'];
+    policies = {
+        "GaussPolicy": gauss_policy_kwargs,
+        "TwoStageGaussPolicy": tsg_policy_kwargs,
+    }
+
+    # qfunc kwargs;
+    Q1_kwargs = config["qfunc_kwargs"].copy()
+    Q1_kwargs["encoder"] = qfunc1_encoder
+
+    Q2_kwargs = config["qfunc_kwargs"].copy()
+    Q2_kwargs["encoder"] = qfunc2_encoder
+
+    Q1t_kwargs = config["qfunc_kwargs"].copy()
+    Q1t_kwargs["encoder"] = qfunc1t_encoder
+
+    Q2t_kwargs = config["qfunc_kwargs"].copy()
+    Q2t_kwargs["encoder"] = qfunc2t_encoder
+
+    # goes in the kwargs of the sac agent constructor;
+    sac_agent_kwargs = dict(
+        training_kwargs=config["training_kwargs"],
+        policy_kwargs=policies[config["agent_kwargs"]["policy_constructor"]],
+        Q1_kwargs=Q1_kwargs,
+        Q2_kwargs=Q2_kwargs,
+        Q1t_kwargs=Q1t_kwargs,
+        Q2t_kwargs=Q2t_kwargs,
+        buffer_kwargs=dict(
+            max_size=config["buffer_kwargs"]["max_size"],
+            nodes=nodes,
+            seed=config["training_kwargs"]["seed"],
+        ),
+        env_kwargs=dict(
+            x=nodes,
+            reward_fn=reward_fn,
+            max_episode_steps=config["env_kwargs"]["max_episode_steps"],
+            num_expert_steps=config["env_kwargs"]["num_expert_steps"],
+            max_repeats=config["env_kwargs"]["max_repeats"],
+            max_self_loops=config["env_kwargs"]["max_self_loops"],
+            drop_repeats_or_self_loops=config["env_kwargs"][
+                "drop_repeats_or_self_loops"
+            ],
+            reward_fn_termination=config["env_kwargs"][
+                "reward_fn_termination"
+            ],
+        ),
     )
 
-    Q1, Q2, agent = train_sac(
-        env=env,
-        agent=SACAgentGraph,
-        num_iters=config["general_kwargs"]["num_iters"],
-        qfunc_hiddens=config["qfunc_kwargs"]["qfunc_hiddens"],
-        qfunc_layer_norm=config["qfunc_kwargs"]["qfunc_layer_norm"],
-        qfunc_lr=config["qfunc_kwargs"]["qfunc_lr"],
-        buffer_len=config["buffer_kwargs"]["max_size"],
-        batch_size=config["general_kwargs"]["batch_size"],
-        discount=config["general_kwargs"]["discount"],
-        tau=config["general_kwargs"]["tau"],
-        seed=config["general_kwargs"]["seed"],
-        save_returns_to=TEST_OUTPUTS_PATH,
-        num_steps_to_sample=config["general_kwargs"]["num_steps_to_sample"],
-        num_eval_steps_to_sample=config["general_kwargs"][
-            "num_steps_to_sample"
-        ],
-        num_grad_steps=config["general_kwargs"]["num_grad_steps"],
-        num_epochs=config["general_kwargs"]["num_epochs"],
-        min_steps_to_presample=config["general_kwargs"][
-            "min_steps_to_presample"
-        ],
-        UT_trick=config["general_kwargs"]["UT_trick"],
-        with_entropy=config["general_kwargs"]["with_entropy"],
-        for_graph=config["general_kwargs"]["for_graph"],
-        qfunc1_encoder=qfunc1_encoder,
-        qfunc2_encoder=qfunc2_encoder,
-        qfunc1t_encoder=qfunc1_encoder,
-        qfunc2t_encoder=qfunc2t_encoder,
-        buffer_instance=buffer,
+    # for the positional args in the sac agent constructor;
+    agent_kwargs = config["agent_kwargs"].copy()
+    agent_kwargs["policy_constructor"] = constructors[
+        config["agent_kwargs"]["policy_constructor"]
+    ]
+    agent_kwargs["qfunc_constructor"] = constructors[
+        config["agent_kwargs"]["qfunc_constructor"]
+    ]
+    agent_kwargs["env_constructor"] = constructors[
+        config["agent_kwargs"]["env_constructor"]
+    ]
+    agent_kwargs["buffer_constructor"] = constructors[
+        config["agent_kwargs"]["buffer_constructor"]
+    ]
+    agent_kwargs["save_to"] = Path(config["agent_kwargs"]["save_to"])
+
+    agent = SACAgentGraph(
+        **agent_kwargs,
+        UT_trick=config["extra_info_kwargs"]["UT_trick"],
+        with_entropy=config["extra_info_kwargs"]["with_entropy"],
+        **sac_agent_kwargs,
+    )
+
+    agent.train_k_epochs(
+        k=config["extra_info_kwargs"]["num_epochs"],
         config=config,
-        verbose=config["general_kwargs"]["verbose"],
-        **agent_policy_kwargs,
+        vis_graph=config["extra_info_kwargs"]["vis_graph"],
     )
