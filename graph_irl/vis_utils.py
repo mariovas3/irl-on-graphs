@@ -43,7 +43,7 @@ def vis_graph_building(edge_index, save_to):
     for first, second in zip(*edge_index):
         if first > second:
             first, second = second, first
-        if (first, second) in unique_edges:
+        if (first, second) in unique_edges or first == second:
             continue
         edges.append((first, second))
         unique_edges.add((first, second))
@@ -52,6 +52,14 @@ def vis_graph_building(edge_index, save_to):
     fig = plt.figure(figsize=(12, 8))
 
     steps = len(edges)
+
+    # no connections;
+    if steps == 0:
+        file_name = save_to / f'last_episode_{len(edges)}_edges.png'
+        plt.savefig(file_name)
+        plt.close()
+        return
+
     rows = int(sqrt(steps))
     cols = int(steps / rows) + (1 if steps % rows else 0)
     for i in range(steps):
