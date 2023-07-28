@@ -1,9 +1,6 @@
 """
 TODO:
-    (1): Put all relevant items for the sac agent training in a 
-        class and implement a train method so that I can choose 
-        how much to train the sac agent. This will be helpful for 
-        the IRL task.
+        (1): Implement the UT trick for the graph case.
 """
 
 import math
@@ -21,6 +18,7 @@ from graph_irl.buffer_v2 import *
 from graph_irl.vis_utils import *
 
 from typing import Optional
+from copy import deepcopy
 from pathlib import Path
 import time
 import pickle
@@ -58,10 +56,20 @@ class SACAgentBase:
         tau,
         discount,
         save_to: Optional[Path] = TEST_OUTPUTS_PATH,
+        cache_best_policy=False,
         **kwargs,
     ):
         self.name = name
         self.save_to = save_to
+
+        # experimental:
+        # chache best nets;
+        self.cache_best_policy = cache_best_policy
+        self.best_eval_return = None
+        self.best_policy = None
+        self.best_Q1, self.best_Q2 = None, None
+        self.best_Q1t, self.best_Q2t = None, None
+        self.best_log_temp = None
 
         # training params;
         self.seed = kwargs["training_kwargs"]["seed"]
@@ -133,6 +141,14 @@ class SACAgentBase:
 
     def sample_action(self, obs):
         pass
+
+    def _cache(self):
+        self.best_policy = deepcopy(self.policy)
+        self.best_Q1 = deepcopy(self.Q1)
+        self.best_Q2 = deepcopy(self.Q2)
+        self.best_Q1t = deepcopy(self.Q1t)
+        self.best_Q2t = deepcopy(self.Q2t)
+        self.best_log_temp = deepcopy(self.log_temperature)
 
     def sample_deterministic(self, obs):
         pass
@@ -230,6 +246,16 @@ class SACAgentBase:
 
             edge_index, last_eval_rewards = None, None
             if vis_graph:
+                if self.best_policy is not None:
+                    self.policy = self.best_policy
+                    self.Q1 = self.best_Q1
+                    self.Q2 = self.best_Q2
+                    self.Q1t = self.best_Q1t
+                    self.Q2t = self.best_Q2t
+                    self.log_temperature = self.best_log_temp
+                    print(f"final eval with best policy")
+                
+                # do final eval;
                 obs, _, rewards, code = sample_eval_path_graph(
                     self.env.spec.max_episode_steps,
                     self.env,
@@ -269,6 +295,7 @@ class SACAgentGraph(SACAgentBase):
         tau,
         discount,
         save_to: Optional[Path] = TEST_OUTPUTS_PATH,
+        cache_best_policy=False,
         UT_trick=False,
         with_entropy=False,
         **kwargs,
@@ -286,6 +313,7 @@ class SACAgentGraph(SACAgentBase):
             tau,
             discount,
             save_to,
+            cache_best_policy,
             **kwargs,
         )
         self.UT_trick = UT_trick
@@ -456,7 +484,7 @@ class SACAgentGraph(SACAgentBase):
 
         self.Q1_losses.append(self.Q1_loss.item())
         self.Q2_losses.append(self.Q2_loss.item())
-
+    
     def train_one_epoch(self):
         # presample if needed;
         self.check_presample()
@@ -478,6 +506,11 @@ class SACAgentGraph(SACAgentBase):
             )
             self.eval_path_returns.append(np.sum(rewards))
             self.eval_path_lens.append(len(actions))
+
+            if self.cache_best_policy:
+                if self.best_eval_return is None or self.eval_path_returns[-1] > self.best_eval_return:
+                    self.best_eval_return = self.eval_path_returns[-1]
+                    self._cache()
 
             # do the gradient updates;
             for _ in range(self.num_grad_steps):
@@ -523,6 +556,7 @@ class SACAgentMuJoCo(SACAgentBase):
         tau,
         discount,
         save_to: Optional[Path] = TEST_OUTPUTS_PATH,
+        cache_best_policy=False,
         UT_trick=False,
         with_entropy=False,
         **kwargs,
@@ -540,6 +574,7 @@ class SACAgentMuJoCo(SACAgentBase):
             tau,
             discount,
             save_to,
+            cache_best_policy,
             **kwargs,
         )
         self.UT_trick = UT_trick
@@ -719,6 +754,12 @@ class SACAgentMuJoCo(SACAgentBase):
             )
             self.eval_path_returns.append(np.sum(rewards))
             self.eval_path_lens.append(len(actions))
+            
+            # check if can cache;
+            if self.cache_best_policy:
+                if self.best_eval_return is None or self.eval_path_returns[-1] > self.best_eval_return:
+                    self.best_eval_return = self.eval_path_returns[-1]
+                    self._cache()
 
             # do the gradient updates;
             for _ in range(self.num_grad_steps):
