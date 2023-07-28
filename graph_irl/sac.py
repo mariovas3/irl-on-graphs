@@ -1,6 +1,7 @@
 """
 TODO:
         (1): Implement the UT trick for the graph case.
+                - currently works for GaussPolicy;
 """
 
 import math
@@ -341,20 +342,19 @@ class SACAgentGraph(SACAgentBase):
         policy_density, node_embeds = self.policy(obs_t)
 
         if self.UT_trick:
-            # raise NotImplementedError("UT trick not implemented for the "
-            #                           "TwoStageGauss Policy. "
-            #                           "The cost is quadratic in "
-            #                           "action dimension.")
+            # currently works for gaussian policy;
             if self.with_entropy:
                 log_pi_integral = -policy_density.entropy().sum(-1)
             else:
                 log_pi_integral = policy_density.log_prob_UT_trick().sum(-1)
             UT_trick_samples = policy_density.get_UT_trick_input()
+            
+            # encoder(obs_t)[0] gives one vector per graph in batch;
             q1_integral = batch_UT_trick_from_samples(
-                self.Q1.net, self.Q1.encoder(obs_t), UT_trick_samples
+                self.Q1.net, self.Q1.encoder(obs_t)[0], UT_trick_samples
             )
             q2_integral = batch_UT_trick_from_samples(
-                self.Q2.net, self.Q2.encoder(obs_t), UT_trick_samples
+                self.Q2.net, self.Q2.encoder(obs_t)[0], UT_trick_samples
             )
             q_integral = torch.min(q1_integral, q2_integral).view(-1)
 
@@ -434,10 +434,10 @@ class SACAgentGraph(SACAgentBase):
             # eval expectation of q-target functions by averaging over the
             # 2 * action_dim + 1 samples and get (B, 1) output;
             qt1_est = batch_UT_trick_from_samples(
-                self.Q1t.net, self.Q1t.encoder(obs_tp1), UT_trick_samples
+                self.Q1t.net, self.Q1t.encoder(obs_tp1)[0], UT_trick_samples
             )
             qt2_est = batch_UT_trick_from_samples(
-                self.Q2t.net, self.Q2t.encoder(obs_tp1), UT_trick_samples
+                self.Q2t.net, self.Q2t.encoder(obs_tp1)[0], UT_trick_samples
             )
 
             # get negative entropy by using the UT trick;
