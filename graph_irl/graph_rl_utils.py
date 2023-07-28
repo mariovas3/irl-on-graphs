@@ -1,13 +1,3 @@
-"""
-TODO:
-    (1): implement reward func to be a func of 
-        torch_geometric.data.Data instance, 
-        the action indexes, and the number 
-        of times they were already selected.
-            - It may be convenient to use 
-              collections.Counter instead 
-              of set for unique_edges, therefore.
-"""
 from scipy.spatial import KDTree
 import torch
 from typing import Callable
