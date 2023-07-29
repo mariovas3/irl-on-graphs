@@ -214,7 +214,7 @@ class GraphEnv:
         )
 
 
-def get_action_vector_from_idx(node_embeds, action_idxs, batch_idxs):
+def get_action_vector_from_idx(node_embeds, action_idxs, num_graphs):
     """
     For each graph according to batch_idxs, return the node
     embeddings according to the indexes in action_idxs.
@@ -226,11 +226,8 @@ def get_action_vector_from_idx(node_embeds, action_idxs, batch_idxs):
         action_idxs (torch.Tensor): Indexes of shape (B, 2) where
             B is the size of the batch and for each graph we
             select 2 node embeddings.
-        batch_idxs (torch.Tensor): The batch attribute of
-            torch_geometric.data.Data or torch_geometric.data.Batch
-            object.
+        num_graphs (int): number of graphs in batch.
     """
-    num_graphs = 1 if batch_idxs is None else len(torch.unique(batch_idxs))
     n_nodes = node_embeds.shape[0] // num_graphs
     action_idxs = (
         action_idxs + torch.arange(len(action_idxs)).view(-1, 1) * n_nodes

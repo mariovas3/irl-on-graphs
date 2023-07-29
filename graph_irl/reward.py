@@ -38,8 +38,13 @@ class GraphReward(nn.Module):
         batch, actions = obs_action
         obs, node_embeds = self.encoder(batch)
         if action_is_index:
+            num_graphs = 1
+            if hasattr(batch, 'num_graphs'):
+                num_graphs = batch.num_graphs
+            
+            # get actions -> vector of idxs of nodes;
             actions = get_action_vector_from_idx(
-                node_embeds, actions, batch.batch
+                node_embeds, actions, num_graphs
             )
         else:
             actions = torch.cat(actions, -1)
