@@ -126,6 +126,12 @@ config = dict(
         max_size=10_000,
         nodes="gaussian",
     ),
+    optimiser_constructors=dict(
+        policy_optim='Adam',
+        temperature_optim='Adam',
+        Q1_optim='Adam',
+        Q2_optim='Adam',
+    ),
     training_kwargs=dict(
         seed=0,
         num_iters=100,
@@ -188,6 +194,7 @@ config = dict(
         tau=0.005,
         discount=0.99,
         save_to=str(TEST_OUTPUTS_PATH),
+        clip_grads=False,
     ),
     qfunc_kwargs=dict(
         obs_action_dim=3 * encoder_hiddens[-1],
@@ -310,6 +317,11 @@ if __name__ == "__main__":
         ),
     )
 
+    opt_map = {
+        'Adam': torch.optim.Adam,
+        'SGD': torch.optim.SGD,
+    }
+
     # for the positional args in the sac agent constructor;
     agent_kwargs = config["agent_kwargs"].copy()
     agent_kwargs["policy_constructor"] = constructors[
@@ -325,6 +337,10 @@ if __name__ == "__main__":
         config["agent_kwargs"]["buffer_constructor"]
     ]
     agent_kwargs["save_to"] = Path(config["agent_kwargs"]["save_to"])
+    agent_kwargs['optimiser_constructors'] = {
+        k: opt_map[v]
+        for k, v in config['optimiser_constructors'].items()
+    }
 
     agent = SACAgentGraph(
         **agent_kwargs,

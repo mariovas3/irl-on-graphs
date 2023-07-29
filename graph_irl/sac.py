@@ -50,6 +50,7 @@ class SACAgentBase:
         qfunc_constructor,
         env_constructor,
         buffer_constructor,
+        optimiser_constructors,
         entropy_lb,
         policy_lr,
         temperature_lr,
@@ -58,10 +59,12 @@ class SACAgentBase:
         discount,
         save_to: Optional[Path] = TEST_OUTPUTS_PATH,
         cache_best_policy=False,
+        clip_grads=False,
         **kwargs,
     ):
         self.name = name
         self.save_to = save_to
+        self.clip_grads = clip_grads
 
         # experimental:
         # chache best nets;
@@ -119,14 +122,14 @@ class SACAgentBase:
         self.discount = discount
 
         # instantiate the optimisers;
-        self.policy_optim = torch.optim.Adam(
+        self.policy_optim = optimiser_constructors['policy_optim'](
             self.policy.parameters(), lr=policy_lr
         )
-        self.temperature_optim = torch.optim.Adam(
+        self.temperature_optim = optimiser_constructors['temperature_optim'](
             [self.log_temperature], lr=temperature_lr
         )
-        self.Q1_optim = torch.optim.Adam(self.Q1.parameters(), lr=qfunc_lr)
-        self.Q2_optim = torch.optim.Adam(self.Q2.parameters(), lr=qfunc_lr)
+        self.Q1_optim = optimiser_constructors['Q1_optim'](self.Q1.parameters(), lr=qfunc_lr)
+        self.Q2_optim = optimiser_constructors['Q2_optim'](self.Q2.parameters(), lr=qfunc_lr)
 
         # loss variables;
         self.temperature_loss = None
@@ -168,6 +171,8 @@ class SACAgentBase:
         # update policy params;
         self.policy_optim.zero_grad()
         self.policy_loss.backward()
+        if self.clip_grads:
+            nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=1.0)
         self.policy_optim.step()
 
         # update temperature;
@@ -181,11 +186,15 @@ class SACAgentBase:
         # update qfunc1
         self.Q1_optim.zero_grad()
         self.Q1_loss.backward()
+        if self.clip_grads:
+            nn.utils.clip_grad_norm_(self.Q1.parameters(), max_norm=1.0)
         self.Q1_optim.step()
 
         # update qfunc2
         self.Q2_optim.zero_grad()
         self.Q2_loss.backward()
+        if self.clip_grads:
+            nn.utils.clip_grad_norm_(self.Q2.parameters(), max_norm=1.0)
         self.Q2_optim.step()
 
     def check_presample(self):
@@ -289,6 +298,7 @@ class SACAgentGraph(SACAgentBase):
         qfunc_constructor,
         env_constructor,
         buffer_constructor,
+        optimiser_constructors,
         entropy_lb,
         policy_lr,
         temperature_lr,
@@ -297,6 +307,7 @@ class SACAgentGraph(SACAgentBase):
         discount,
         save_to: Optional[Path] = TEST_OUTPUTS_PATH,
         cache_best_policy=False,
+        clip_grads=False,
         UT_trick=False,
         with_entropy=False,
         **kwargs,
@@ -307,6 +318,7 @@ class SACAgentGraph(SACAgentBase):
             qfunc_constructor,
             env_constructor,
             buffer_constructor,
+            optimiser_constructors,
             entropy_lb,
             policy_lr,
             temperature_lr,
@@ -315,6 +327,7 @@ class SACAgentGraph(SACAgentBase):
             discount,
             save_to,
             cache_best_policy,
+            clip_grads,
             **kwargs,
         )
         self.UT_trick = UT_trick
@@ -549,6 +562,7 @@ class SACAgentMuJoCo(SACAgentBase):
         qfunc_constructor,
         env_constructor,
         buffer_constructor,
+        optimiser_constructors,
         entropy_lb,
         policy_lr,
         temperature_lr,
@@ -557,6 +571,7 @@ class SACAgentMuJoCo(SACAgentBase):
         discount,
         save_to: Optional[Path] = TEST_OUTPUTS_PATH,
         cache_best_policy=False,
+        clip_grads=False,
         UT_trick=False,
         with_entropy=False,
         **kwargs,
@@ -567,6 +582,7 @@ class SACAgentMuJoCo(SACAgentBase):
             qfunc_constructor,
             env_constructor,
             buffer_constructor,
+            optimiser_constructors,
             entropy_lb,
             policy_lr,
             temperature_lr,
@@ -575,6 +591,7 @@ class SACAgentMuJoCo(SACAgentBase):
             discount,
             save_to,
             cache_best_policy,
+            clip_grads,
             **kwargs,
         )
         self.UT_trick = UT_trick
