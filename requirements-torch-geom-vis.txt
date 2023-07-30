@@ -30,7 +30,6 @@ nvidia-nvtx-cu11==11.7.91
 packaging==23.1
 pandas==2.0.2
 Pillow==9.5.0
-pkg_resources==0.0.0
 psutil==5.9.5
 pyparsing==3.1.0
 python-dateutil==2.8.2
