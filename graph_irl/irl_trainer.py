@@ -1,6 +1,9 @@
 import numpy as np
 import torch
+from torch import nn
 from torch_geometric.data import Data, Batch
+
+from typing import Tuple
 
 
 class IRLGraphTrainer:
@@ -14,11 +17,13 @@ class IRLGraphTrainer:
             num_expert_traj, 
             num_generated_traj,
             num_graphs_in_batch, 
-            reward_optim_lr_scheduler=None
+            reward_optim_lr_scheduler=None,
+            reward_grad_clip=False,
     ):
         self.reward_fn = reward_fn
         self.reward_optim = reward_optim
         self.reward_optim_lr_scheduler = reward_optim_lr_scheduler
+        self.reward_grad_clip = reward_grad_clip
         self.agent = agent
         self.nodes = nodes
         self.expert_edge_index = expert_edge_index
@@ -37,28 +42,46 @@ class IRLGraphTrainer:
         self.reward_optim.zero_grad()
         
         # get avg(expert_returns)
-        expert_avg_returns = self.get_avg_expert_returns()
+        expert_avg_returns, expert_rewards = self.get_avg_expert_returns()
         
         # get imp_sampled generated returns with stop grad on the weights;
         imp_samples_gen_rewards = self.get_avg_generated_returns()
         
-
+        # get loss;
         loss = - (expert_avg_returns - imp_samples_gen_rewards)
         loss.backward()
+        if self.reward_grad_clip:
+            nn.utils.clip_grad_norm_(self.reward_fn.parameters(), max_norm=1.)
 
         # optimise;
         self.reward_optim.step()
+        if self.reward_optim_lr_scheduler is not None:
+            self.reward_optim_lr_scheduler.step()
     
-    def get_avg_expert_returns(self):
+    def get_avg_expert_returns(self) -> Tuple[float, torch.Tensor]:
+        """
+        Returns avg returns over self.num_expert_traj trajectories
+        together with all rewards along the trajectories in 
+        (num_expert_trajectories, episode_length) shaped torch.Tensor.
+
+        Note: This is if I want to add the expert trajectories in the 
+                imp sampled term similar to the GCL paper.
+        """
         avg = 0.
         N = 0
+        cached_expert_rewards = []
         for _ in range(self.num_expert_traj):
-            R = self._get_single_ep_expert_return()
+            R, rewards = self._get_single_ep_expert_return()
             N += 1
             avg = avg + (R - avg) / N
-        return avg
+            cached_expert_rewards.append(rewards)
+        return avg, torch.stack(cached_expert_rewards)
     
-    def _get_single_ep_expert_return(self):
+    def _get_single_ep_expert_return(self) -> Tuple[float, torch.Tensor]:
+        """
+        Returns sum of rewards along single expert trajectory as well as all 
+        rewards along the trajectory in 1-D torch.Tensor.
+        """
         # permute even indexes of edge index;
         # edge index is assumed to correspond to an undirected graph;
         perm = np.random.permutation(
@@ -75,6 +98,7 @@ class IRLGraphTrainer:
         # rather than single input at a time.
         pointer = 0
         return_val = 0.
+        cached_rewards = []
         # the * 2 multiplier is because undirected graph is assumed
         # and effectively each edge is duplicated in edge_index;
         while pointer * self.num_graphs_in_batch * 2 < self.expert_edge_index.shape[-1]:
@@ -96,8 +120,10 @@ class IRLGraphTrainer:
             # create batch of graphs;
             batch = Batch.from_data_list(batch_list)
             pointer += 1
-            return_val += self.reward_fn((batch, torch.tensor(action_idxs)), action_is_index=True).sum()
-        return return_val
+            curr_rewards = self.reward_fn((batch, torch.tensor(action_idxs)), action_is_index=True).view(-1)
+            return_val += curr_rewards.sum()
+            cached_rewards.append(curr_rewards)
+        return return_val, torch.cat(cached_rewards)
 
 
 
