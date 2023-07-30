@@ -108,8 +108,15 @@ class GraphEnv:
         info["repeats_done"] = self.repeats_done
         info["self_loops_done"] = self.self_loops_done
 
-    def step(self, action):
-        """Returns (observation, terminated, truncated, None)."""
+    def step(self, action, calculate_reward=True):
+        """
+        Returns (observation, terminated, truncated, info)
+        
+        Note: You may wish to set calculate_reward=False if you wish 
+                ot e.g., sample only states and actions and then calculate
+                reward on batches of states and actions. This is generally 
+                useful when reward_fn is Deep net.
+        """
         assert not (self.terminated or self.truncated)
         self.steps_done += 1
         info = {
@@ -154,7 +161,9 @@ class GraphEnv:
 
         # calculate reward;
         idxs = torch.tensor([[first, second]], dtype=torch.long)
-        reward = self.reward_fn((data, idxs), action_is_index=True)
+        reward = None
+        if calculate_reward:
+            reward = self.reward_fn((data, idxs), action_is_index=True)
 
         # if self loop;
         if first == second:
