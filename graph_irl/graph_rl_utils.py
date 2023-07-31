@@ -17,6 +17,7 @@ class GraphEnv:
         drop_repeats_or_self_loops: bool = False,
         id: str = None,
         reward_fn_termination: bool = False,
+        calculate_reward: bool=True,
     ):
         """
         Args:
@@ -47,6 +48,7 @@ class GraphEnv:
         # due to deterministic transitions, make reward
         # state dependent only, since S x A -> S deterministically.
         self.reward_fn = reward_fn
+        self.calculate_reward = calculate_reward
 
         # attributes to be reset when reset called;
         self.edge_index = torch.tensor([[], []], dtype=torch.long)
@@ -108,7 +110,7 @@ class GraphEnv:
         info["repeats_done"] = self.repeats_done
         info["self_loops_done"] = self.self_loops_done
 
-    def step(self, action, calculate_reward=True):
+    def step(self, action):
         """
         Returns (observation, terminated, truncated, info)
         
@@ -162,7 +164,7 @@ class GraphEnv:
         # calculate reward;
         idxs = torch.tensor([[first, second]], dtype=torch.long)
         reward = None
-        if calculate_reward:
+        if self.calculate_reward:
             reward = self.reward_fn((data, idxs), action_is_index=True)
 
         # if self loop;
