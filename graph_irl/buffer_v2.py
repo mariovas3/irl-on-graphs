@@ -157,6 +157,7 @@ class GraphBuffer(BufferBase):
             torch.cat(rewards, -1),
             torch.cumprod(torch.cat(weights, -1), 0),
             code,
+            len(rewards)
         )
 
     def get_single_ep_rewards_and_weights(self, env, agent, verbose=False):
@@ -177,11 +178,11 @@ class GraphBuffer(BufferBase):
         # process the episode;
         while not (terminated or truncated):
             # sample deterministic actions;
-            (mus1, mus2), node_embeds = agent.sample_deterministic(obs)
+            (a1, a2), node_embeds = agent.sample_action(obs)
 
             # make env step;
             new_obs, reward, terminated, truncated, info = env.step(
-                ((mus1.numpy(), mus2.numpy()), node_embeds.detach().numpy())
+                ((a1.numpy(), a2.numpy()), node_embeds.detach().numpy())
             )
 
             # resample action if repeated edge or self loop;
@@ -196,8 +197,8 @@ class GraphBuffer(BufferBase):
                     torch.tensor([first, second], dtype=torch.long)
                 )
             else:
-                assert mus1.ndim == 1
-                action_idxs.append(torch.cat((mus1, mus2), -1))
+                assert a1.ndim == 1
+                action_idxs.append(torch.cat((a1, a2), -1))
             batch_list.append(obs)
 
             # if max batch length reached, compute rewards;
@@ -260,13 +261,13 @@ class GraphBuffer(BufferBase):
             if code != -1:
                 if self.per_decision_imp_sample:
                     return self._process_rewards_weights(rewards, weights, code)
-                return return_val, imp_weight, code
+                return return_val, imp_weight, code, env.steps_done
 
         if self.per_decision_imp_sample:
             # in the per dicision case, need to cumprod the weights
             # until the current time point;
             return self._process_rewards_weights(rewards, weights, 2)
-        return return_val, imp_weight, 2
+        return return_val, imp_weight, 2, env.steps_done
 
     def collect_path(
         self,
@@ -476,6 +477,8 @@ class Buffer(BufferBase):
 
 
 def sample_eval_path_graph(T, env, agent, seed, verbose=False):
+    old_calculate_reward = env.calculate_reward
+    env.calculate_reward = True
     observations, actions, rewards = [], [], []
     obs, info = env.reset(seed=seed)
     agent.policy.eval()
@@ -490,14 +493,20 @@ def sample_eval_path_graph(T, env, agent, seed, verbose=False):
         a = np.array([info["first"], info["second"]], dtype=np.int64)
         actions.append(a)
         observations.append(new_obs)
+        if isinstance(reward, torch.Tensor):
+            reward = reward.detach().item()
         rewards.append(reward)
         obs = new_obs
         if terminated and not truncated:
+            env.calculate_reward = old_calculate_reward
             return observations, actions, rewards, 0
         if terminated and truncated:
+            env.calculate_reward = old_calculate_reward
             return observations, actions, rewards, 1
         if truncated:
+            env.calculate_reward = old_calculate_reward
             return observations, actions, rewards, 2
+    env.calculate_reward = old_calculate_reward
     return observations, actions, rewards, 2
 
 
