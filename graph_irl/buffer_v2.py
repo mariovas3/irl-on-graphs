@@ -1,22 +1,27 @@
-"""
-TODO:
-    (1): Implement a Graph Buffer following the 
-        description from the README.md file.
-"""
-
 import numpy as np
 import torch
 from torch_geometric.data import Data, Batch
+
+from graph_irl.graph_rl_utils import get_action_vector_from_idx
 
 
 class BufferBase:
     def __init__(self, max_size, seed=None):
         self.seed = 0 if seed is None else seed
         self.idx, self.max_size = 0, max_size
+        self.reward_idx = 0
+        self.looped = False
+
+        # log variables;
         self.undiscounted_returns = []
         self.path_lens = []
         self.avg_rewards_per_episode = []
-        self.looped = False
+
+    def add_sample_without_reward(self, *args, **kwargs):
+        pass
+
+    def add_rewards(self, rewards, **kwargs):
+        pass
 
     def add_sample(self, *args, **kwargs):
         pass
@@ -30,9 +35,29 @@ class BufferBase:
     def collect_path(self, env, agent, num_steps_to_collect):
         pass
 
+    def clear_buffer(self):
+        """Reset tracked logs and idx in buffer."""
+        self.idx = 0
+        self.reward_idx = 0
+        self.looped = False
+
+        self.undiscounted_returns = []
+        self.path_lens = []
+        self.avg_rewards_per_episode = []
+
 
 class GraphBuffer(BufferBase):
-    def __init__(self, max_size, nodes: torch.Tensor, seed=None):
+    def __init__(
+        self,
+        max_size,
+        nodes: torch.Tensor,
+        seed=None,
+        drop_repeats_or_self_loops=False,
+        get_batch_reward=False,
+        graphs_per_batch=None,
+        action_is_index=True,
+        per_decision_imp_sample=False,
+    ):
         super(GraphBuffer, self).__init__(max_size, seed)
         edge_index = torch.tensor([[], []], dtype=torch.long)
         self.obs_t = [
@@ -44,6 +69,43 @@ class GraphBuffer(BufferBase):
         ]
         self.terminal_tp1 = np.empty((max_size,), dtype=np.int8)
         self.reward_t = np.empty((max_size,))
+
+        # keep nodes reference;
+        self.nodes = nodes
+
+        # extra config for reward computation;
+        self.drop_repeats_or_self_loops = drop_repeats_or_self_loops
+        self.get_batch_reward = get_batch_reward
+        self.graphs_per_batch = graphs_per_batch
+        self.action_is_index = action_is_index
+        self.per_decision_imp_sample = per_decision_imp_sample
+        if get_batch_reward:
+            if graphs_per_batch is None:
+                raise ValueError(
+                    "get_batch_reward is True but graphs_per_batch not specified"
+                )
+            if self.graphs_per_batch > self.max_size:
+                raise ValueError(
+                    "graphs_per_batch expected to be less"
+                    " than or equal to size of buffer"
+                )
+
+    def clear_buffer(self):
+        super().clear_buffer()
+        edge_index = torch.tensor([[], []], dtype=torch.long)
+
+        # reset buffer;
+        self.obs_t = [
+            Data(x=self.nodes, edge_index=edge_index)
+            for _ in range(self.max_size)
+        ]
+        self.action_t = np.empty((self.max_size, 2), dtype=np.int64)
+        self.obs_tp1 = [
+            Data(x=self.nodes, edge_index=edge_index)
+            for _ in range(self.max_size)
+        ]
+        self.terminal_tp1 = np.empty((self.max_size,), dtype=np.int8)
+        self.reward_t = np.empty((self.max_size,))
 
     def add_sample(self, obs_t, action_t, reward_t, obs_tp1, terminal_tp1):
         idx = self.idx % self.max_size
@@ -57,11 +119,31 @@ class GraphBuffer(BufferBase):
         self.terminal_tp1[idx] = terminal_tp1
         self.idx += 1
 
-    def sample(self, batch_size):
+    def add_sample_without_reward(self, obs_t, action_t, obs_tp1, terminal_tp1):
+        idx = self.idx % self.max_size
+        if not self.looped and self.idx and not idx:
+            self.looped = True
+        self.idx = idx
+        self.obs_t[idx] = obs_t
+        self.action_t[idx] = action_t
+        self.obs_tp1[idx] = obs_tp1
+        self.terminal_tp1[idx] = terminal_tp1
+        self.idx += 1
+
+    def add_rewards(self, rewards):
+        """
+        Add 1-D numpy array of rewards to the buffer.
+        """
+        reward_idx = self.reward_idx % self.max_size
+        idxs = (reward_idx + np.arange(len(rewards))) % self.max_size
+        self.reward_t[idxs] = rewards
+        self.reward_idx = idxs[-1] + 1
+
+    def sample(self, batch_size=None):
+        if batch_size is None:
+            batch_size = self.graphs_per_batch
         assert batch_size <= self.__len__()
-        idxs = np.random.choice(
-            self.__len__(), size=batch_size, replace=False
-        )
+        idxs = np.random.choice(self.__len__(), size=batch_size, replace=False)
         return (
             Batch.from_data_list([self.obs_t[idx] for idx in idxs]),
             torch.from_numpy(self.action_t[idxs]),  # (B, 2) shape tensor
@@ -69,6 +151,122 @@ class GraphBuffer(BufferBase):
             Batch.from_data_list([self.obs_tp1[idx] for idx in idxs]),
             torch.tensor(self.terminal_tp1[idxs], dtype=torch.float32),
         )
+
+    def _process_rewards_weights(self, rewards, weights, code):
+        return (
+            torch.cat(rewards, -1),
+            torch.cumprod(torch.cat(weights, -1), 0),
+            code,
+        )
+
+    def get_single_ep_rewards_and_weights(self, env, agent, verbose=False):
+        if self.per_decision_imp_sample:
+            weights, rewards = [], []
+        else:
+            imp_weight, return_val = 1.0, 0
+        obs, info = env.reset(seed=self.seed)
+        agent.policy.eval()
+
+        # eval policy and reward fn in batch mode;
+        batch_list, action_idxs = [], []
+        if verbose:
+            env.reward_fn.verbose()
+
+        terminated, truncated = False, False
+
+        # process the episode;
+        while not (terminated or truncated):
+            # sample deterministic actions;
+            (mus1, mus2), node_embeds = agent.sample_deterministic(obs)
+
+            # make env step;
+            new_obs, reward, terminated, truncated, info = env.step(
+                ((mus1.numpy(), mus2.numpy()), node_embeds.detach().numpy())
+            )
+
+            # resample action if repeated edge or self loop;
+            if self.drop_repeats_or_self_loops and not info["terminated"]:
+                if info["self_loop"] or info["is_repeat"]:
+                    continue
+
+            first, second = info["first"], info["second"]
+            # add action to action list and observation in batch_list;
+            if self.action_is_index:
+                action_idxs.append(
+                    torch.tensor([first, second], dtype=torch.long)
+                )
+            else:
+                assert mus1.ndim == 1
+                action_idxs.append(torch.cat((mus1, mus2), -1))
+            batch_list.append(obs)
+
+            # if max batch length reached, compute rewards;
+            if (
+                len(batch_list) == self.graphs_per_batch
+                or terminated
+                or truncated
+            ):
+                # make batch of graphs;
+                batch = Batch.from_data_list(batch_list)
+
+                action_idxs = torch.stack(action_idxs)
+
+                # calculate rewards on batch;
+                curr_rewards = env.reward_fn(
+                    (batch, action_idxs), action_is_index=self.action_is_index
+                ).view(-1)
+
+                # calculate probs;
+                policy_dists, node_embeds = agent.policy(batch)
+
+                # get action vectors from indexes by taking the node embeds
+                # for the relevant indexes;
+                if self.action_is_index:
+                    action_idxs = get_action_vector_from_idx(
+                        node_embeds, action_idxs, batch.num_graphs
+                    )
+
+                _, D = node_embeds.shape
+                assert action_idxs.shape[-1] == 2 * D
+
+                # get probs;
+                log_probs = policy_dists.log_prob(
+                    action_idxs[:, :D], action_idxs[:, D:]
+                ).sum(-1)
+                assert log_probs.shape == curr_rewards.shape
+
+                # update path vars;
+                if self.per_decision_imp_sample:
+                    rewards.append(curr_rewards)
+                    weights.append((curr_rewards - log_probs).exp().detach())
+                else:
+                    imp_weight *= (
+                        (curr_rewards - log_probs).sum().exp().detach()
+                    )
+                    return_val += curr_rewards.sum()
+
+                # reset batch list and action idxs list;
+                batch_list, action_idxs = [], []
+
+            # update current state;
+            obs = new_obs
+            code = -1
+            if terminated and not truncated:
+                code = 0
+            elif terminated and truncated:
+                code = 1
+            elif truncated:
+                code = 2
+            if code != -1:
+                if self.per_decision_imp_sample:
+                    return self._process_rewards_weights(rewards, weights, code)
+                return return_val, imp_weight, code
+
+        if self.per_decision_imp_sample:
+            # in the per dicision case, need to cumprod the weights
+            # until the current time point;
+            return self._process_rewards_weights(rewards, weights, 2)
+        return return_val, imp_weight, 2
 
     def collect_path(
         self,
@@ -92,6 +290,13 @@ class GraphBuffer(BufferBase):
         self.seed += 1
         avg_reward, num_rewards = 0.0, 0.0
         undiscounted_return = 0.0
+
+        # see if should do batch eval of reward;
+        # this should be more efficient if deep reward net;
+        if self.get_batch_reward:
+            batch_list = []
+            action_idxs = []
+
         while t < num_steps_to_collect:
             # sample action;
             (a1, a2), node_embeds = agent.sample_action(obs_t)
@@ -101,21 +306,64 @@ class GraphBuffer(BufferBase):
                 ((a1.numpy(), a2.numpy()), node_embeds.detach().numpy())
             )
 
+            # resample action if repeated edge or self loop;
+            if self.drop_repeats_or_self_loops and not info["terminated"]:
+                if info["self_loop"] or info["is_repeat"]:
+                    continue
+
             # indexes of nodes to be connected;
             first, second = info["first"], info["second"]
             action_t = np.array([first, second])
 
-            # add sampled tuple to buffer;
-            self.add_sample(obs_t, action_t, reward, obs_tp1, terminal)
+            if self.get_batch_reward:
+                self.add_sample_without_reward(
+                    obs_t, action_t, obs_tp1, terminal
+                )
+                batch_list.append(obs_t)
+                action_idxs.append([first, second])
+                if (
+                    len(batch_list) == self.graphs_per_batch
+                    or terminal
+                    or truncated
+                    or (t == num_steps_to_collect - 1)
+                ):
+                    # make batch of graphs;
+                    batch = Batch.from_data_list(batch_list)
 
-            # house keeping for observed rewards.
-            num_rewards += 1
+                    # calculate rewards on batch;
+                    rewards = env.reward_fn(
+                        (batch, torch.tensor(action_idxs, dtype=torch.long)),
+                        action_is_index=True,
+                    ).view(-1)
 
-            avg_reward = avg_reward + (reward - avg_reward) / num_rewards
-            undiscounted_return += reward
+                    # add rewards to buffer;
+                    rewards = rewards.detach().numpy()
+                    self.add_rewards(rewards)
+
+                    # reset batch list and action list;
+                    batch_list = []
+                    action_idxs = []
+
+                    # update housekeeping;
+                    avg_reward = avg_reward * (
+                        num_rewards / (num_rewards + len(rewards))
+                    ) + rewards.sum() / (num_rewards + len(rewards))
+                    undiscounted_return += rewards.sum()
+                    num_rewards += len(rewards)
+            else:
+                # add sampled tuple to buffer;
+                self.add_sample(obs_t, action_t, reward, obs_tp1, terminal)
+
+                # housekeeping for observed rewards.
+                num_rewards += 1
+                avg_reward = avg_reward + (reward - avg_reward) / num_rewards
+                undiscounted_return += reward
 
             # restart env if episode ended;
             if terminal or truncated:
+                # print("repeats or self loops: "
+                #       f"{info['max_repeats_reached']}, "
+                #       f"{info['max_self_loops_reached']}")
                 obs_t, info = env.reset(seed=self.seed)
                 self.seed += 1
                 self.undiscounted_returns.append(undiscounted_return)
@@ -127,6 +375,8 @@ class GraphBuffer(BufferBase):
             else:
                 obs_t = obs_tp1
             t += 1
+        if self.get_batch_reward:
+            assert self.idx == self.reward_idx
 
 
 class Buffer(BufferBase):
@@ -137,6 +387,15 @@ class Buffer(BufferBase):
         self.obs_tp1 = np.empty((max_size, obs_dim))
         self.terminal_tp1 = np.empty((max_size,))
         self.reward_t = np.empty((max_size,))
+        self.obs_dim, self.action_dim = obs_dim, action_dim
+
+    def clear_buffer(self):
+        super().clear_buffer()
+        self.obs_t = np.empty((self.max_size, self.obs_dim))
+        self.action_t = np.empty((self.max_size, self.action_dim))
+        self.obs_tp1 = np.empty((self.max_size, self.obs_dim))
+        self.terminal_tp1 = np.empty((self.max_size,))
+        self.reward_t = np.empty((self.max_size,))
 
     def add_sample(self, obs_t, action_t, reward_t, obs_tp1, terminal_tp1):
         idx = self.idx % self.max_size
@@ -152,9 +411,7 @@ class Buffer(BufferBase):
 
     def sample(self, batch_size):
         assert batch_size <= self.__len__()
-        idxs = np.random.choice(
-            self.__len__(), size=batch_size, replace=False
-        )
+        idxs = np.random.choice(self.__len__(), size=batch_size, replace=False)
         return (
             torch.tensor(self.obs_t[idxs], dtype=torch.float32),
             torch.tensor(self.action_t[idxs], dtype=torch.float32),

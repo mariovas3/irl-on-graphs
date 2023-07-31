@@ -109,9 +109,15 @@ class SACAgentBase:
         self.Q1t.eval()
         self.Q2t.eval()
 
-        # instantiate remaining utilities;
+        # instantiate buffer and env and check some of their attributes;
         self.buffer = buffer_constructor(**kwargs["buffer_kwargs"])
         self.env = env_constructor(**kwargs["env_kwargs"])
+        assert self.buffer.drop_repeats_or_self_loops == self.env.drop_repeats_or_self_loops
+        assert (not self.env.calculate_reward) == self.buffer.get_batch_reward
+        if self.num_eval_steps_to_sample is None:
+            self.num_eval_steps_to_sample = self.env.spec.max_episode_steps
+        
+        # init temperature and other parameters;
         self.log_temperature = torch.tensor(0.0, requires_grad=True)
         self.entropy_lb = (
             entropy_lb
@@ -145,6 +151,9 @@ class SACAgentBase:
 
     def sample_action(self, obs):
         pass
+
+    def clear_buffer(self):
+        self.buffer.clear_buffer()
 
     def _cache(self):
         self.best_policy = deepcopy(self.policy)
