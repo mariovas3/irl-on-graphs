@@ -26,10 +26,9 @@ class GraphReward(nn.Module):
             if with_layer_norm:
                 self.net.append(nn.LayerNorm((temp[i+1], )))
         
-        # reward func returns exp(reward)
-        # to get the reward one needs to apply log;
+        # up to here this corresponds to getting the cost function;
         self.net.append(nn.Linear(hiddens[-1], 1))
-        self.net.append(nn.Sigmoid())
+        self.net.append(nn.Softplus())
     
     def reset(self):
         pass
@@ -49,4 +48,5 @@ class GraphReward(nn.Module):
         else:
             actions = torch.cat(actions, -1)
         obs_action = torch.cat((obs, actions), -1)
-        return self.net(obs_action)
+        # return the negative of the cost -> reward;
+        return -self.net(obs_action)
