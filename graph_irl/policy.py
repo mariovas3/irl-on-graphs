@@ -53,10 +53,10 @@ class GCN(nn.Module):
                     x = torch.relu(x)
             else:
                 x = torch.relu(x)
-
-            # see if layer norm is needed;
-            if self.with_layer_norm:
-                x = torch.layer_norm(x, (self.hiddens[i],))
+                
+                # see if layer norm is needed;
+                if self.with_layer_norm:
+                    x = torch.layer_norm(x, (self.hiddens[i],))
         # return avg node embedding for each graph in the batch;
         # together with node embeddings;
         return global_mean_pool(x, batch.batch), x
