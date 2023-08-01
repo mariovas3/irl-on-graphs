@@ -18,6 +18,7 @@ class GraphEnv:
         id: str = None,
         reward_fn_termination: bool = False,
         calculate_reward: bool=True,
+        min_steps_to_do: int=3,
     ):
         """
         Args:
@@ -44,6 +45,7 @@ class GraphEnv:
         self.max_repeats = max_repeats
         self.max_self_loops = max_self_loops
         self.reward_fn_termination = reward_fn_termination
+        self.min_steps_to_do = min_steps_to_do
         # reward fn should have its own GNN encoder;
         # due to deterministic transitions, make reward
         # state dependent only, since S x A -> S deterministically.
@@ -85,14 +87,22 @@ class GraphEnv:
 
     def _update_info_terminals(self, info):
         self.terminated = (
-            len(self.unique_edges) >= self.num_expert_steps
-            or self.repeats_done >= self.max_repeats
-            or self.self_loops_done >= self.max_self_loops
-            or (
-                self.reward_fn_termination and self.reward_fn.should_terminate
+            # enforce at least min steps to do;
+            (self.steps_done >= self.min_steps_to_do) and (
+                len(self.unique_edges) >= self.num_expert_steps
+                or (
+                    self.reward_fn_termination and self.reward_fn.should_terminate
+                )
             )
         )
-        self.truncated = self.steps_done >= self.spec.max_episode_steps
+        self.truncated = (
+            # enforce at least min steps to do;
+            (self.steps_done >= self.min_steps_to_do) and (
+                self.steps_done >= self.spec.max_episode_steps
+                or self.repeats_done >= self.max_repeats
+                or self.self_loops_done >= self.max_self_loops
+            )
+        )
 
         info["terminated"] = self.terminated
         info["expert_episode_length_reached"] = (
