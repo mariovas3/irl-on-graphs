@@ -153,14 +153,20 @@ class GraphBuffer(BufferBase):
         )
 
     def _process_rewards_weights(self, rewards, weights, code):
+        rewards = torch.cat(rewards, -1)
+        weights = torch.cat(weights, -1)
         return (
-            torch.cat(rewards, -1),
-            torch.cumprod(torch.cat(weights, -1), 0),
+            rewards,
+            torch.cumprod(weights, 0),
             code,
             len(rewards)
         )
 
-    def get_single_ep_rewards_and_weights(self, env, agent, verbose=False):
+    def get_single_ep_rewards_and_weights(self, env, agent, lcr_reg=False, verbose=False):
+        # init lcr regularisation term and last two rewards;
+        lcr_reg_term = 0.
+        r1, r2 = None, None
+        
         if self.per_decision_imp_sample:
             weights, rewards = [], []
         else:
@@ -175,9 +181,13 @@ class GraphBuffer(BufferBase):
 
         terminated, truncated = False, False
 
+        # this steps variable is for debugging
+        steps = 0
+
         # process the episode;
         while not (terminated or truncated):
-            # sample deterministic actions;
+            
+            # sample stochastic actions;
             (a1, a2), node_embeds = agent.sample_action(obs)
 
             # make env step;
@@ -186,36 +196,71 @@ class GraphBuffer(BufferBase):
             )
 
             # resample action if repeated edge or self loop;
-            if self.drop_repeats_or_self_loops and not info["terminated"]:
+            if self.drop_repeats_or_self_loops and not (terminated or truncated):
                 if info["self_loop"] or info["is_repeat"]:
                     continue
-
-            first, second = info["first"], info["second"]
-            # add action to action list and observation in batch_list;
-            if self.action_is_index:
-                action_idxs.append(
-                    torch.tensor([first, second], dtype=torch.long)
+            
+            skip_sample = (
+                self.drop_repeats_or_self_loops 
+                and (
+                    info['max_repeats_reached'] 
+                    or info['max_self_loops_reached']
                 )
-            else:
-                assert a1.ndim == 1
-                action_idxs.append(torch.cat((a1, a2), -1))
-            batch_list.append(obs)
+                # also check if current is self loop or repeated edge;
+                # since if max repeats or max self loops are true 
+                # but min_steps_to_do is not reached in env
+                # we may discard good edges;
+                and (
+                    info['self_loop']
+                    or info['is_repeat']
+                )
+            )
+
+            steps -= int(skip_sample)
+            
+            # get idxs of nodes to connect;
+            first, second = info["first"], info["second"]
+            
+            # add action to action list and observation in batch_list;
+            if not skip_sample:
+                if self.action_is_index:
+                    action_idxs.append(
+                        torch.tensor([first, second], dtype=torch.long)
+                    )
+                else:
+                    assert a1.ndim == 1
+                    action_idxs.append(torch.cat((a1, a2), -1))
+                batch_list.append(obs)
 
             # if max batch length reached, compute rewards;
             if (
-                len(batch_list) == self.graphs_per_batch
-                or terminated
-                or truncated
+                len(batch_list) and (
+                    len(batch_list) == self.graphs_per_batch
+                    or terminated
+                    or truncated
+                )
             ):
                 # make batch of graphs;
                 batch = Batch.from_data_list(batch_list)
-
                 action_idxs = torch.stack(action_idxs)
 
                 # calculate rewards on batch;
                 curr_rewards = env.reward_fn(
                     (batch, action_idxs), action_is_index=self.action_is_index
                 ).view(-1)
+
+                # see if lcr_reg should be calculated;
+                # a single lcr reg term requires rewards from 3 time steps;
+                if lcr_reg:
+                    if r1 is not None and r2 is not None:
+                        temp = torch.cat((
+                            torch.stack((r1, r2)), curr_rewards
+                        ))
+                        lcr_reg_term += ((temp[2:] + temp[:-2] - 2 * temp[1:-1]) ** 2).sum()
+                    elif len(curr_rewards) > 2:
+                        lcr_reg_term += ((curr_rewards[2:] + curr_rewards[:-2] - 2 * curr_rewards[1:-1]) ** 2).sum()
+                    if len(curr_rewards) > 1:
+                        r1, r2 = curr_rewards[-2], curr_rewards[-1]
 
                 # calculate probs;
                 policy_dists, node_embeds = agent.policy(batch)
@@ -230,13 +275,13 @@ class GraphBuffer(BufferBase):
                 _, D = node_embeds.shape
                 assert action_idxs.shape[-1] == 2 * D
 
-                # get probs;
+                # get log_probs;
                 log_probs = policy_dists.log_prob(
                     action_idxs[:, :D], action_idxs[:, D:]
                 ).sum(-1)
                 assert log_probs.shape == curr_rewards.shape
 
-                # update path vars;
+                # rewards and weights
                 if self.per_decision_imp_sample:
                     rewards.append(curr_rewards)
                     weights.append((curr_rewards - log_probs).exp().detach())
@@ -251,6 +296,7 @@ class GraphBuffer(BufferBase):
 
             # update current state;
             obs = new_obs
+            steps += 1
             code = -1
             if terminated and not truncated:
                 code = 0
@@ -259,15 +305,19 @@ class GraphBuffer(BufferBase):
             elif truncated:
                 code = 2
             if code != -1:
+                assert steps == env.steps_done
+				# print(steps, env.steps_done, info['max_self_loops_reached'])
                 if self.per_decision_imp_sample:
-                    return self._process_rewards_weights(rewards, weights, code)
-                return return_val, imp_weight, code, env.steps_done
+                    return self._process_rewards_weights(rewards, weights, code) + (lcr_reg_term, )
+                return return_val, imp_weight, code, env.steps_done, lcr_reg_term
 
+        assert steps == env.steps_done
+		# print(steps, env.steps_done, info['max_self_loops_reached'])
         if self.per_decision_imp_sample:
             # in the per dicision case, need to cumprod the weights
             # until the current time point;
-            return self._process_rewards_weights(rewards, weights, 2)
-        return return_val, imp_weight, 2, env.steps_done
+            return self._process_rewards_weights(rewards, weights, 2) + (lcr_reg_term, )
+        return return_val, imp_weight, 2, env.steps_done, lcr_reg_term
 
     def collect_path(
         self,
@@ -308,25 +358,43 @@ class GraphBuffer(BufferBase):
             )
 
             # resample action if repeated edge or self loop;
-            if self.drop_repeats_or_self_loops and not info["terminated"]:
+            if self.drop_repeats_or_self_loops and not (terminal or truncated):
                 if info["self_loop"] or info["is_repeat"]:
                     continue
+            
+            skip_sample = (
+                self.drop_repeats_or_self_loops 
+                and (
+                    info['max_repeats_reached'] 
+                    or info['max_self_loops_reached']
+                )
+                and (
+                    info['self_loop']
+                    or info['is_repeat']
+                )
+            )
+
+            # see if this step should be skipped;
+            t -= int(skip_sample)
 
             # indexes of nodes to be connected;
             first, second = info["first"], info["second"]
             action_t = np.array([first, second])
 
             if self.get_batch_reward:
-                self.add_sample_without_reward(
-                    obs_t, action_t, obs_tp1, terminal
-                )
-                batch_list.append(obs_t)
-                action_idxs.append([first, second])
+                if not skip_sample:
+                    self.add_sample_without_reward(
+                        obs_t, action_t, obs_tp1, terminal
+                    )
+                    batch_list.append(obs_t)
+                    action_idxs.append([first, second])
                 if (
-                    len(batch_list) == self.graphs_per_batch
-                    or terminal
-                    or truncated
-                    or (t == num_steps_to_collect - 1)
+                    len(batch_list) and (
+                        len(batch_list) == self.graphs_per_batch
+                        or terminal
+                        or truncated
+                        or (t == num_steps_to_collect - 1)
+                    )
                 ):
                     # make batch of graphs;
                     batch = Batch.from_data_list(batch_list)
@@ -353,12 +421,13 @@ class GraphBuffer(BufferBase):
                     num_rewards += len(rewards)
             else:
                 # add sampled tuple to buffer;
-                self.add_sample(obs_t, action_t, reward, obs_tp1, terminal)
+                if not skip_sample:
+                    self.add_sample(obs_t, action_t, reward, obs_tp1, terminal)
 
-                # housekeeping for observed rewards.
-                num_rewards += 1
-                avg_reward = avg_reward + (reward - avg_reward) / num_rewards
-                undiscounted_return += reward
+                    # housekeeping for observed rewards.
+                    num_rewards += 1
+                    avg_reward = avg_reward + (reward - avg_reward) / num_rewards
+                    undiscounted_return += reward
 
             # restart env if episode ended;
             if terminal or truncated:
