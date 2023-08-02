@@ -49,8 +49,6 @@ class GCN(nn.Module):
             if i == len(self.net) - 1:
                 if self.final_tanh:
                     x = torch.tanh(x)
-                else:
-                    x = torch.relu(x)
             else:
                 x = torch.relu(x)
                 
