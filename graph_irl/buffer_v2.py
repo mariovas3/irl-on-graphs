@@ -57,9 +57,19 @@ class GraphBuffer(BufferBase):
         graphs_per_batch=None,
         action_is_index=True,
         per_decision_imp_sample=False,
+        reward_scale=1.,
+        log_offset=0.,
+        verbose=False,
     ):
         super(GraphBuffer, self).__init__(max_size, seed)
+        
+        # see if should print stuff;
+        self.verbose = verbose
+
+        # place holder edge index;
         edge_index = torch.tensor([[], []], dtype=torch.long)
+        
+        # containers to store mdp info;
         self.obs_t = [
             Data(x=nodes, edge_index=edge_index) for _ in range(self.max_size)
         ]
@@ -72,6 +82,21 @@ class GraphBuffer(BufferBase):
 
         # keep nodes reference;
         self.nodes = nodes
+        
+        # log_offset is subtracted in
+        # reward - log_prob_policy - log_offset
+        # the reward is always in (-inf, 0)
+        # as the reward and policy both become better, the 
+        # reward will give high reward for sampled traj 
+        # so reward -> 0, however log_prob_policy is generally 
+        # negative and depends on dim of action vector; 
+        # at that point our importance weights (reward - log_prob).exp()
+        # might become too large so an offset might help;
+        self.log_offset = log_offset
+        
+        # similar purpose as log offset, although has slightly different
+        # interpretation as amplifying reward signal;
+        self.reward_scale = reward_scale
 
         # extra config for reward computation;
         self.drop_repeats_or_self_loops = drop_repeats_or_self_loops
@@ -79,6 +104,8 @@ class GraphBuffer(BufferBase):
         self.graphs_per_batch = graphs_per_batch
         self.action_is_index = action_is_index
         self.per_decision_imp_sample = per_decision_imp_sample
+        
+        # some proper init rules;
         if get_batch_reward:
             if graphs_per_batch is None:
                 raise ValueError(
@@ -143,6 +170,8 @@ class GraphBuffer(BufferBase):
         if batch_size is None:
             batch_size = self.graphs_per_batch
         assert batch_size <= self.__len__()
+
+        # always sample without replacement;
         idxs = np.random.choice(self.__len__(), size=batch_size, replace=False)
         return (
             Batch.from_data_list([self.obs_t[idx] for idx in idxs]),
@@ -247,7 +276,7 @@ class GraphBuffer(BufferBase):
                 # calculate rewards on batch;
                 curr_rewards = env.reward_fn(
                     (batch, action_idxs), action_is_index=self.action_is_index
-                ).view(-1)
+                ).view(-1) * self.reward_scale
 
                 # see if lcr_reg should be calculated;
                 # a single lcr reg term requires rewards from 3 time steps;
@@ -280,16 +309,26 @@ class GraphBuffer(BufferBase):
                     action_idxs[:, :D], action_idxs[:, D:]
                 ).sum(-1)
                 assert log_probs.shape == curr_rewards.shape
+                
+                # see if should print stuff;
+                if self.verbose:
+                    print(f"max reward from within buffer sampling: {curr_rewards.max().item()}")
+                    print(f"min log_prob: {log_probs.min().item()}")
 
                 # rewards and weights
                 if self.per_decision_imp_sample:
                     rewards.append(curr_rewards)
-                    weights.append((curr_rewards - log_probs).exp().detach())
+                    weights.append((curr_rewards - log_probs - self.log_offset).exp().detach())
                 else:
                     imp_weight *= (
-                        (curr_rewards - log_probs).sum().exp().detach()
+                        (curr_rewards - log_probs - self.log_offset).sum().exp().detach()
                     )
                     return_val += curr_rewards.sum()
+                    if self.verbose:
+                        print(f"step: {steps} of sampling, vanilla weight: {imp_weight}",
+                            f"vanilla return: {return_val}\n"
+                            "curr rewards from sampling\n", 
+                            curr_rewards.tolist(), end='\n\n',)
 
                 # reset batch list and action idxs list;
                 batch_list, action_idxs = [], []
@@ -403,7 +442,7 @@ class GraphBuffer(BufferBase):
                     rewards = env.reward_fn(
                         (batch, torch.tensor(action_idxs, dtype=torch.long)),
                         action_is_index=True,
-                    ).view(-1)
+                    ).view(-1) * self.reward_scale
 
                     # add rewards to buffer;
                     rewards = rewards.detach().numpy()
