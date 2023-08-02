@@ -65,6 +65,7 @@ class SACAgentBase:
         self.name = name
         self.save_to = save_to
         self.clip_grads = clip_grads
+        self.num_policy_updates = 0
 
         # experimental:
         # chache best nets;
@@ -154,6 +155,12 @@ class SACAgentBase:
 
     def clear_buffer(self):
         self.buffer.clear_buffer()
+        # empty agent bookkeeping;
+        self.policy_losses = []
+        self.temperature_losses = []
+        self.Q1_losses, self.Q2_losses = [], []
+        self.temperatures = []
+        self.eval_path_returns, self.eval_path_lens = [], []
 
     def _cache(self):
         self.best_policy = deepcopy(self.policy)
@@ -181,7 +188,7 @@ class SACAgentBase:
         self.policy_optim.zero_grad()
         self.policy_loss.backward()
         if self.clip_grads:
-            nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=1.0)
+            nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=1.0, error_if_nonfinite=True)
         self.policy_optim.step()
 
         # update temperature;
@@ -196,14 +203,14 @@ class SACAgentBase:
         self.Q1_optim.zero_grad()
         self.Q1_loss.backward()
         if self.clip_grads:
-            nn.utils.clip_grad_norm_(self.Q1.parameters(), max_norm=1.0)
+            nn.utils.clip_grad_norm_(self.Q1.parameters(), max_norm=1.0, error_if_nonfinite=True)
         self.Q1_optim.step()
 
         # update qfunc2
         self.Q2_optim.zero_grad()
         self.Q2_loss.backward()
         if self.clip_grads:
-            nn.utils.clip_grad_norm_(self.Q2.parameters(), max_norm=1.0)
+            nn.utils.clip_grad_norm_(self.Q2.parameters(), max_norm=1.0, error_if_nonfinite=True)
         self.Q2_optim.step()
 
     def check_presample(self):
@@ -221,15 +228,13 @@ class SACAgentBase:
     ):
         for _ in tqdm(range(k)):
             self.train_one_epoch(*args, **kwargs)
+        
+        self.num_policy_updates += 1
+        # assert np.max(self.buffer.path_lens) <= self.env.spec.max_episode_steps
+        # assert np.max(self.eval_path_lens) <= self.env.spec.max_episode_steps
 
         # check if have to save;
         if self.save_to is not None:
-            self.name = (
-                self.name + f"-{self.policy.name}-UT-{int(self.UT_trick)}"
-                f"-entropy-{int(self.with_entropy)}"
-                f"-buffer-size-{self.buffer.max_size}"
-                f"-epochs-{k}-iters-{self.num_iters}"
-            )
             metric_names = [
                 "policy-loss",
                 "temperature-loss",
@@ -296,6 +301,10 @@ class SACAgentBase:
                 config,
                 edge_index=edge_index,
                 last_eval_rewards=last_eval_rewards,
+                suptitle=(
+                    f"figure after {self.num_policy_updates}" 
+                    " policy updates"
+                )
             )
 
 
@@ -341,6 +350,24 @@ class SACAgentGraph(SACAgentBase):
         )
         self.UT_trick = UT_trick
         self.with_entropy = with_entropy
+
+        # update name;
+        self.name = (
+            name + f"-{self.policy.name}-UT-{int(self.UT_trick)}"
+            f"-entropy-{int(self.with_entropy)}"
+            f"-buffer-size-{self.buffer.max_size}"
+            f"-iters-{self.num_iters}"
+            f"-env-{self.env.spec.id}"
+            f"-seed-{self.seed}"
+            f"-timestamp-{time.time()}"
+        )
+
+        # created save dir;
+        self.save_to = save_to
+        if self.save_to is not None:
+            self.save_to = self.save_to / self.name
+            if not self.save_to.exists():
+                self.save_to.mkdir(parents=True)
 
     def sample_action(self, obs):
         policy_dist, node_embeds = self.policy(obs)
@@ -826,6 +853,7 @@ def save_metrics(
     config=None,
     edge_index=None,
     last_eval_rewards=None,
+    suptitle=None,
 ):
     now = time.time()
     new_dir = agent_name + f"-{env_name}-seed-{seed}-{now}"
@@ -863,4 +891,5 @@ def save_metrics(
         metrics,
         save_returns_to,
         seed,
+        suptitle=suptitle,
     )

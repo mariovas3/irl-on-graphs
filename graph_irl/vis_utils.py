@@ -74,7 +74,7 @@ def vis_graph_building(edge_index, save_to):
     plt.close()
 
 
-def save_metric_plots(metric_names, metrics, path, seed):
+def save_metric_plots(metric_names, metrics, path, seed, suptitle=None):
     file_name = f"metric-plots-seed-{seed}.png"
     file_name = path / file_name
     rows = int(sqrt(len(metrics)))
@@ -94,6 +94,8 @@ def save_metric_plots(metric_names, metrics, path, seed):
                                 yoffset))
         ax.set_xticks(np.arange(xlow, xhigh, (xhigh - xlow) / 10).round())
         ax.set_xticklabels(ax.get_xticks(), rotation=90)
+    if suptitle is not None:
+        fig.suptitle(suptitle)
     fig.tight_layout()
     plt.savefig(file_name)
     plt.close()
