@@ -32,6 +32,9 @@ class GraphReward(nn.Module):
     
     def reset(self):
         pass
+
+    def verbose(self):
+        pass
     
     def forward(self, obs_action, action_is_index=False):
         batch, actions = obs_action
