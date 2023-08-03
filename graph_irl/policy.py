@@ -215,12 +215,15 @@ class TanhGaussPolicy(nn.Module):
 
 class Qfunc(nn.Module):
     def __init__(
-        self, obs_action_dim, hiddens, with_layer_norm=False, encoder=None
+        self, obs_action_dim, hiddens, with_layer_norm=False, 
+        with_batch_norm=False, encoder=None,
     ):
         super(Qfunc, self).__init__()
 
         # set encoder;
         self.encoder = encoder
+
+        assert not (with_batch_norm and with_layer_norm)
 
         # init net;
         self.net = nn.Sequential()
@@ -236,6 +239,8 @@ class Qfunc(nn.Module):
             self.net.append(nn.ReLU())
             if with_layer_norm:
                 self.net.append(nn.LayerNorm(hiddens[i]))
+            if with_batch_norm:
+                self.net.append(nn.BatchNorm1d(hiddens[i]))
 
         # Q-func maps to scalar;
         self.net.append(nn.Linear(hiddens[-1], 1))
@@ -263,3 +268,38 @@ class Qfunc(nn.Module):
                 actions = torch.cat(actions, -1)
             obs_action = torch.cat((obs, actions), -1)
         return self.net(obs_action)
+
+
+class Vfunc(nn.Module):
+    def __init__(
+        self, embed_dim, encoder, hiddens, with_layer_norm=False,
+    ):
+        super(Vfunc, self).__init__()
+
+        # set encoder;
+        self.encoder = encoder
+
+        # init net;
+        self.net = nn.Sequential()
+
+        # add hidden layers;
+        for i in range(len(hiddens)):
+            if i == 0:
+                self.net.append(nn.Linear(embed_dim, hiddens[i]))
+            else:
+                self.net.append(nn.Linear(hiddens[i - 1], hiddens[i]))
+
+            # add ReLU non-linearity;
+            self.net.append(nn.ReLU())
+            if with_layer_norm:
+                self.net.append(nn.LayerNorm(hiddens[i]))
+
+        # V-func maps to scalar;
+        self.net.append(nn.Linear(hiddens[-1], 1))
+
+    def forward(self, obs):
+        """
+        obs is batch of graphs or single torch_geometric.data.Data object.S
+        """
+        obs, _ = self.encoder(obs)
+        return self.net(obs)
