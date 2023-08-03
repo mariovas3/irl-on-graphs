@@ -184,6 +184,8 @@ class GraphBuffer(BufferBase):
     def _process_rewards_weights(self, rewards, weights, code):
         rewards = torch.cat(rewards, -1)
         weights = torch.cat(weights, -1)
+        print(weights)
+        print(weights.shape, torch.cumprod(weights, 0), end='\n\n')
         return (
             rewards,
             torch.cumprod(weights, 0),
@@ -387,7 +389,7 @@ class GraphBuffer(BufferBase):
             batch_list = []
             action_idxs = []
 
-        while t < num_steps_to_collect:
+        while t < num_steps_to_collect or self.idx != self.reward_idx:
             # sample action;
             (a1, a2), node_embeds = agent.sample_action(obs_t)
 
@@ -432,7 +434,7 @@ class GraphBuffer(BufferBase):
                         len(batch_list) == self.graphs_per_batch
                         or terminal
                         or truncated
-                        or (t == num_steps_to_collect - 1)
+                        # or (t == num_steps_to_collect - 1)
                     )
                 ):
                     # make batch of graphs;
@@ -586,6 +588,7 @@ class Buffer(BufferBase):
 
 def sample_eval_path_graph(T, env, agent, seed, verbose=False):
     old_calculate_reward = env.calculate_reward
+    env.reward_fn.eval()
     env.calculate_reward = True
     observations, actions, rewards = [], [], []
     obs, info = env.reset(seed=seed)
@@ -615,6 +618,7 @@ def sample_eval_path_graph(T, env, agent, seed, verbose=False):
             env.calculate_reward = old_calculate_reward
             return observations, actions, rewards, 2
     env.calculate_reward = old_calculate_reward
+    env.reward_fn.train()
     return observations, actions, rewards, 2
 
 

@@ -1,0 +1,197 @@
+import sys
+from pathlib import Path
+p = Path(__file__).absolute().parent.parent
+if sys.path[-1] != str(p):
+    sys.path.append(str(p))
+print(str(p))
+
+from graph_irl.buffer_v2 import GraphBuffer
+from graph_irl.policy import GaussPolicy, TwoStageGaussPolicy, GCN, Qfunc
+from graph_irl.graph_rl_utils import GraphEnv
+from graph_irl.sac import SACAgentGraph, TEST_OUTPUTS_PATH
+from graph_irl.reward import GraphReward
+from graph_irl.examples.circle_graph import create_circle_graph
+from graph_irl.irl_trainer import IRLGraphTrainer
+
+import numpy as np
+import torch
+torch.manual_seed(0)
+np.random.seed(0)
+
+def uniform_init(size_t):
+    return torch.distributions.Uniform(0., 1.).sample(size_t)
+
+
+# circular graph with 7 nodes;
+n_nodes, node_dim = 11, 5
+nodes, expert_edge_index = create_circle_graph(n_nodes, node_dim, torch.randn)
+# nodes = torch.ones_like(nodes)  # doesn't seem to work for ones;
+print(nodes, expert_edge_index)
+encoder_hiddens = [8, 8, 8]
+reward_fn_hiddens = [16, 16]
+gauss_policy_hiddens = [16, 16]
+tsg_policy_hiddens1 = [16, 16]
+tsg_policy_hiddens2 = [16, 16]
+qfunc_hiddens = [16, 16]
+
+print(f"IRL training for {n_nodes}-node graph")
+
+encoder_dict = dict(
+    encoder = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=True),
+    encoderq1 = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=True),
+    encoderq2 = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=True),
+    encoderq1t = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=True),
+    encoderq2t = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=True),
+    encoder_reward = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=True),
+)
+
+reward_fn = GraphReward(
+    encoder_dict['encoder_reward'], 
+    encoder_hiddens[-1], 
+    hiddens=reward_fn_hiddens, 
+    with_layer_norm=True,
+    with_batch_norm=False,
+)
+
+gauss_policy_kwargs = dict(
+    obs_dim=encoder_hiddens[-1],
+    action_dim=encoder_hiddens[-1],
+    hiddens=gauss_policy_hiddens,
+    with_layer_norm=True,
+    # with_batch_norm=False,
+    encoder=encoder_dict['encoder'],
+    two_action_vectors=True,
+)
+
+tsg_policy_kwargs = dict(
+    obs_dim=encoder_hiddens[-1],
+    action_dim=encoder_hiddens[-1],
+    hiddens1=tsg_policy_hiddens1,
+    hiddens2=tsg_policy_hiddens2,
+    encoder=encoder_dict['encoder'],
+    with_layer_norm=True,
+    # with_batch_norm=False,
+)
+
+qfunc_kwargs = dict(
+    obs_action_dim=encoder_hiddens[-1] * 3, 
+    hiddens=qfunc_hiddens, 
+    with_layer_norm=True, 
+    with_batch_norm=False,
+    encoder=None
+)
+
+Q1_kwargs = qfunc_kwargs.copy()
+Q1_kwargs['encoder'] = encoder_dict['encoderq1']
+Q2_kwargs = qfunc_kwargs.copy()
+Q2_kwargs['encoder'] = encoder_dict['encoderq2']
+Q1t_kwargs = qfunc_kwargs.copy()
+Q1t_kwargs['encoder'] = encoder_dict['encoderq1t']
+Q2t_kwargs = qfunc_kwargs.copy()
+Q2t_kwargs['encoder'] = encoder_dict['encoderq2t']
+
+agent_kwargs=dict(
+    name='SACAgentGraph',
+    policy_constructor=GaussPolicy,
+    qfunc_constructor=Qfunc,
+    env_constructor=GraphEnv,
+    buffer_constructor=GraphBuffer,
+    optimiser_constructors=dict(
+        policy_optim=torch.optim.Adam,
+        temperature_optim=torch.optim.Adam,
+        Q1_optim=torch.optim.Adam,
+        Q2_optim=torch.optim.Adam,
+    ),
+    entropy_lb=encoder_hiddens[-1],
+    policy_lr=3e-4,
+    temperature_lr=3e-4,
+    qfunc_lr=3e-4,
+    tau=0.005,
+    discount=1.,
+    save_to=TEST_OUTPUTS_PATH,
+    cache_best_policy=False,
+    clip_grads=False,
+    UT_trick=False,
+    with_entropy=False,
+)
+
+config = dict(
+    training_kwargs=dict(
+        seed=0,
+        num_iters=100,
+        num_steps_to_sample=200,
+        num_grad_steps=1,
+        batch_size=100,
+        num_eval_steps_to_sample=n_nodes,
+        min_steps_to_presample=0,
+    ),
+    Q1_kwargs=Q1_kwargs,
+    Q2_kwargs=Q2_kwargs,
+    Q1t_kwargs=Q1t_kwargs,
+    Q2t_kwargs=Q2t_kwargs,
+    policy_kwargs=gauss_policy_kwargs,
+    buffer_kwargs=dict(
+        max_size=10_000,
+        nodes=nodes,
+        seed=0,
+        drop_repeats_or_self_loops=True,
+        get_batch_reward=True,
+        graphs_per_batch=100,
+        action_is_index=True,
+        per_decision_imp_sample=True,
+        reward_scale=encoder_hiddens[-1] * 4,
+        log_offset=0.,
+        verbose=True,
+    ),
+    env_kwargs=dict(
+        x=nodes,
+        reward_fn=reward_fn,
+        max_episode_steps=n_nodes,
+        num_expert_steps=n_nodes,
+        max_repeats=n_nodes // 3,
+        max_self_loops=n_nodes // 3,
+        drop_repeats_or_self_loops=True,
+        id=None,
+        reward_fn_termination=False,
+        calculate_reward=False,
+        min_steps_to_do=3,
+    )
+)
+
+agent = SACAgentGraph(
+    **agent_kwargs,
+    **config
+)
+
+irl_trainer_config = dict(
+    num_expert_traj=15,
+    graphs_per_batch=config['buffer_kwargs']['graphs_per_batch'],
+    reward_optim_lr_scheduler=None,
+    reward_grad_clip=False,
+    reward_scale=config['buffer_kwargs']['reward_scale'],
+    per_decision_imp_sample=config['buffer_kwargs']['per_decision_imp_sample'],
+    add_expert_to_generated=False,
+    lcr_regularisation_coef=None,
+    mono_regularisation_on_demo_coef=None, #1 / n_nodes,
+    verbose=True,
+)
+
+irl_trainer = IRLGraphTrainer(
+    reward_fn=reward_fn,
+    reward_optim=torch.optim.Adam(reward_fn.parameters(), lr=3e-4),
+    agent=agent,
+    nodes=nodes,
+    expert_edge_index=expert_edge_index,
+    **irl_trainer_config,
+)
+
+irl_trainer_config['num_iters'] = 8
+irl_trainer_config['policy_epochs'] = 1
+irl_trainer_config['vis_graph'] = True
+irl_trainer_config['log_offset'] = config['buffer_kwargs']['log_offset']
+irl_trainer.train_irl(
+    num_iters=irl_trainer_config['num_iters'], 
+    policy_epochs=irl_trainer_config['policy_epochs'], 
+    vis_graph=irl_trainer_config['vis_graph'], 
+    config=irl_trainer_config
+)

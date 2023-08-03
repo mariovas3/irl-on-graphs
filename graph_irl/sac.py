@@ -244,7 +244,7 @@ class SACAgentBase:
                 "avg-reward-ma-30",
                 "path-lens",
                 "path-lens-ma-30",
-                "undiscounted-returns",
+                "returns",
                 "returns-ma-30",
                 "eval-path-returns",
                 "eval-returns-ma-30",
