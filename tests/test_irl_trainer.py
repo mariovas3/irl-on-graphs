@@ -31,7 +31,7 @@ encoder_hiddens = [8, 8, 8]
 reward_fn_hiddens = [16, 16]
 gauss_policy_hiddens = [16, 16]
 tsg_policy_hiddens1 = [16, 16]
-tsg_policy_hiddens2 = [16, 16]
+tsg_policy_hiddens2 = [16]
 qfunc_hiddens = [16, 16]
 
 print(f"IRL training for {n_nodes}-node graph")
@@ -58,7 +58,6 @@ gauss_policy_kwargs = dict(
     action_dim=encoder_hiddens[-1],
     hiddens=gauss_policy_hiddens,
     with_layer_norm=True,
-    # with_batch_norm=False,
     encoder=encoder_dict['encoder'],
     two_action_vectors=True,
 )
@@ -70,7 +69,6 @@ tsg_policy_kwargs = dict(
     hiddens2=tsg_policy_hiddens2,
     encoder=encoder_dict['encoder'],
     with_layer_norm=True,
-    # with_batch_norm=False,
 )
 
 qfunc_kwargs = dict(
@@ -111,6 +109,7 @@ agent_kwargs=dict(
     save_to=TEST_OUTPUTS_PATH,
     cache_best_policy=False,
     clip_grads=False,
+    zero_temperature=False,
     UT_trick=False,
     with_entropy=False,
 )
@@ -139,7 +138,7 @@ config = dict(
         graphs_per_batch=100,
         action_is_index=True,
         per_decision_imp_sample=True,
-        reward_scale=encoder_hiddens[-1] * 4,
+        reward_scale=encoder_hiddens[-1] * 2,
         log_offset=0.,
         verbose=True,
     ),
@@ -148,8 +147,8 @@ config = dict(
         reward_fn=reward_fn,
         max_episode_steps=n_nodes,
         num_expert_steps=n_nodes,
-        max_repeats=n_nodes // 3,
-        max_self_loops=n_nodes // 3,
+        max_repeats=n_nodes,
+        max_self_loops=n_nodes,
         drop_repeats_or_self_loops=True,
         id=None,
         reward_fn_termination=False,
@@ -164,21 +163,23 @@ agent = SACAgentGraph(
 )
 
 irl_trainer_config = dict(
-    num_expert_traj=15,
+    num_expert_traj=10,
     graphs_per_batch=config['buffer_kwargs']['graphs_per_batch'],
+    num_extra_paths_gen=5,
     reward_optim_lr_scheduler=None,
     reward_grad_clip=False,
     reward_scale=config['buffer_kwargs']['reward_scale'],
     per_decision_imp_sample=config['buffer_kwargs']['per_decision_imp_sample'],
+    unnorm_policy=True,
     add_expert_to_generated=False,
     lcr_regularisation_coef=None,
-    mono_regularisation_on_demo_coef=None, #1 / n_nodes,
+    mono_regularisation_on_demo_coef=1 / (expert_edge_index.shape[-1] // 2),
     verbose=True,
 )
 
 irl_trainer = IRLGraphTrainer(
     reward_fn=reward_fn,
-    reward_optim=torch.optim.Adam(reward_fn.parameters(), lr=3e-4),
+    reward_optim=torch.optim.Adam(reward_fn.parameters(), lr=1e-2),
     agent=agent,
     nodes=nodes,
     expert_edge_index=expert_edge_index,
@@ -189,6 +190,14 @@ irl_trainer_config['num_iters'] = 8
 irl_trainer_config['policy_epochs'] = 1
 irl_trainer_config['vis_graph'] = True
 irl_trainer_config['log_offset'] = config['buffer_kwargs']['log_offset']
+irl_trainer_config['policy_lr']=agent_kwargs['policy_lr']
+irl_trainer_config['temperature_lr']=agent_kwargs['temperature_lr']
+irl_trainer_config['qfunc_lr']=agent_kwargs['qfunc_lr']
+irl_trainer_config['tau']=agent_kwargs['tau']
+irl_trainer_config['discount']=agent_kwargs['discount']
+irl_trainer_config['zero_temperature'] = agent_kwargs['zero_temperature']
+
+
 irl_trainer.train_irl(
     num_iters=irl_trainer_config['num_iters'], 
     policy_epochs=irl_trainer_config['policy_epochs'], 

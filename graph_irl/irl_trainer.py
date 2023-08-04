@@ -19,10 +19,12 @@ class IRLGraphTrainer:
         expert_edge_index,
         num_expert_traj,
         graphs_per_batch,
+        num_extra_paths_gen=0,
         reward_optim_lr_scheduler=None,
         reward_grad_clip=False,
         reward_scale=1.,
         per_decision_imp_sample=False,
+        unnorm_policy=False,
         add_expert_to_generated=False,
         lcr_regularisation_coef=None,
         mono_regularisation_on_demo_coef=None,
@@ -51,9 +53,11 @@ class IRLGraphTrainer:
         # since edges of undirected graphs are duplicated;
         self.num_expert_traj = num_expert_traj
         self.graphs_per_batch = graphs_per_batch
+        self.num_extra_paths_gen = num_extra_paths_gen
 
         # reward-loss-related params;
         self.per_decision_imp_sample = per_decision_imp_sample
+        self.unnorm_policy = unnorm_policy
         self.lcr_regularisation_coef = lcr_regularisation_coef
         self.mono_regularisation_on_demo_coef = mono_regularisation_on_demo_coef
 
@@ -74,6 +78,7 @@ class IRLGraphTrainer:
         # get avg(expert_returns)
         expert_avg_returns, expert_rewards = self.get_avg_expert_returns()
         assert expert_rewards.requires_grad
+        print("expert_rewards shape: ", expert_rewards.shape)
 
         # see if should penalise to encourage later steps in the expert traj
         # to receive more reward;
@@ -132,7 +137,7 @@ class IRLGraphTrainer:
             print(f"overall reward loss: {loss.item()}")
             for p in self.reward_fn.parameters():
                 print(
-                    f"len module param: {len(p)}",
+                    f"len module param: {p.shape}",
                     f"l2 norm of grad of params: "
                     f"{torch.norm(p.grad.detach().view(-1), 2).item()}")
             print('\n')
@@ -169,7 +174,7 @@ class IRLGraphTrainer:
         T = self.expert_edge_index.shape[-1] // 2
         
         # for the step matching;
-        n_steps_to_sample = self.num_expert_traj * T
+        n_steps_to_sample = (self.num_expert_traj + self.num_extra_paths_gen) * T
         n_steps_done, longest = 0, 0
 
         weights, rewards = [], []
@@ -184,14 +189,18 @@ class IRLGraphTrainer:
                 code,
                 steps,
                 lcr_reg_term,
+                obs
             ) = self.agent.buffer.get_single_ep_rewards_and_weights(
                 self.agent.env,
                 self.agent,
                 self.lcr_regularisation_coef is not None,
+                verbose=self.verbose,
+                unnorm_policy=self.unnorm_policy,
             )
             assert len(w) == len(r)
+            assert len(w) >= self.agent.env.min_steps_to_do
             assert r.requires_grad and not w.requires_grad
-            # print(steps, lcr_reg_term)
+            print(f"sampled undiscounted return: {r.detach().sum()}")
 
             # update avg lcr_reg_term;
             n_episodes += 1
@@ -223,6 +232,7 @@ class IRLGraphTrainer:
 
         # if self.verbose:
             # print("weights per dec", weights, sep='\n')
+        print("sampled rewards shape ", torch.stack(rewards).shape)
         
         assert torch.allclose(weights[:, :longest].sum(0), torch.ones((1, )))
         return (weights * torch.stack(rewards)).sum(), avg_lcr_reg_term
@@ -230,7 +240,7 @@ class IRLGraphTrainer:
     def _get_vanilla_imp_sampled_returns(self):
         assert not self.per_decision_imp_sample
         T = self.expert_edge_index.shape[-1] // 2
-        n_steps_to_sample = self.num_expert_traj * T
+        n_steps_to_sample = (self.num_expert_traj + self.num_extra_paths_gen) * T
         n_steps_done = 0
         sum_w = 0.0
         returns, ws = [], []
@@ -244,13 +254,17 @@ class IRLGraphTrainer:
                 code,
                 steps,
                 lcr_reg_term,
+                obs
             ) = self.agent.buffer.get_single_ep_rewards_and_weights(
                 self.agent.env,
                 self.agent,
                 self.lcr_regularisation_coef is not None,
+                verbose=self.verbose,
+                unnorm_policy=self.unnorm_policy,
             )
             # print(steps, lcr_reg_term)
             assert r.requires_grad and not w.requires_grad
+            print(f"sampled undiscounted return: {r.item()}")
             
             # update avg_lcr_reg_term;
             n_episodes += 1
@@ -288,6 +302,7 @@ class IRLGraphTrainer:
         cached_expert_rewards = []
         for _ in range(self.num_expert_traj):
             R, rewards = self._get_single_ep_expert_return()
+            print(f"expert return: {R}")
             N += 1
             avg = avg + (R - avg) / N
             cached_expert_rewards.append(rewards)

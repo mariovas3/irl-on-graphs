@@ -60,12 +60,14 @@ class SACAgentBase:
         save_to: Optional[Path] = TEST_OUTPUTS_PATH,
         cache_best_policy=False,
         clip_grads=False,
+        zero_temperature=False,
         **kwargs,
     ):
         self.name = name
         self.save_to = save_to
         self.clip_grads = clip_grads
         self.num_policy_updates = 0
+        self.zero_temperature = zero_temperature
 
         # experimental:
         # chache best nets;
@@ -119,7 +121,13 @@ class SACAgentBase:
             self.num_eval_steps_to_sample = self.env.spec.max_episode_steps
         
         # init temperature and other parameters;
-        self.log_temperature = torch.tensor(0.0, requires_grad=True)
+        if self.zero_temperature:
+            self.log_temperature = torch.tensor(-1e6, dtype=torch.float)
+        else:
+            self.log_temperature = torch.tensor(0.0, requires_grad=True)
+            self.temperature_optim = optimiser_constructors['temperature_optim'](
+                [self.log_temperature], lr=temperature_lr
+            )
         self.entropy_lb = (
             entropy_lb
             if entropy_lb
@@ -132,9 +140,7 @@ class SACAgentBase:
         self.policy_optim = optimiser_constructors['policy_optim'](
             self.policy.parameters(), lr=policy_lr
         )
-        self.temperature_optim = optimiser_constructors['temperature_optim'](
-            [self.log_temperature], lr=temperature_lr
-        )
+        
         self.Q1_optim = optimiser_constructors['Q1_optim'](self.Q1.parameters(), lr=qfunc_lr)
         self.Q2_optim = optimiser_constructors['Q2_optim'](self.Q2.parameters(), lr=qfunc_lr)
 
@@ -147,7 +153,8 @@ class SACAgentBase:
         self.policy_losses = []
         self.temperature_losses = []
         self.Q1_losses, self.Q2_losses = [], []
-        self.temperatures = [math.exp(self.log_temperature.item())]
+        if not self.zero_temperature:
+            self.temperatures = [math.exp(self.log_temperature.item())]
         self.eval_path_returns, self.eval_path_lens = [], []
 
     def sample_action(self, obs):
@@ -192,12 +199,13 @@ class SACAgentBase:
         self.policy_optim.step()
 
         # update temperature;
-        self.temperature_optim.zero_grad()
-        self.temperature_loss.backward()
-        self.temperature_optim.step()
+        if not self.zero_temperature:
+            self.temperature_optim.zero_grad()
+            self.temperature_loss.backward()
+            self.temperature_optim.step()
 
-        # add new temperature to list;
-        self.temperatures.append(math.exp(self.log_temperature.item()))
+            # add new temperature to list;
+            self.temperatures.append(math.exp(self.log_temperature.item()))
 
         # update qfunc1
         self.Q1_optim.zero_grad()
@@ -237,7 +245,6 @@ class SACAgentBase:
         if self.save_to is not None:
             metric_names = [
                 "policy-loss",
-                "temperature-loss",
                 "qfunc1-loss",
                 "qfunc2-loss",
                 "avg-reward",
@@ -250,11 +257,9 @@ class SACAgentBase:
                 "eval-returns-ma-30",
                 "eval-path-lens",
                 "eval-path-lens-ma-30",
-                "temperatures",
             ]
             metrics = [
                 self.policy_losses,
-                self.temperature_losses,
                 self.Q1_losses,
                 self.Q2_losses,
                 self.buffer.avg_rewards_per_episode,
@@ -267,8 +272,11 @@ class SACAgentBase:
                 get_moving_avgs(self.eval_path_returns, 30),
                 self.eval_path_lens,
                 get_moving_avgs(self.eval_path_lens, 30),
-                self.temperatures,
             ]
+            if not self.zero_temperature:
+                metric_names.extend(['temperature-loss', 'temperatures'])
+                metrics.append(self.temperature_losses)
+                metrics.append(self.temperatures)
 
             edge_index, last_eval_rewards = None, None
             if vis_graph:
@@ -281,17 +289,21 @@ class SACAgentBase:
                     self.log_temperature = self.best_log_temp
                     print(f"final eval with best policy")
                 
-                # do final eval;
-                obs, _, rewards, code = sample_eval_path_graph(
-                    self.env.spec.max_episode_steps,
+                # this is only for graph problems;
+                # mujoco should have vis_graph=False
+                r, _, code, ep_len, _, obs = self.buffer.get_single_ep_rewards_and_weights(
                     self.env,
                     self,
-                    self.seed,
-                    verbose=True,
+                    be_deterministic=False,
+                    verbose=False
                 )
+                if self.buffer.per_decision_imp_sample:
+                    r = r.sum().item()
+                else:
+                    r = r.item()
                 print(f"code from sampling eval episode: {code}")
-                edge_index = obs[-1].edge_index.tolist()
-                last_eval_rewards = rewards
+                edge_index = obs.edge_index.tolist()
+                # last_eval_rewards = rewards
 
             save_metrics(
                 self.save_to,
@@ -328,6 +340,7 @@ class SACAgentGraph(SACAgentBase):
         save_to: Optional[Path] = TEST_OUTPUTS_PATH,
         cache_best_policy=False,
         clip_grads=False,
+        zero_temperature=False,
         UT_trick=False,
         with_entropy=False,
         **kwargs,
@@ -348,6 +361,7 @@ class SACAgentGraph(SACAgentBase):
             save_to,
             cache_best_policy,
             clip_grads,
+            zero_temperature,
             **kwargs,
         )
         self.UT_trick = UT_trick
@@ -416,10 +430,11 @@ class SACAgentGraph(SACAgentBase):
             ).mean()
 
             # get temperature loss;
-            self.temperature_loss = -(
-                self.log_temperature.exp()
-                * (log_pi_integral + self.entropy_lb).detach()
-            ).mean()
+            if not self.zero_temperature:
+                self.temperature_loss = -(
+                    self.log_temperature.exp()
+                    * (log_pi_integral + self.entropy_lb).detach()
+                ).mean()
         else:
             # do reparam trick;
             repr_trick1, repr_trick2 = policy_density.rsample()
@@ -445,15 +460,17 @@ class SACAgentGraph(SACAgentBase):
                 math.exp(self.log_temperature.item()) * log_prob - q_est
             ).mean()
 
-            # get temperature loss;
-            self.temperature_loss = -(
-                self.log_temperature.exp()
-                * (log_prob + self.entropy_lb).detach()
-            ).mean()
+            if not self.zero_temperature:
+                # get temperature loss;
+                self.temperature_loss = -(
+                    self.log_temperature.exp()
+                    * (log_prob + self.entropy_lb).detach()
+                ).mean()
 
         # housekeeping;
         self.policy_losses.append(self.policy_loss.item())
-        self.temperature_losses.append(self.temperature_loss.item())
+        if not self.zero_temperature:
+            self.temperature_losses.append(self.temperature_loss.item())
 
     def get_q_losses(
         self,
@@ -549,14 +566,19 @@ class SACAgentGraph(SACAgentBase):
             )
 
             # sample paths with delta func policy;
-            observations, actions, rewards, code = sample_eval_path_graph(
-                self.num_eval_steps_to_sample,
+            r, _, code, ep_len, _, obs = self.buffer.get_single_ep_rewards_and_weights(
                 self.env,
                 self,
-                seed=self.buffer.seed - 1,
+                be_deterministic=False,
+                verbose=False
             )
-            self.eval_path_returns.append(np.sum(rewards))
-            self.eval_path_lens.append(len(actions))
+            if self.buffer.per_decision_imp_sample:
+                r = r.sum().item()
+            else:
+                r = r.item()
+            self.eval_path_returns.append(r)
+            assert ep_len == obs.edge_index.shape[-1] // 2
+            self.eval_path_lens.append(ep_len)
 
             if self.cache_best_policy:
                 if self.best_eval_return is None or self.eval_path_returns[-1] > self.best_eval_return:

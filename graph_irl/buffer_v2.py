@@ -1,8 +1,17 @@
+"""
+    TODO:
+        (1): Deprecate sample_eval_paths_graph since haven't implemented it 
+                for case when drop self loop or repeated edge. It is recommended
+                to use get_single_ep_rewards_and_weights.
+"""
+
 import numpy as np
 import torch
 from torch_geometric.data import Data, Batch
 
 from graph_irl.graph_rl_utils import get_action_vector_from_idx
+
+import warnings
 
 
 class BufferBase:
@@ -181,11 +190,12 @@ class GraphBuffer(BufferBase):
             torch.tensor(self.terminal_tp1[idxs], dtype=torch.float32),
         )
 
-    def _process_rewards_weights(self, rewards, weights, code):
+    def _process_rewards_weights(self, rewards, weights, code, verbose=False):
         rewards = torch.cat(rewards, -1)
         weights = torch.cat(weights, -1)
-        print(weights)
-        print(weights.shape, torch.cumprod(weights, 0), end='\n\n')
+        if verbose:
+            print(weights)
+            print(weights.shape, torch.cumprod(weights, 0), end='\n\n')
         return (
             rewards,
             torch.cumprod(weights, 0),
@@ -193,7 +203,11 @@ class GraphBuffer(BufferBase):
             len(rewards)
         )
 
-    def get_single_ep_rewards_and_weights(self, env, agent, lcr_reg=False, verbose=False):
+    def get_single_ep_rewards_and_weights(self, env, agent, 
+                                          lcr_reg=False, 
+                                          verbose=False,
+                                          unnorm_policy=False,
+                                          be_deterministic=False):
         # init lcr regularisation term and last two rewards;
         lcr_reg_term = 0.
         r1, r2 = None, None
@@ -219,7 +233,10 @@ class GraphBuffer(BufferBase):
         while not (terminated or truncated):
             
             # sample stochastic actions;
-            (a1, a2), node_embeds = agent.sample_action(obs)
+            if be_deterministic:
+                (a1, a2), node_embeds = agent.sample_deterministic(obs)
+            else:
+                (a1, a2), node_embeds = agent.sample_action(obs)
 
             # make env step;
             new_obs, reward, terminated, truncated, info = env.step(
@@ -307,13 +324,18 @@ class GraphBuffer(BufferBase):
                 assert action_idxs.shape[-1] == 2 * D
 
                 # get log_probs;
-                log_probs = policy_dists.log_prob(
-                    action_idxs[:, :D], action_idxs[:, D:]
-                ).sum(-1)
+                if unnorm_policy:
+                    log_probs = policy_dists.get_unnorm_log_prob(
+                        action_idxs[:, :D], action_idxs[:, D:]
+                    ).sum(-1)
+                else:
+                    log_probs = policy_dists.log_prob(
+                        action_idxs[:, :D], action_idxs[:, D:]
+                    ).sum(-1)
                 assert log_probs.shape == curr_rewards.shape
                 
                 # see if should print stuff;
-                if self.verbose:
+                if verbose:
                     print(f"max reward from within buffer sampling: {curr_rewards.max().item()}")
                     print(f"min log_prob: {log_probs.min().item()}")
 
@@ -326,7 +348,7 @@ class GraphBuffer(BufferBase):
                         (curr_rewards - log_probs - self.log_offset).sum().exp().detach()
                     )
                     return_val += curr_rewards.sum()
-                    if self.verbose:
+                    if verbose:
                         print(f"step: {steps} of sampling, vanilla weight: {imp_weight}",
                             f"vanilla return: {return_val}\n"
                             "curr rewards from sampling\n", 
@@ -349,16 +371,16 @@ class GraphBuffer(BufferBase):
                 assert steps == env.steps_done
 				# print(steps, env.steps_done, info['max_self_loops_reached'])
                 if self.per_decision_imp_sample:
-                    return self._process_rewards_weights(rewards, weights, code) + (lcr_reg_term, )
-                return return_val, imp_weight, code, env.steps_done, lcr_reg_term
+                    return self._process_rewards_weights(rewards, weights, code, verbose) + (lcr_reg_term, obs)
+                return return_val, imp_weight, code, env.steps_done, lcr_reg_term, obs
 
         assert steps == env.steps_done
 		# print(steps, env.steps_done, info['max_self_loops_reached'])
         if self.per_decision_imp_sample:
             # in the per dicision case, need to cumprod the weights
             # until the current time point;
-            return self._process_rewards_weights(rewards, weights, 2) + (lcr_reg_term, )
-        return return_val, imp_weight, 2, env.steps_done, lcr_reg_term
+            return self._process_rewards_weights(rewards, weights, 2, verbose) + (lcr_reg_term, obs)
+        return return_val, imp_weight, 2, env.steps_done, lcr_reg_term, obs
 
     def collect_path(
         self,
@@ -587,6 +609,8 @@ class Buffer(BufferBase):
 
 
 def sample_eval_path_graph(T, env, agent, seed, verbose=False):
+    warnings.warn("sample_eval_path_graph is deprecated in favour of "
+                  "the graph_buffer's get_ep_rewards_and_weights method")
     old_calculate_reward = env.calculate_reward
     env.reward_fn.eval()
     env.calculate_reward = True
@@ -618,6 +642,7 @@ def sample_eval_path_graph(T, env, agent, seed, verbose=False):
             env.calculate_reward = old_calculate_reward
             return observations, actions, rewards, 2
     env.calculate_reward = old_calculate_reward
+    # env.min_steps_to_do = old_min_steps_to_do
     env.reward_fn.train()
     return observations, actions, rewards, 2
 

@@ -6,6 +6,12 @@ import torch.distributions as dists
 class GaussInputDist:
     def __init__(self, diag_gauss):
         self.diag_gauss = diag_gauss
+    
+    @staticmethod
+    def unnorm_log_prob(x, diag_gauss):
+        return (
+            -.5 * ((x - diag_gauss.mean) / diag_gauss.stddev) ** 2
+        )
 
     def log_prob(self, x):
         pass
@@ -53,6 +59,12 @@ class GaussDist(GaussInputDist):
             return self.diag_gauss.log_prob(x)
         return self.diag_gauss.log_prob(*x)
     
+    def get_unnorm_log_prob(self, *x):
+        if self.two_action_vectors:
+            x = torch.cat(x, -1)
+            return GaussInputDist.unnorm_log_prob(x, self.diag_gauss)
+        return GaussInputDist.unnorm_log_prob(*x, self.diag_gauss)
+    
     @property
     def mean(self):
         mus = super().mean
@@ -96,6 +108,13 @@ class TwoStageGaussDist(GaussInputDist):
         super(TwoStageGaussDist, self).__init__(diag_gauss)
         self.obs = obs
         self.net = net
+    
+    def get_unnorm_log_prob(self, a1, a2):
+        diag_gauss2 = self._get_a2_dist(a1)
+        return (
+            GaussInputDist.unnorm_log_prob(a1, self.diag_gauss)
+            + GaussInputDist.unnorm_log_prob(a2, diag_gauss2)
+        )
 
     def log_prob(self, a1, a2):
         diag_gauss2 = self._get_a2_dist(a1)
