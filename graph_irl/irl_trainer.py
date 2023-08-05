@@ -4,10 +4,15 @@ from torch import nn
 import torch.nn.functional as F
 from torch_geometric.data import Data, Batch
 
+import matplotlib.pyplot as plt
+from networkx import Graph, draw_networkx
+import time
+
 from typing import Tuple
 import warnings
 from tqdm import tqdm
 
+DO_PLOT = True
 
 class IRLGraphTrainer:
     def __init__(
@@ -31,7 +36,6 @@ class IRLGraphTrainer:
         verbose=False,
     ):
         self.verbose = verbose
-
         # reward-related params;
         self.reward_fn = reward_fn
         self.reward_optim = reward_optim
@@ -128,19 +132,19 @@ class IRLGraphTrainer:
         # get grads;
         loss.backward()
 
-        if self.verbose:
+        if True:#self.verbose:
             print(f"expert avg rewards: {expert_avg_returns.item()}")
             print(f"imp sampled rewards: {imp_sampled_gen_rewards.item()}")
             print(f"mono loss: {mono_loss}")
             print(f"lcr_expert_loss: {lcr_loss1}")
             print(f"lcr_sampled_loss: {lcr_loss2}")
             print(f"overall reward loss: {loss.item()}")
-            for p in self.reward_fn.parameters():
-                print(
-                    f"len module param: {p.shape}",
-                    f"l2 norm of grad of params: "
-                    f"{torch.norm(p.grad.detach().view(-1), 2).item()}")
-            print('\n')
+            # for p in self.reward_fn.parameters():
+                # print(
+                    # f"len module param: {p.shape}",
+                    # f"l2 norm of grad of params: "
+                    # f"{torch.norm(p.grad.detach().view(-1), 2).item()}")
+            # print('\n')
         
         # see if reward grads need clipping;
         if self.reward_grad_clip:
@@ -160,6 +164,7 @@ class IRLGraphTrainer:
         # clear buffer since reward changed, making
         # previousely sampled trajectories invalid;
         # also empty lists with losses and other tracked metrics;
+        # if not self.agent.buffer.compute_rewards_online:
         self.agent.clear_buffer()
 
     def get_avg_generated_returns(self):
@@ -228,7 +233,7 @@ class IRLGraphTrainer:
         weights[:, :longest] = weights[:, :longest] / weights[:, :longest].sum(
             0, keepdim=True
         )
-        print(weights[:, :longest].numpy().round(3))
+        # print(weights[:, :longest].numpy().round(3))
 
         # if self.verbose:
             # print("weights per dec", weights, sep='\n')
@@ -297,6 +302,8 @@ class IRLGraphTrainer:
         Note: This is if I want to add the expert trajectories in the
                 imp sampled term similar to the GCL paper.
         """
+        global DO_PLOT
+        DO_PLOT=True
         avg = 0.0
         N = 0
         cached_expert_rewards = []
@@ -368,9 +375,30 @@ class IRLGraphTrainer:
             ).view(-1) * self.reward_scale
             return_val += curr_rewards.sum()
             cached_rewards.append(curr_rewards)
+        global DO_PLOT
+        if DO_PLOT:
+            G = Graph()
+            G.add_edges_from(list(zip(*batch_list[-1].edge_index.tolist())))
+            draw_networkx(G)
+            plt.savefig(f'bob{time.time()}.png')
+            plt.close()
+            DO_PLOT = False
         return return_val, torch.cat(cached_rewards)
 
     def train_irl(self, num_iters, policy_epochs, **kwargs):
-        for _ in tqdm(range(num_iters)):
+        for it in tqdm(range(num_iters)):
+            print(f"IRL TRAINER ITER {it+1}:\n------------------------")
+            # put reward fn in train mode and policy in eval mode
+            # for the reward update step;
+            self.reward_fn.requires_grad_(True)
+            self.reward_fn.train()
+            self.agent.policy.requires_grad_(False)
             self.do_reward_grad_step()
+
+            # when training policy, set policy to train mode
+            # and reward to eval mode;
+            self.reward_fn.requires_grad_(False)
+            self.reward_fn.eval()
+            self.agent.policy.requires_grad_(True)
+            self.agent.policy.eval()
             self.train_policy_k_epochs(policy_epochs, **kwargs)
