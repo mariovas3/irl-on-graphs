@@ -25,6 +25,8 @@ import time
 import pickle
 from tqdm import tqdm
 
+get_dtpe = True
+
 # path to save logs;
 TEST_OUTPUTS_PATH = Path(__file__).absolute().parent.parent / "test_output"
 
@@ -300,7 +302,6 @@ class SACAgentBase:
                 edge_index = obs.edge_index.tolist()
                 # last_eval_rewards = rewards
 
-            print(self.buffer.idx)
             save_metrics(
                 self.save_to,
                 metric_names,
@@ -316,14 +317,11 @@ class SACAgentBase:
                     " policy updates"
                 )
             )
-            print(self.buffer.idx, 
-                  self.buffer.action_t[:5], 
-                  self.buffer.action_t[len(self.buffer)-5:len(self.buffer)],
-                  self.buffer.obs_t[:5],
-                  self.buffer.obs_t[len(self.buffer)-5:len(self.buffer)])
-            with open(f'bob_action_t{time.time()}.txt', 'wb') as f:
-                pickle.dump(self.buffer.action_t[:10], f)
-
+            # print(self.buffer.idx, 
+            #       self.buffer.action_t[:5], 
+            #       self.buffer.action_t[len(self.buffer)-5:len(self.buffer)],
+            #       self.buffer.obs_t[:5],
+            #       self.buffer.obs_t[len(self.buffer)-5:len(self.buffer)])
 
 
 class SACAgentGraph(SACAgentBase):
@@ -604,8 +602,12 @@ class SACAgentGraph(SACAgentBase):
 
                 if self.buffer.compute_rewards_online:
                     assert reward_t is None
-                    reward_t = self.env.reward_fn((obs_t, action_t), action_is_index=True).detach().view(-1) * self.buffer.reward_scale
-
+                    reward_t = self.env.reward_fn(
+                        (obs_t, action_t), 
+                        action_is_index=True
+                    ).detach().view(-1) * self.buffer.reward_scale
+                
+                # print(action_t.T, reward_t, sep='\n', end='\n\n')
                 # get temperature and policy loss;
                 self.get_policy_loss_and_temperature_loss(obs_t)
 

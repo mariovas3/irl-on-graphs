@@ -119,10 +119,10 @@ agent_kwargs=dict(
 config = dict(
     training_kwargs=dict(
         seed=0,
-        num_iters=31,
+        num_iters=50,
         num_steps_to_sample=100,
         num_grad_steps=1,
-        batch_size=11,
+        batch_size=100,
         num_eval_steps_to_sample=n_nodes,
         min_steps_to_presample=0,
     ),
@@ -188,7 +188,7 @@ irl_trainer = IRLGraphTrainer(
     **irl_trainer_config,
 )
 
-irl_trainer_config['num_iters'] = 2
+irl_trainer_config['num_iters'] = 8
 irl_trainer_config['policy_epochs'] = 1
 irl_trainer_config['vis_graph'] = True
 irl_trainer_config['log_offset'] = config['buffer_kwargs']['log_offset']

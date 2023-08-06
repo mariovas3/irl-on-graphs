@@ -78,6 +78,11 @@ class GraphBuffer(BufferBase):
         # as I sample a batch in the sac training loop - for more efficiency;
         self.compute_rewards_online = compute_rewards_online
 
+        if not self.compute_rewards_online:
+            warnings.warn("compute_rewards_online is False, note that "
+                    "if reward_fn is a deep net it is more efficient "
+                    "to set it to True; You also don't have to discard "
+                    "old sampled experience after reward_fn is updated.")
         # place holder edge index;
         edge_index = torch.tensor([[], []], dtype=torch.long)
         
@@ -148,7 +153,8 @@ class GraphBuffer(BufferBase):
         ]
         self.terminal_tp1 = np.empty((self.max_size,), dtype=np.int8)
         if not self.compute_rewards_online:
-            self.reward_t = np.zeros((self.max_size,), dtype=np.float32)
+            self.reward_t = np.zeros((self.max_size,), 
+                                        dtype=np.float32)
 
     def add_sample(self, obs_t, action_t, reward_t, obs_tp1, terminal_tp1):
         idx = self.idx % self.max_size
@@ -192,7 +198,7 @@ class GraphBuffer(BufferBase):
         if self.compute_rewards_online:
             reward_t = None
         else:
-            reward_t = torch.tensor(self.reward_t[idxs], dtype=torch.float32)
+            reward_t = torch.from_numpy(self.reward_t[idxs])
         return (
             Batch.from_data_list([self.obs_t[idx] for idx in idxs]),
             torch.from_numpy(self.action_t[idxs]),  # (B, 2) shape tensor
@@ -204,9 +210,9 @@ class GraphBuffer(BufferBase):
     def _process_rewards_weights(self, rewards, weights, code, verbose=False):
         rewards = torch.cat(rewards, -1)
         weights = torch.cat(weights, -1)
-        if verbose:
-            print(weights)
-            print(weights.shape, torch.cumprod(weights, 0), end='\n\n')
+        # print('per decision imp weights:')
+        # print(weights)
+        # print(weights.shape, torch.cumprod(weights, 0), end='\n\n')
         return (
             rewards,
             torch.cumprod(weights, 0),
@@ -381,13 +387,11 @@ class GraphBuffer(BufferBase):
                 code = 2
             if code != -1:
                 assert steps == env.steps_done
-				# print(steps, env.steps_done, info['max_self_loops_reached'])
                 if self.per_decision_imp_sample:
                     return self._process_rewards_weights(rewards, weights, code, verbose) + (lcr_reg_term, obs)
                 return return_val, imp_weight, code, env.steps_done, lcr_reg_term, obs
 
         assert steps == env.steps_done
-		# print(steps, env.steps_done, info['max_self_loops_reached'])
         if self.per_decision_imp_sample:
             # in the per dicision case, need to cumprod the weights
             # until the current time point;
@@ -526,7 +530,6 @@ class GraphBuffer(BufferBase):
             else:
                 obs_t = obs_tp1
             t += 1
-        # print(0, self.idx, self.reward_idx)
         if self.get_batch_reward and not self.compute_rewards_online:
             assert self.idx == self.reward_idx
 
