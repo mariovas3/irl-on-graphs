@@ -13,10 +13,12 @@ from graph_irl.reward import GraphReward
 from graph_irl.examples.circle_graph import create_circle_graph
 from graph_irl.irl_trainer import IRLGraphTrainer
 
+import random
 import numpy as np
 import torch
-torch.manual_seed(0)
+random.seed(0)
 np.random.seed(0)
+torch.manual_seed(0)
 
 def uniform_init(size_t):
     return torch.distributions.Uniform(0., 1.).sample(size_t)
@@ -104,7 +106,7 @@ agent_kwargs=dict(
     policy_lr=3e-4,
     temperature_lr=3e-4,
     qfunc_lr=3e-4,
-    tau=0.005,
+    tau=0.01,
     discount=1.,
     save_to=TEST_OUTPUTS_PATH,
     cache_best_policy=False,
@@ -117,8 +119,8 @@ agent_kwargs=dict(
 config = dict(
     training_kwargs=dict(
         seed=0,
-        num_iters=100,
-        num_steps_to_sample=200,
+        num_iters=50,
+        num_steps_to_sample=100,
         num_grad_steps=1,
         batch_size=100,
         num_eval_steps_to_sample=n_nodes,
@@ -135,12 +137,12 @@ config = dict(
         seed=0,
         drop_repeats_or_self_loops=True,
         get_batch_reward=True,
+        compute_rewards_online=True,
         graphs_per_batch=100,
         action_is_index=True,
         per_decision_imp_sample=True,
         reward_scale=encoder_hiddens[-1] * 2,
         log_offset=0.,
-        verbose=True,
     ),
     env_kwargs=dict(
         x=nodes,
@@ -174,7 +176,7 @@ irl_trainer_config = dict(
     add_expert_to_generated=False,
     lcr_regularisation_coef=None,
     mono_regularisation_on_demo_coef=1 / (expert_edge_index.shape[-1] // 2),
-    verbose=True,
+    verbose=False,
 )
 
 irl_trainer = IRLGraphTrainer(

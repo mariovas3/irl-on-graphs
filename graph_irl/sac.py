@@ -25,6 +25,8 @@ import time
 import pickle
 from tqdm import tqdm
 
+get_dtpe = True
+
 # path to save logs;
 TEST_OUTPUTS_PATH = Path(__file__).absolute().parent.parent / "test_output"
 
@@ -92,11 +94,6 @@ class SACAgentBase:
         self.min_steps_to_presample = kwargs["training_kwargs"][
             "min_steps_to_presample"
         ]
-
-        if self.seed is not None:
-            torch.manual_seed(self.seed)
-            np.random.seed(self.seed)
-            random.seed(self.seed)
 
         # instantiate necessary items;
         self.Q1 = qfunc_constructor(**kwargs["Q1_kwargs"])
@@ -320,6 +317,11 @@ class SACAgentBase:
                     " policy updates"
                 )
             )
+            # print(self.buffer.idx, 
+            #       self.buffer.action_t[:5], 
+            #       self.buffer.action_t[len(self.buffer)-5:len(self.buffer)],
+            #       self.buffer.obs_t[:5],
+            #       self.buffer.obs_t[len(self.buffer)-5:len(self.buffer)])
 
 
 class SACAgentGraph(SACAgentBase):
@@ -471,6 +473,7 @@ class SACAgentGraph(SACAgentBase):
         self.policy_losses.append(self.policy_loss.item())
         if not self.zero_temperature:
             self.temperature_losses.append(self.temperature_loss.item())
+        self.policy.eval()
 
     def get_q_losses(
         self,
@@ -484,6 +487,7 @@ class SACAgentGraph(SACAgentBase):
         self.Q2.requires_grad_(True)
         self.Q1.train()
         self.Q2.train()
+        self.policy.eval()
 
         # get predictions from q functions;
         obs_action_t = (obs_t, action_t)
@@ -554,6 +558,7 @@ class SACAgentGraph(SACAgentBase):
         self.Q2_losses.append(self.Q2_loss.item())
     
     def train_one_epoch(self):
+        self.policy.eval()
         # presample if needed;
         self.check_presample()
 
@@ -595,6 +600,14 @@ class SACAgentGraph(SACAgentBase):
                     terminated_tp1,
                 ) = self.buffer.sample(self.batch_size)
 
+                if self.buffer.compute_rewards_online:
+                    assert reward_t is None
+                    reward_t = self.env.reward_fn(
+                        (obs_t, action_t), 
+                        action_is_index=True
+                    ).detach().view(-1) * self.buffer.reward_scale
+                
+                # print(action_t.T, reward_t, sep='\n', end='\n\n')
                 # get temperature and policy loss;
                 self.get_policy_loss_and_temperature_loss(obs_t)
 
@@ -730,6 +743,7 @@ class SACAgentMuJoCo(SACAgentBase):
         # housekeeping;
         self.policy_losses.append(self.policy_loss.item())
         self.temperature_losses.append(self.temperature_loss.item())
+        self.policy.eval()
 
     def get_q_losses(
         self,
@@ -743,6 +757,7 @@ class SACAgentMuJoCo(SACAgentBase):
         self.Q2.requires_grad_(True)
         self.Q1.train()
         self.Q2.train()
+        self.policy.eval()
 
         # get predictions from q functions;
         obs_action_t = torch.cat((obs_t, action_t), -1)
@@ -812,6 +827,7 @@ class SACAgentMuJoCo(SACAgentBase):
 
     def train_one_epoch(self):
         # presample if needed;
+        self.policy.eval()
         self.check_presample()
 
         for _ in tqdm(range(self.num_iters)):

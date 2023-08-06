@@ -4,6 +4,10 @@ from torch import nn
 import torch.nn.functional as F
 from torch_geometric.data import Data, Batch
 
+import matplotlib.pyplot as plt
+from networkx import Graph, draw_networkx
+import time
+
 from typing import Tuple
 import warnings
 from tqdm import tqdm
@@ -31,7 +35,6 @@ class IRLGraphTrainer:
         verbose=False,
     ):
         self.verbose = verbose
-
         # reward-related params;
         self.reward_fn = reward_fn
         self.reward_optim = reward_optim
@@ -78,7 +81,8 @@ class IRLGraphTrainer:
         # get avg(expert_returns)
         expert_avg_returns, expert_rewards = self.get_avg_expert_returns()
         assert expert_rewards.requires_grad
-        print("expert_rewards shape: ", expert_rewards.shape)
+        if self.verbose:
+            print("expert_rewards shape: ", expert_rewards.shape)
 
         # see if should penalise to encourage later steps in the expert traj
         # to receive more reward;
@@ -128,13 +132,13 @@ class IRLGraphTrainer:
         # get grads;
         loss.backward()
 
+        print(f"expert avg rewards: {expert_avg_returns.item()}")
+        print(f"imp sampled rewards: {imp_sampled_gen_rewards.item()}")
+        print(f"mono loss: {mono_loss}")
+        print(f"lcr_expert_loss: {lcr_loss1}")
+        print(f"lcr_sampled_loss: {lcr_loss2}")
+        print(f"overall reward loss: {loss.item()}")
         if self.verbose:
-            print(f"expert avg rewards: {expert_avg_returns.item()}")
-            print(f"imp sampled rewards: {imp_sampled_gen_rewards.item()}")
-            print(f"mono loss: {mono_loss}")
-            print(f"lcr_expert_loss: {lcr_loss1}")
-            print(f"lcr_sampled_loss: {lcr_loss2}")
-            print(f"overall reward loss: {loss.item()}")
             for p in self.reward_fn.parameters():
                 print(
                     f"len module param: {p.shape}",
@@ -157,10 +161,15 @@ class IRLGraphTrainer:
         if self.reward_optim_lr_scheduler is not None:
             self.reward_optim_lr_scheduler.step()
 
-        # clear buffer since reward changed, making
-        # previousely sampled trajectories invalid;
-        # also empty lists with losses and other tracked metrics;
-        self.agent.clear_buffer()
+        # if compute_rewards_online is true, during trajectory
+        # sampling, we only keep observations and actions and 
+        # then the rewards are computed as batche are sampled
+        # using the current reward function in the sac training;
+        # this allows us speed up due to batch reward computation
+        # and allows us to keep old experience after reward_fn
+        # is updated;
+        if not self.agent.buffer.compute_rewards_online:
+            self.agent.clear_buffer()
 
     def get_avg_generated_returns(self):
         if self.per_decision_imp_sample:
@@ -200,7 +209,8 @@ class IRLGraphTrainer:
             assert len(w) == len(r)
             assert len(w) >= self.agent.env.min_steps_to_do
             assert r.requires_grad and not w.requires_grad
-            print(f"sampled undiscounted return: {r.detach().sum()}")
+            if self.verbose:
+                print(f"per dec sampled return: {r.detach().sum()}")
 
             # update avg lcr_reg_term;
             n_episodes += 1
@@ -214,25 +224,20 @@ class IRLGraphTrainer:
 
             # pad all weights to the right with zeros;
             weights.append(F.pad(w, (0, T - len(w)), value=0))
-            # if self.verbose:
-                # print(w)
 
             # pad all rewards to len = T;
             rewards.append(F.pad(r, (0, T - len(r)), value=0))
 
             # keep track of len of longest episode;
             longest = max(len(w), longest)
-            # print(len(w), longest)
 
         weights = torch.stack(weights)
         weights[:, :longest] = weights[:, :longest] / weights[:, :longest].sum(
             0, keepdim=True
         )
-        print(weights[:, :longest].numpy().round(3))
-
-        # if self.verbose:
-            # print("weights per dec", weights, sep='\n')
-        print("sampled rewards shape ", torch.stack(rewards).shape)
+        if self.verbose:
+            print("weights per dec", weights, sep='\n')
+            print("sampled rewards shape ", torch.stack(rewards).shape)
         
         assert torch.allclose(weights[:, :longest].sum(0), torch.ones((1, )))
         return (weights * torch.stack(rewards)).sum(), avg_lcr_reg_term
@@ -262,9 +267,9 @@ class IRLGraphTrainer:
                 verbose=self.verbose,
                 unnorm_policy=self.unnorm_policy,
             )
-            # print(steps, lcr_reg_term)
             assert r.requires_grad and not w.requires_grad
-            print(f"sampled undiscounted return: {r.item()}")
+            if self.verbose:
+                print(f"sampled undiscounted return: {r.item()}")
             
             # update avg_lcr_reg_term;
             n_episodes += 1
@@ -302,7 +307,8 @@ class IRLGraphTrainer:
         cached_expert_rewards = []
         for _ in range(self.num_expert_traj):
             R, rewards = self._get_single_ep_expert_return()
-            print(f"expert return: {R}")
+            if self.verbose:
+                print(f"expert return: {R}")
             N += 1
             avg = avg + (R - avg) / N
             cached_expert_rewards.append(rewards)
@@ -371,6 +377,19 @@ class IRLGraphTrainer:
         return return_val, torch.cat(cached_rewards)
 
     def train_irl(self, num_iters, policy_epochs, **kwargs):
-        for _ in tqdm(range(num_iters)):
+        for it in tqdm(range(num_iters)):
+            print(f"IRL TRAINER ITER {it+1}:\n------------------------")
+            # put reward fn in train mode and policy in eval mode
+            # for the reward update step;
+            self.reward_fn.requires_grad_(True)
+            self.reward_fn.train()
+            self.agent.policy.requires_grad_(False)
             self.do_reward_grad_step()
+
+            # when training policy, set policy to train mode
+            # and reward to eval mode;
+            self.reward_fn.requires_grad_(False)
+            self.reward_fn.eval()
+            self.agent.policy.requires_grad_(True)
+            self.agent.policy.eval()
             self.train_policy_k_epochs(policy_epochs, **kwargs)
