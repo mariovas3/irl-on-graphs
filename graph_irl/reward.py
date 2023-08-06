@@ -57,8 +57,8 @@ class GraphReward(nn.Module):
             actions = get_action_vector_from_idx(
                 node_embeds, actions, num_graphs
             )
-        else:
-            actions = torch.cat(actions, -1)
+        # else:
+        #     actions = torch.cat(actions, -1)
         obs_action = torch.cat((obs, actions), -1)
         # return the negative of the cost -> reward;
         return -self.net(obs_action)
@@ -73,7 +73,7 @@ class StateGraphReward(nn.Module):
         with_layer_norm: bool=False,
         with_batch_norm: bool=False,
     ):
-        super(GraphReward, self).__init__()
+        super(StateGraphReward, self).__init__()
         # set given attributes;
         self.encoder = encoder
         self.hiddens = hiddens
@@ -81,15 +81,13 @@ class StateGraphReward(nn.Module):
         assert not (with_batch_norm and with_layer_norm)
 
         # create net assuming input will be
-        # concat(graph_embed, node_embed1, node_embed2)
+        # graph_embed;
         self.net = nn.Sequential()
-
         temp = [embed_dim] + hiddens
-
-        if with_layer_norm:
-                self.net.append(nn.LayerNorm((temp[0], )))
-        if with_batch_norm:
-            self.net.append(nn.BatchNorm1d(temp[0]))
+        # if with_layer_norm:
+                # self.net.append(nn.LayerNorm((temp[0], )))
+        # if with_batch_norm:
+            # self.net.append(nn.BatchNorm1d(temp[0]))
         for i in range(len(temp)-1):
             self.net.append(nn.Linear(temp[i], temp[i+1]))
             self.net.append(nn.ReLU())
@@ -100,7 +98,7 @@ class StateGraphReward(nn.Module):
         
         # up to here this corresponds to getting the cost function;
         self.net.append(nn.Linear(hiddens[-1], 1))
-        self.net.append(nn.ReLU())
+        self.net.append(nn.Softplus())
     
     def reset(self):
         pass
@@ -108,7 +106,7 @@ class StateGraphReward(nn.Module):
     def verbose(self):
         pass
     
-    def forward(self, obs):
-        obs, _ = self.encoder(obs)
+    def forward(self, graph_batch):
+        obs, _ = self.encoder(graph_batch)
         # return the negative of the cost -> reward;
         return -self.net(obs)

@@ -160,17 +160,7 @@ class IRLGraphTrainer:
         # see if lr scheduler present;
         if self.reward_optim_lr_scheduler is not None:
             self.reward_optim_lr_scheduler.step()
-
-        # if compute_rewards_online is true, during trajectory
-        # sampling, we only keep observations and actions and 
-        # then the rewards are computed as batche are sampled
-        # using the current reward function in the sac training;
-        # this allows us speed up due to batch reward computation
-        # and allows us to keep old experience after reward_fn
-        # is updated;
-        if not self.agent.buffer.compute_rewards_online:
-            self.agent.clear_buffer()
-
+        
     def get_avg_generated_returns(self):
         if self.per_decision_imp_sample:
             return self._get_per_dec_imp_samp_returns()
@@ -202,9 +192,9 @@ class IRLGraphTrainer:
             ) = self.agent.buffer.get_single_ep_rewards_and_weights(
                 self.agent.env,
                 self.agent,
-                self.lcr_regularisation_coef is not None,
-                verbose=self.verbose,
-                unnorm_policy=self.unnorm_policy,
+                # self.lcr_regularisation_coef is not None,
+                # verbose=self.verbose,
+                # unnorm_policy=self.unnorm_policy,
             )
             assert len(w) == len(r)
             assert len(w) >= self.agent.env.min_steps_to_do
@@ -263,9 +253,9 @@ class IRLGraphTrainer:
             ) = self.agent.buffer.get_single_ep_rewards_and_weights(
                 self.agent.env,
                 self.agent,
-                self.lcr_regularisation_coef is not None,
-                verbose=self.verbose,
-                unnorm_policy=self.unnorm_policy,
+                # self.lcr_regularisation_coef is not None,
+                # verbose=self.verbose,
+                # unnorm_policy=self.unnorm_policy,
             )
             assert r.requires_grad and not w.requires_grad
             if self.verbose:
@@ -365,13 +355,26 @@ class IRLGraphTrainer:
                     self.expert_edge_index[1, idxs[i]],
                 )
                 action_idxs.append([first, second])
+                if self.agent.buffer.state_reward:
+                    batch_list[-1].edge_index = torch.cat(
+                        (
+                            batch_list[-1].edge_index, 
+                            torch.tensor([[first, second], 
+                                          [second, first]], dtype=torch.long)
+                        ), -1
+                    )
 
             # create batch of graphs;
             batch = Batch.from_data_list(batch_list)
             pointer += 1
-            curr_rewards = self.reward_fn(
-                (batch, torch.tensor(action_idxs)), action_is_index=True
-            ).view(-1) * self.reward_scale
+            if self.agent.buffer.state_reward:
+                curr_rewards = self.reward_fn(
+                    batch
+                ).view(-1) * self.reward_scale
+            else:
+                curr_rewards = self.reward_fn(
+                    (batch, torch.tensor(action_idxs)), action_is_index=True
+                ).view(-1) * self.reward_scale
             return_val += curr_rewards.sum()
             cached_rewards.append(curr_rewards)
         return return_val, torch.cat(cached_rewards)

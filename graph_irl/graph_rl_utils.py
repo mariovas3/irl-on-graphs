@@ -5,6 +5,20 @@ from torch_geometric.data import Data
 from collections import namedtuple
 
 
+def inc_lcr_reg(r1, r2, curr_rewards):
+    inc = 0
+    if r1 is not None and r2 is not None:
+        temp = torch.cat((
+            torch.stack((r1, r2)), curr_rewards
+        ))
+        inc = ((temp[2:] + temp[:-2] - 2 * temp[1:-1]) ** 2).sum()
+    elif len(curr_rewards) > 2:
+        inc = ((curr_rewards[2:] + curr_rewards[:-2] - 2 * curr_rewards[1:-1]) ** 2).sum()
+    if len(curr_rewards) > 1:
+        r1, r2 = curr_rewards[-2], curr_rewards[-1]
+    return r1, r2, inc
+
+
 class GraphEnv:
     def __init__(
         self,

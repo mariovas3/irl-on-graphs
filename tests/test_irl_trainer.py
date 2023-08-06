@@ -9,7 +9,7 @@ from graph_irl.buffer_v2 import GraphBuffer
 from graph_irl.policy import GaussPolicy, TwoStageGaussPolicy, GCN, Qfunc
 from graph_irl.graph_rl_utils import GraphEnv
 from graph_irl.sac import SACAgentGraph, TEST_OUTPUTS_PATH
-from graph_irl.reward import GraphReward
+from graph_irl.reward import GraphReward, StateGraphReward
 from graph_irl.examples.circle_graph import create_circle_graph
 from graph_irl.irl_trainer import IRLGraphTrainer
 
@@ -47,13 +47,25 @@ encoder_dict = dict(
     encoder_reward = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=True),
 )
 
-reward_fn = GraphReward(
-    encoder_dict['encoder_reward'], 
-    encoder_hiddens[-1], 
-    hiddens=reward_fn_hiddens, 
-    with_layer_norm=True,
-    with_batch_norm=False,
+
+reward_funcs = dict(
+    reward_fn = GraphReward(
+        encoder_dict['encoder_reward'], 
+        encoder_hiddens[-1], 
+        hiddens=reward_fn_hiddens, 
+        with_layer_norm=True,
+        with_batch_norm=False,
+    ),
+    state_reward_fn=StateGraphReward(
+        encoder_dict['encoder_reward'], 
+        encoder_hiddens[-1], 
+        hiddens=reward_fn_hiddens, 
+        with_layer_norm=True,
+        with_batch_norm=False,
+    )
 )
+
+reward_fn = reward_funcs['state_reward_fn']
 
 gauss_policy_kwargs = dict(
     obs_dim=encoder_hiddens[-1],
@@ -134,15 +146,19 @@ config = dict(
     buffer_kwargs=dict(
         max_size=10_000,
         nodes=nodes,
+        state_reward=True,
         seed=0,
         drop_repeats_or_self_loops=True,
-        get_batch_reward=True,
-        compute_rewards_online=True,
         graphs_per_batch=100,
-        action_is_index=True,
+        action_is_index=False,
+        action_dim=encoder_hiddens[-1] * 2,
         per_decision_imp_sample=True,
         reward_scale=encoder_hiddens[-1] * 2,
         log_offset=0.,
+        lcr_reg=False, 
+        verbose=False,
+        unnorm_policy=True,
+        be_deterministic=False,
     ),
     env_kwargs=dict(
         x=nodes,
@@ -172,11 +188,11 @@ irl_trainer_config = dict(
     reward_grad_clip=False,
     reward_scale=config['buffer_kwargs']['reward_scale'],
     per_decision_imp_sample=config['buffer_kwargs']['per_decision_imp_sample'],
-    unnorm_policy=True,
+    unnorm_policy=config['buffer_kwargs']['unnorm_policy'],
     add_expert_to_generated=False,
     lcr_regularisation_coef=None,
     mono_regularisation_on_demo_coef=1 / (expert_edge_index.shape[-1] // 2),
-    verbose=False,
+    verbose=True,
 )
 
 irl_trainer = IRLGraphTrainer(

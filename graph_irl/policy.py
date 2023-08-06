@@ -264,8 +264,8 @@ class Qfunc(nn.Module):
                 actions = get_action_vector_from_idx(
                     node_embeds, actions, num_graphs
                 )
-            else:
-                actions = torch.cat(actions, -1)
+            # else:
+                # actions = torch.cat(actions, -1)
             obs_action = torch.cat((obs, actions), -1)
         return self.net(obs_action)
 

@@ -113,7 +113,6 @@ class SACAgentBase:
         self.buffer = buffer_constructor(**kwargs["buffer_kwargs"])
         self.env = env_constructor(**kwargs["env_kwargs"])
         assert self.buffer.drop_repeats_or_self_loops == self.env.drop_repeats_or_self_loops
-        assert (not self.env.calculate_reward) == self.buffer.get_batch_reward
         if self.num_eval_steps_to_sample is None:
             self.num_eval_steps_to_sample = self.env.spec.max_episode_steps
         
@@ -244,12 +243,12 @@ class SACAgentBase:
                 "policy-loss",
                 "qfunc1-loss",
                 "qfunc2-loss",
-                "avg-reward",
-                "avg-reward-ma-30",
-                "path-lens",
-                "path-lens-ma-30",
-                "returns",
-                "returns-ma-30",
+                # "avg-reward",
+                # "avg-reward-ma-30",
+                # "path-lens",
+                # "path-lens-ma-30",
+                # "returns",
+                # "returns-ma-30",
                 "eval-path-returns",
                 "eval-returns-ma-30",
                 "eval-path-lens",
@@ -259,12 +258,12 @@ class SACAgentBase:
                 self.policy_losses,
                 self.Q1_losses,
                 self.Q2_losses,
-                self.buffer.avg_rewards_per_episode,
-                get_moving_avgs(self.buffer.avg_rewards_per_episode, 30),
-                self.buffer.path_lens,
-                get_moving_avgs(self.buffer.path_lens, 30),
-                self.buffer.undiscounted_returns,
-                get_moving_avgs(self.buffer.undiscounted_returns, 30),
+                # self.buffer.avg_rewards_per_episode,
+                # get_moving_avgs(self.buffer.avg_rewards_per_episode, 30),
+                # self.buffer.path_lens,
+                # get_moving_avgs(self.buffer.path_lens, 30),
+                # self.buffer.undiscounted_returns,
+                # get_moving_avgs(self.buffer.undiscounted_returns, 30),
                 self.eval_path_returns,
                 get_moving_avgs(self.eval_path_returns, 30),
                 self.eval_path_lens,
@@ -291,8 +290,6 @@ class SACAgentBase:
                 r, _, code, ep_len, _, obs = self.buffer.get_single_ep_rewards_and_weights(
                     self.env,
                     self,
-                    be_deterministic=False,
-                    verbose=False
                 )
                 if self.buffer.per_decision_imp_sample:
                     r = r.sum().item()
@@ -496,8 +493,12 @@ class SACAgentGraph(SACAgentBase):
 
         # the action_is_index boolean will only be considered
         # if self.encoder is not None;
-        q1_est = self.Q1(obs_action_t, action_is_index=True).view(-1)
-        q2_est = self.Q2(obs_action_t, action_is_index=True).view(-1)
+        q1_est = self.Q1(obs_action_t, 
+                         action_is_index=self.buffer.action_is_index
+                         ).view(-1)
+        q2_est = self.Q2(obs_action_t, 
+                         action_is_index=self.buffer.action_is_index
+                         ).view(-1)
 
         if self.UT_trick:
             # get (B, 2 * action_dim + 1, action_dim) samples;
@@ -574,8 +575,6 @@ class SACAgentGraph(SACAgentBase):
             r, _, code, ep_len, _, obs = self.buffer.get_single_ep_rewards_and_weights(
                 self.env,
                 self,
-                be_deterministic=False,
-                verbose=False
             )
             if self.buffer.per_decision_imp_sample:
                 r = r.sum().item()
@@ -600,11 +599,15 @@ class SACAgentGraph(SACAgentBase):
                     terminated_tp1,
                 ) = self.buffer.sample(self.batch_size)
 
-                if self.buffer.compute_rewards_online:
-                    assert reward_t is None
+                assert reward_t is None
+                if self.buffer.state_reward:
+                    reward_t = self.env.reward_fn(
+                        obs_tp1
+                    ).detach().view(-1) * self.buffer.reward_scale
+                else:
                     reward_t = self.env.reward_fn(
                         (obs_t, action_t), 
-                        action_is_index=True
+                        action_is_index=self.buffer.action_is_index
                     ).detach().view(-1) * self.buffer.reward_scale
                 
                 # print(action_t.T, reward_t, sep='\n', end='\n\n')
