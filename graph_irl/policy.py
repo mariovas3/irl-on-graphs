@@ -46,10 +46,10 @@ class GCN(nn.Module):
             x = f(x, edge_index)
 
             # activation follow-up;
-            if i == len(self.net) - 1:
+            if i == len(self.net) - 2:
                 if self.final_tanh:
                     x = torch.tanh(x)
-            else:
+            elif i < len(self.net) - 2:
                 x = torch.relu(x)
                 
                 # see if layer norm is needed;
@@ -83,12 +83,13 @@ class AmortisedGaussNet(nn.Module):
         # add mean and Cholesky of diag covariance net;
         self.mu_net = nn.Linear(hiddens[-1], action_dim)
         self.std_net = nn.Sequential(
-            nn.Linear(hiddens[-1], action_dim), nn.Softplus()
+            nn.Linear(hiddens[-1], action_dim), 
+            nn.Softplus()
         )
 
     def forward(self, obs):
         emb = self.net(obs)  # shared embedding for mean and std;
-        return self.mu_net(emb), torch.clamp(self.std_net(emb), 0.01, 4.0)
+        return self.mu_net(emb), self.std_net(emb)
 
 
 class GaussPolicy(nn.Module):

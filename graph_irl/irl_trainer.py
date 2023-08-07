@@ -12,6 +12,8 @@ from typing import Tuple
 import warnings
 from tqdm import tqdm
 
+DO_PLOT = True
+
 
 class IRLGraphTrainer:
     def __init__(
@@ -44,6 +46,9 @@ class IRLGraphTrainer:
 
         # set agent;
         self.agent = agent
+
+        if self.agent.buffer.lcr_reg:
+            assert lcr_regularisation_coef is not None
 
         # set expert example;
         self.nodes = nodes
@@ -201,6 +206,7 @@ class IRLGraphTrainer:
             assert r.requires_grad and not w.requires_grad
             if self.verbose:
                 print(f"per dec sampled return: {r.detach().sum()}")
+                print(f"weights for return ", w, sep='\n')
 
             # update avg lcr_reg_term;
             n_episodes += 1
@@ -377,13 +383,24 @@ class IRLGraphTrainer:
                 ).view(-1) * self.reward_scale
             return_val += curr_rewards.sum()
             cached_rewards.append(curr_rewards)
+        global DO_PLOT
+        if DO_PLOT:
+            G = Graph()
+            G.add_edges_from(list(zip(*batch_list[-1].edge_index.tolist())))
+            fig = plt.figure()
+            draw_networkx(G)
+            plt.savefig('expert_example.png')
+            plt.close()
+            DO_PLOT = False
         return return_val, torch.cat(cached_rewards)
 
     def train_irl(self, num_iters, policy_epochs, **kwargs):
+        buffer_verbose = self.agent.buffer.verbose
         for it in tqdm(range(num_iters)):
             print(f"IRL TRAINER ITER {it+1}:\n------------------------")
             # put reward fn in train mode and policy in eval mode
             # for the reward update step;
+            self.agent.buffer.verbose = buffer_verbose
             self.reward_fn.requires_grad_(True)
             self.reward_fn.train()
             self.agent.policy.requires_grad_(False)
@@ -391,6 +408,7 @@ class IRLGraphTrainer:
 
             # when training policy, set policy to train mode
             # and reward to eval mode;
+            self.agent.buffer.verbose = False
             self.reward_fn.requires_grad_(False)
             self.reward_fn.eval()
             self.agent.policy.requires_grad_(True)

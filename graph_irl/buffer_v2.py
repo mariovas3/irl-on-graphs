@@ -230,11 +230,13 @@ class GraphBuffer(BufferBase):
         )
     
     def get_log_probs_and_dists(
-            self, batch_list, actions, unnorm_policy, agent
+            self, batch_list, actions, agent
     ):
         if self.state_reward:
+            assert len(batch_list) == len(actions) + 1
             batch = Batch.from_data_list(batch_list[:-1])
         else:
+            assert len(batch_list) == len(actions)
             batch = Batch.from_data_list(batch_list)
         policy_dists, node_embeds = agent.policy(batch)
 
@@ -250,7 +252,7 @@ class GraphBuffer(BufferBase):
         assert actions.shape[-1] == 2 * D
 
         # get log_probs;
-        if unnorm_policy:
+        if self.unnorm_policy:
             log_probs = policy_dists.get_unnorm_log_prob(
                 actions[:, :D], actions[:, D:]
             ).sum(-1)
@@ -379,7 +381,7 @@ class GraphBuffer(BufferBase):
 
                 # get log probs and policy dists;
                 log_probs, policy_dists = self.get_log_probs_and_dists(
-                    batch_list, action_idxs, self.unnorm_policy, agent
+                    batch_list, action_idxs, agent
                 )
                 
                 # see if should print stuff;
@@ -395,7 +397,7 @@ class GraphBuffer(BufferBase):
                           sep=' ')
                     print(f"corresponding entropies: ",
                           policy_dists.entropy().sum(-1)[[i, j]].detach().numpy(),
-                          sep=' ')
+                          sep=' ', end='\n\n')
 
                 # rewards and weights
                 if self.per_decision_imp_sample:
@@ -408,9 +410,7 @@ class GraphBuffer(BufferBase):
                     return_val += curr_rewards.sum()
                     if self.verbose:
                         print(f"step: {steps} of sampling, vanilla weight: {imp_weight}",
-                            f"vanilla return: {return_val}\n"
-                            "curr rewards from sampling\n", 
-                            curr_rewards.tolist(), end='\n\n',)
+                            f"vanilla return: {return_val}\n", end='\n\n')
 
                 # reset batch list and action idxs list;
                 if self.state_reward:
