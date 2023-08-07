@@ -16,9 +16,10 @@ from graph_irl.irl_trainer import IRLGraphTrainer
 import random
 import numpy as np
 import torch
-random.seed(0)
-np.random.seed(0)
-torch.manual_seed(0)
+seed = 123
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
 
 def uniform_init(size_t):
     return torch.distributions.Uniform(0., 1.).sample(size_t)
@@ -136,13 +137,13 @@ def get_params():
         cache_best_policy=False,
         clip_grads=False,
         zero_temperature=False,
-        UT_trick=True,
+        UT_trick=False,
         with_entropy=False,
     )
 
     config = dict(
         training_kwargs=dict(
-            seed=0,
+            seed=seed,
             num_iters=50,
             num_steps_to_sample=100,
             num_grad_steps=1,
@@ -159,7 +160,7 @@ def get_params():
             max_size=10_000,
             nodes=nodes,
             state_reward=which_reward_fn == 'state_reward_fn',
-            seed=0,
+            seed=seed,
             drop_repeats_or_self_loops=True,
             graphs_per_batch=100,
             action_is_index=action_is_index,
