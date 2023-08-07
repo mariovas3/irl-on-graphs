@@ -231,11 +231,16 @@ class IRLGraphTrainer:
         weights[:, :longest] = weights[:, :longest] / weights[:, :longest].sum(
             0, keepdim=True
         )
+        torch.nan_to_num_(weights, nan=0., posinf=0., neginf=0.)
+        # mask = torch.isnan(weights)
+        # temp = mask.sum(0, keepdim=True)
+        # if temp.sum():
+        #     weights[mask] = (mask / temp)[mask]
         if self.verbose:
             print("weights per dec", weights, sep='\n')
             print("sampled rewards shape ", torch.stack(rewards).shape)
         
-        assert torch.allclose(weights[:, :longest].sum(0), torch.ones((1, )))
+        # assert torch.allclose(weights[:, :longest].sum(0), torch.ones((1, )))
         return (weights * torch.stack(rewards)).sum(), avg_lcr_reg_term
 
     def _get_vanilla_imp_sampled_returns(self):

@@ -25,17 +25,18 @@ def uniform_init(size_t):
 
 
 # circular graph with 7 nodes;
-n_nodes, node_dim = 11, 5
+n_nodes, node_dim = 11, 8
 nodes, expert_edge_index = create_circle_graph(n_nodes, node_dim, torch.randn)
 # nodes = torch.ones_like(nodes)  # doesn't seem to work for ones;
 print(nodes, expert_edge_index)
-encoder_hiddens = [8] * 3
-reward_fn_hiddens = [16, 16]
+encoder_hiddens = [256, 256, 8]
+reward_fn_hiddens = [256, 256]
 gauss_policy_hiddens = [256, 256]
 tsg_policy_hiddens1 = [256, 256]
 tsg_policy_hiddens2 = [256]
 qfunc_hiddens = [256, 256]
 which_reward_fn = 'state_reward_fn'
+which_policy_kwargs = 'gauss_policy_kwargs'
 action_is_index = False
 action_dim = encoder_hiddens[-1] * 2
 reward_scale = encoder_hiddens[-1]
@@ -72,22 +73,28 @@ def get_params():
 
     reward_fn = reward_funcs[which_reward_fn]
 
-    gauss_policy_kwargs = dict(
-        obs_dim=encoder_hiddens[-1],
-        action_dim=encoder_hiddens[-1],
-        hiddens=gauss_policy_hiddens,
-        with_layer_norm=True,
-        encoder=encoder_dict['encoder'],
-        two_action_vectors=True,
+    policy_constructors = dict(
+        tsg_policy_kwargs=TwoStageGaussPolicy,
+        gauss_policy_kwargs=GaussPolicy
     )
-
-    tsg_policy_kwargs = dict(
-        obs_dim=encoder_hiddens[-1],
-        action_dim=encoder_hiddens[-1],
-        hiddens1=tsg_policy_hiddens1,
-        hiddens2=tsg_policy_hiddens2,
-        encoder=encoder_dict['encoder'],
-        with_layer_norm=True,
+    
+    policy_kwargs = dict(
+        gauss_policy_kwargs = dict(
+            obs_dim=encoder_hiddens[-1],
+            action_dim=encoder_hiddens[-1],
+            hiddens=gauss_policy_hiddens,
+            with_layer_norm=True,
+            encoder=encoder_dict['encoder'],
+            two_action_vectors=True,
+        ),
+        tsg_policy_kwargs = dict(
+            obs_dim=encoder_hiddens[-1],
+            action_dim=encoder_hiddens[-1],
+            hiddens1=tsg_policy_hiddens1,
+            hiddens2=tsg_policy_hiddens2,
+            encoder=encoder_dict['encoder'],
+            with_layer_norm=True,
+        )
     )
 
     qfunc_kwargs = dict(
@@ -109,7 +116,7 @@ def get_params():
 
     agent_kwargs=dict(
         name='SACAgentGraph',
-        policy_constructor=GaussPolicy,
+        policy_constructor=policy_constructors[which_policy_kwargs],
         qfunc_constructor=Qfunc,
         env_constructor=GraphEnv,
         buffer_constructor=GraphBuffer,
@@ -122,15 +129,15 @@ def get_params():
         entropy_lb=encoder_hiddens[-1],
         policy_lr=3e-4,
         temperature_lr=3e-4,
-        qfunc_lr=3e-4,
-        tau=0.05,
+        qfunc_lr=1e-3, #3e-4,
+        tau=0.005,
         discount=1.,
         save_to=TEST_OUTPUTS_PATH,
         cache_best_policy=False,
         clip_grads=False,
         zero_temperature=False,
         UT_trick=False,
-        with_entropy=False,
+        with_entropy=True,
     )
 
     config = dict(
@@ -147,7 +154,7 @@ def get_params():
         Q2_kwargs=Q2_kwargs,
         Q1t_kwargs=Q1t_kwargs,
         Q2t_kwargs=Q2t_kwargs,
-        policy_kwargs=gauss_policy_kwargs,
+        policy_kwargs=policy_kwargs[which_policy_kwargs],
         buffer_kwargs=dict(
             max_size=10_000,
             nodes=nodes,
