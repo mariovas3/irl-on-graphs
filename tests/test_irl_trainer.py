@@ -136,7 +136,7 @@ def get_params():
         cache_best_policy=False,
         clip_grads=False,
         zero_temperature=False,
-        UT_trick=False,
+        UT_trick=True,
         with_entropy=True,
     )
 
