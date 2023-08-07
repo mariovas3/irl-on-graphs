@@ -137,7 +137,7 @@ def get_params():
         clip_grads=False,
         zero_temperature=False,
         UT_trick=True,
-        with_entropy=True,
+        with_entropy=False,
     )
 
     config = dict(
