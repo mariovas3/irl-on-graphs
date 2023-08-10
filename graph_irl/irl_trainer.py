@@ -78,6 +78,21 @@ class IRLGraphTrainer:
 
     def train_policy_k_epochs(self, k, **kwargs):
         self.agent.train_k_epochs(k, **kwargs)
+    
+    def _get_lcr_loss(self, rewards):
+        if rewards.shape[-1] > 2:
+            lcr_loss = (
+                (
+                    (
+                        rewards[:, :-2]
+                        + rewards[:, 2:]
+                        - 2 * rewards[:, 1:-1]
+                    ) ** 2 * ((rewards[:, 2:] != 0).detach().int())
+                ).sum(-1).mean()
+            ) * self.lcr_regularisation_coef
+            return lcr_loss
+        warnings.warn("expert trajectories less than 3 steps long")
+        return 0.
 
     def do_reward_grad_step(self):
         self.reward_optim.zero_grad()
@@ -96,35 +111,16 @@ class IRLGraphTrainer:
                 (
                     torch.relu(
                         expert_rewards[:, :-1] - expert_rewards[:, 1:] - 1.0
-                    )
-                    ** 2
-                )
-                .sum(-1)
-                .mean()
+                    ) ** 2
+                ).sum(-1).mean()
             ) * self.mono_regularisation_on_demo_coef
 
         # lcr loss for the expert examples;
         if self.lcr_regularisation_coef is not None:
-            if expert_rewards.shape[-1] > 2:
-                lcr_loss1 = (
-                    (
-                        (
-                            expert_rewards[:, :-2]
-                            + expert_rewards[:, 2:]
-                            - 2 * expert_rewards[:, 1:-1]
-                        )
-                        ** 2
-                    )
-                    .sum(-1)
-                    .mean()
-                ) * self.lcr_regularisation_coef
-            else:
-                warnings.warn("expert trajectories less than 3 steps long")
+            lcr_loss1 = self._get_lcr_loss(expert_rewards)
 
         # get imp_sampled generated returns with stop grad on the weights;
         imp_sampled_gen_rewards, lcr_loss2 = self.get_avg_generated_returns()
-        if self.lcr_regularisation_coef is not None:
-            lcr_loss2 *= self.lcr_regularisation_coef
 
         # get loss;
         loss = (
@@ -179,9 +175,11 @@ class IRLGraphTrainer:
         
         # for the step matching;
         n_steps_to_sample = (self.num_expert_traj + self.num_extra_paths_gen) * T
-        n_steps_done, longest = 0, 0
+        n_steps_done, longest = 0, - float('inf')
 
-        weights, rewards = [], []
+        # store cumsum of log weights in each episode;
+        # together with rewards from that episode;
+        log_weights, rewards = [], []
         
         # avg lcr reularisation over episodes;
         avg_lcr_reg_term, n_episodes = 0.0, 0
@@ -189,7 +187,7 @@ class IRLGraphTrainer:
         while n_steps_done < n_steps_to_sample:
             (
                 r,
-                w,
+                log_w,
                 code,
                 steps,
                 lcr_reg_term,
@@ -197,66 +195,71 @@ class IRLGraphTrainer:
             ) = self.agent.buffer.get_single_ep_rewards_and_weights(
                 self.agent.env,
                 self.agent,
-                # self.lcr_regularisation_coef is not None,
-                # verbose=self.verbose,
-                # unnorm_policy=self.unnorm_policy,
             )
-            assert len(w) == len(r)
-            assert len(w) >= self.agent.env.min_steps_to_do
-            assert r.requires_grad and not w.requires_grad
+            assert len(log_w) == len(r)
+            assert len(log_w) >= self.agent.env.min_steps_to_do
+            assert r.requires_grad and not log_w.requires_grad
             if self.verbose:
                 print(f"per dec sampled return: {r.detach().sum()}")
-                print(f"weights for return ", w, sep='\n')
+                print(f"cumsum log weights of episode ", log_w, sep='\n')
 
             # update avg lcr_reg_term;
             n_episodes += 1
-            avg_lcr_reg_term = (
-                avg_lcr_reg_term
-                + (lcr_reg_term - avg_lcr_reg_term) / n_episodes
-            )
+
+            # pad all log_weights to the right with neginf;
+            # so that I can do max later;
+            log_weights.append(F.pad(log_w, 
+                                     (0, T - len(log_w)), 
+                                     value=-float('inf')))
+
+            # pad all rewards to len = T;
+            # here pad with 0;
+            rewards.append(F.pad(r, (0, T - len(r)), value=0))
+            longest = max(len(log_w), longest)
 
             # increment steps;
             n_steps_done += steps
 
-            # pad all weights to the right with zeros;
-            weights.append(F.pad(w, (0, T - len(w)), value=0))
+        # stack rewards and cumsum log weights;
+        rewards = torch.stack(rewards)
+        log_weights = torch.stack(log_weights)
 
-            # pad all rewards to len = T;
-            rewards.append(F.pad(r, (0, T - len(r)), value=0))
-
-            # keep track of len of longest episode;
-            longest = max(len(w), longest)
-
-        weights = torch.stack(weights)
-        weights[:, :longest] = weights[:, :longest] / weights[:, :longest].sum(
-            0, keepdim=True
+        # get max cumsum of logs across batch dim;
+        maxes = log_weights[:, :longest].max(0, keepdim=True).values
+        # each entry is now exp{log(wi) - log(w_max)} = wi / w_max;
+        log_weights[:, :longest] = (log_weights[:, :longest] - maxes).exp()
+        # each entry is now (wi / w_max) / sum_j(wj / w_max) = wi / sum_j(wj)
+        log_weights[:, :longest] = (
+            log_weights[:, :longest] / log_weights[:, :longest].nansum(
+                dim=0, keepdim=True
+            )
         )
-        torch.nan_to_num_(weights, nan=0., posinf=0., neginf=0.)
-        # mask = torch.isnan(weights)
-        # temp = mask.sum(0, keepdim=True)
-        # if temp.sum():
-        #     weights[mask] = (mask / temp)[mask]
-        if self.verbose:
-            print("weights per dec", weights, sep='\n')
-            print("sampled rewards shape ", torch.stack(rewards).shape)
+
+        if self.lcr_regularisation_coef is not None:
+            avg_lcr_reg_term = self._get_lcr_loss(rewards[:, :longest])
         
-        # assert torch.allclose(weights[:, :longest].sum(0), torch.ones((1, )))
-        return (weights * torch.stack(rewards)).sum(), avg_lcr_reg_term
+        if self.verbose:
+            print("actual weights per dec", log_weights[:, :longest], sep='\n')
+            print("sampled rewards shape ", rewards.shape)
+            # print(f"effective steps: {longest * len(log_weights)}")
+        
+        assert torch.allclose(log_weights[:, :longest].sum(0), torch.ones((1, )))
+        return (log_weights[:, :longest] * rewards[:, :longest]).sum(), avg_lcr_reg_term
 
     def _get_vanilla_imp_sampled_returns(self):
         assert not self.per_decision_imp_sample
         T = self.expert_edge_index.shape[-1] // 2
         n_steps_to_sample = (self.num_expert_traj + self.num_extra_paths_gen) * T
         n_steps_done = 0
-        sum_w = 0.0
-        returns, ws = [], []
+        max_log_w = - float('inf')
+        returns, log_ws = [], []
         avg_lcr_reg_term, n_episodes = 0.0, 0
 
         # sample steps;
         while n_steps_done < n_steps_to_sample:
             (
                 r,
-                w,
+                log_w,
                 code,
                 steps,
                 lcr_reg_term,
@@ -264,11 +267,8 @@ class IRLGraphTrainer:
             ) = self.agent.buffer.get_single_ep_rewards_and_weights(
                 self.agent.env,
                 self.agent,
-                # self.lcr_regularisation_coef is not None,
-                # verbose=self.verbose,
-                # unnorm_policy=self.unnorm_policy,
             )
-            assert r.requires_grad and not w.requires_grad
+            assert r.requires_grad and not log_w.requires_grad
             if self.verbose:
                 print(f"sampled undiscounted return: {r.item()}")
             
@@ -280,19 +280,25 @@ class IRLGraphTrainer:
             )
 
             # update trajectory params;
-            sum_w += w
-            ws.append(w)
+            max_log_w = max(max_log_w, log_w)
+            log_ws.append(log_w)
             returns.append(r)
 
             # house keeping;
             n_steps_done += steps
         
+        # stack returns and sum of log weights;
+        returns = torch.stack(returns)
+        log_ws = torch.stack(log_ws)
+        # subtract greatest log_weight and take exp;
+        # each entry becomes wi/w_max
+        log_ws = (log_ws - max_log_w).exp()
+        # normalise and get (wi/w_max) / sum_j(wj/w_max) = wi / sum_j(wj)
+        log_ws = log_ws / log_ws.sum()
         if self.verbose:
-            print("weights vanilla", ws, sep='\n')
-            
-        return (
-            torch.stack(returns) * (torch.stack(ws) / sum_w)
-        ).sum(), avg_lcr_reg_term
+            print("actual weights vanilla", log_ws, sep='\n')
+        # 
+        return returns @ log_ws, avg_lcr_reg_term
 
     def get_avg_expert_returns(self) -> Tuple[float, torch.Tensor]:
         """

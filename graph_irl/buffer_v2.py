@@ -205,15 +205,12 @@ class GraphBuffer(BufferBase):
             torch.tensor(self.terminal_tp1[idxs], dtype=torch.float32),
         )
 
-    def _process_rewards_weights(self, rewards, weights, code):
+    def _process_rewards_log_weights(self, rewards, log_weights, code):
         rewards = torch.cat(rewards, -1)
-        weights = torch.cat(weights, -1)
-        # print('per decision imp weights:')
-        # print(weights)
-        # print(weights.shape, torch.cumprod(weights, 0), end='\n\n')
+        log_weights = torch.cat(log_weights, -1)
         return (
             rewards,
-            torch.cumprod(weights, 0),
+            torch.cumsum(log_weights, 0),
             code,
             len(rewards)
         )
@@ -273,9 +270,9 @@ class GraphBuffer(BufferBase):
         r1, r2 = None, None
         
         if self.per_decision_imp_sample:
-            weights, rewards = [], []
+            log_weights, rewards = [], []
         else:
-            imp_weight, return_val = 1.0, 0
+            log_imp_weight, return_val = 0, 0
         
         # start the episode;
         obs, info = env.reset(seed=self.seed)
@@ -399,17 +396,17 @@ class GraphBuffer(BufferBase):
                           policy_dists.entropy().sum(-1)[[i, j]].detach().numpy(),
                           sep=' ', end='\n\n')
 
-                # rewards and weights
+                # rewards and log_weights
                 if self.per_decision_imp_sample:
                     rewards.append(curr_rewards)
-                    weights.append((curr_rewards - log_probs - self.log_offset).exp().detach())
+                    log_weights.append((curr_rewards - log_probs - self.log_offset).detach())
                 else:
-                    imp_weight *= (
-                        (curr_rewards - log_probs - self.log_offset).sum().exp().detach()
+                    log_imp_weight += (
+                        (curr_rewards - log_probs - self.log_offset).sum().detach()
                     )
                     return_val += curr_rewards.sum()
                     if self.verbose:
-                        print(f"step: {steps} of sampling, vanilla weight: {imp_weight}",
+                        print(f"step: {steps} of sampling, vanilla sum of log weights: {log_imp_weight}",
                             f"vanilla return: {return_val}\n", end='\n\n')
 
                 # reset batch list and action idxs list;
@@ -432,15 +429,15 @@ class GraphBuffer(BufferBase):
             if code != -1:
                 assert steps == env.steps_done
                 if self.per_decision_imp_sample:
-                    return self._process_rewards_weights(rewards, weights, code) + (lcr_reg_term, obs)
-                return return_val, imp_weight, code, env.steps_done, lcr_reg_term, obs
+                    return self._process_rewards_log_weights(rewards, log_weights, code) + (lcr_reg_term, obs)
+                return return_val, log_imp_weight, code, env.steps_done, lcr_reg_term, obs
 
         assert steps == env.steps_done
         if self.per_decision_imp_sample:
-            # in the per dicision case, need to cumprod the weights
+            # in the per dicision case, need to cumsum the log_weights
             # until the current time point;
-            return self._process_rewards_weights(rewards, weights, 2) + (lcr_reg_term, obs)
-        return return_val, imp_weight, 2, env.steps_done, lcr_reg_term, obs
+            return self._process_rewards_log_weights(rewards, log_weights, 2) + (lcr_reg_term, obs)
+        return return_val, log_imp_weight, 2, env.steps_done, lcr_reg_term, obs
 
     def collect_path(
         self,

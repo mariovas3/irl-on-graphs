@@ -21,16 +21,17 @@ random.seed(seed)
 np.random.seed(seed)
 torch.manual_seed(seed)
 
-def uniform_init(size_t):
-    return torch.distributions.Uniform(0., 1.).sample(size_t)
-
+def trig_circle_init(*args):
+    n_nodes = args[0]
+    inputs = torch.linspace(0, 2 * np.pi, n_nodes).view(-1, 1)
+    return torch.cat((torch.cos(inputs), torch.sin(inputs)), -1)
 
 # circular graph with 7 nodes;
-n_nodes, node_dim = 11, 8
-nodes, expert_edge_index = create_circle_graph(n_nodes, node_dim, torch.randn)
+n_nodes, node_dim = 10, 2
+nodes, expert_edge_index = create_circle_graph(n_nodes, node_dim, trig_circle_init)
 # nodes = torch.ones_like(nodes)  # doesn't seem to work for ones;
 print(nodes, expert_edge_index)
-encoder_hiddens = [256, 256, 8]
+encoder_hiddens = [16, 16, 8]
 reward_fn_hiddens = [256, 256]
 gauss_policy_hiddens = [256, 256]
 tsg_policy_hiddens1 = [256, 256]
@@ -46,14 +47,13 @@ print(f"IRL training for {n_nodes}-node graph")
 
 def get_params():
     encoder_dict = dict(
-        encoder = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=True),
-        encoderq1 = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=True),
-        encoderq2 = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=True),
-        encoderq1t = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=True),
-        encoderq2t = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=True),
-        encoder_reward = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=True),
+        encoder = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=False),
+        encoderq1 = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=False),
+        encoderq2 = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=False),
+        encoderq1t = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=False),
+        encoderq2t = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=False),
+        encoder_reward = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=False),
     )
-
 
     reward_funcs = dict(
         reward_fn = GraphReward(
@@ -147,9 +147,9 @@ def get_params():
             num_iters=50,
             num_steps_to_sample=100,
             num_grad_steps=1,
-            batch_size=100,
+            batch_size=200,
             num_eval_steps_to_sample=n_nodes,
-            min_steps_to_presample=0,
+            min_steps_to_presample=200,
         ),
         Q1_kwargs=Q1_kwargs,
         Q2_kwargs=Q2_kwargs,
@@ -157,7 +157,7 @@ def get_params():
         Q2t_kwargs=Q2t_kwargs,
         policy_kwargs=policy_kwargs[which_policy_kwargs],
         buffer_kwargs=dict(
-            max_size=10_000,
+            max_size=100_000,
             nodes=nodes,
             state_reward=which_reward_fn == 'state_reward_fn',
             seed=seed,
@@ -168,7 +168,7 @@ def get_params():
             per_decision_imp_sample=True,
             reward_scale=reward_scale,
             log_offset=0.,
-            lcr_reg=False, 
+            lcr_reg=True, 
             verbose=True,
             unnorm_policy=True,
             be_deterministic=False,
@@ -199,15 +199,15 @@ agent = SACAgentGraph(
 irl_trainer_config = dict(
     num_expert_traj=10,
     graphs_per_batch=config['buffer_kwargs']['graphs_per_batch'],
-    num_extra_paths_gen=5,
+    num_extra_paths_gen=40,
     reward_optim_lr_scheduler=None,
     reward_grad_clip=False,
     reward_scale=config['buffer_kwargs']['reward_scale'],
     per_decision_imp_sample=config['buffer_kwargs']['per_decision_imp_sample'],
     unnorm_policy=config['buffer_kwargs']['unnorm_policy'],
     add_expert_to_generated=False,
-    lcr_regularisation_coef=None,
-    mono_regularisation_on_demo_coef=1 / (expert_edge_index.shape[-1] // 2),
+    lcr_regularisation_coef=(expert_edge_index.shape[-1] // 2) * 1.,
+    mono_regularisation_on_demo_coef=(expert_edge_index.shape[-1] // 2),
     verbose=True,
 )
 
@@ -236,6 +236,7 @@ irl_trainer.train_irl(
     num_iters=irl_trainer_config['num_iters'], 
     policy_epochs=irl_trainer_config['policy_epochs'], 
     vis_graph=irl_trainer_config['vis_graph'], 
+    with_pos=True,
     config=irl_trainer_config
 )
 
@@ -253,5 +254,5 @@ agent = SACAgentGraph(
 agent.buffer.verbose = False
 agent.tau = 0.005
 
-agent.train_k_epochs(k=10, vis_graph=True)
+agent.train_k_epochs(k=10, vis_graph=True, with_pos=True)
 

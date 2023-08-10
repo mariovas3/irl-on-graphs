@@ -19,7 +19,7 @@ def create_circle_graph(n_nodes, node_dim, init_fn: Callable):
     ], dtype=torch.long)
     
     # create nodes;
-    nodes = init_fn((edge_index.shape[-1] // 2, node_dim))
+    nodes = init_fn(edge_index.shape[-1] // 2, node_dim)
 
     return nodes, edge_index
 

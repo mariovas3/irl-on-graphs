@@ -228,12 +228,14 @@ class SACAgentBase:
         pass
 
     def train_k_epochs(
-        self, k, *args, config=None, vis_graph=False, **kwargs
+        self, k, *args, config=None, vis_graph=False, 
+        with_pos=False, **kwargs
     ):
         for _ in tqdm(range(k)):
             self.train_one_epoch(*args, **kwargs)
         
         self.num_policy_updates += 1
+        pos = None
         # assert np.max(self.buffer.path_lens) <= self.env.spec.max_episode_steps
         # assert np.max(self.eval_path_lens) <= self.env.spec.max_episode_steps
 
@@ -297,6 +299,8 @@ class SACAgentBase:
                     r = r.item()
                 print(f"code from sampling eval episode: {code}")
                 edge_index = obs.edge_index.tolist()
+                if with_pos:
+                    pos = obs.x.numpy()[:, :2]
                 # last_eval_rewards = rewards
 
             save_metrics(
@@ -312,7 +316,8 @@ class SACAgentBase:
                 suptitle=(
                     f"figure after {self.num_policy_updates}" 
                     " policy updates"
-                )
+                ),
+                pos=pos
             )
             # print(self.buffer.idx, 
             #       self.buffer.action_t[:5], 
@@ -897,6 +902,7 @@ def save_metrics(
     edge_index=None,
     last_eval_rewards=None,
     suptitle=None,
+    pos=None,
 ):
     now = time.time()
     new_dir = agent_name + f"-{env_name}-seed-{seed}-{now}"
@@ -906,7 +912,7 @@ def save_metrics(
 
     # illustrate the graph building stages if edge_index supplied;
     if edge_index is not None:
-        vis_graph_building(edge_index, save_returns_to)
+        vis_graph_building(edge_index, save_returns_to, pos=pos)
         file_name = save_returns_to / "edge-index.pkl"
         with open(file_name, "wb") as f:
             pickle.dump(edge_index, f)

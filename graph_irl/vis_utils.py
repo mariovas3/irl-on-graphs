@@ -37,7 +37,7 @@ def see_one_episode(env, agent, seed, save_to):
     pygame.display.quit()
 
 
-def vis_graph_building(edge_index, save_to):
+def vis_graph_building(edge_index, save_to, pos=None):
     edges = []
     unique_edges = set()
     for first, second in zip(*edge_index):
@@ -67,7 +67,7 @@ def vis_graph_building(edge_index, save_to):
         G.add_node(edges[i][0])
         G.add_node(edges[i][1])
         G.add_edge(*edges[i])
-        nx.draw_networkx(G)
+        nx.draw_networkx(G, pos=pos, label=True)
     fig.tight_layout()
     file_name = save_to / f'last_episode_{len(edges)}_edges.png'
     plt.savefig(file_name)
