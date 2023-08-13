@@ -7,7 +7,7 @@ print(str(p))
 
 from graph_irl.buffer_v2 import GraphBuffer
 from graph_irl.policy import GaussPolicy, TwoStageGaussPolicy, GCN, Qfunc
-from graph_irl.graph_rl_utils import GraphEnv
+from graph_irl.graph_rl_utils import *
 from graph_irl.sac import SACAgentGraph, TEST_OUTPUTS_PATH
 from graph_irl.reward import GraphReward, StateGraphReward
 from graph_irl.examples.circle_graph import create_circle_graph
@@ -23,20 +23,29 @@ torch.manual_seed(seed)
 
 def trig_circle_init(*args):
     n_nodes = args[0]
-    inputs = torch.linspace(0, 2 * np.pi, n_nodes).view(-1, 1)
+    inputs = np.linspace(0, 2 * np.pi, n_nodes, endpoint=False)
+    inputs = torch.tensor(inputs, dtype=torch.float32).view(-1, 1)
     return torch.cat((torch.cos(inputs), torch.sin(inputs)), -1)
 
 # circular graph with 7 nodes;
-n_nodes, node_dim = 10, 2
+n_nodes, node_dim = 20, 2
 nodes, expert_edge_index = create_circle_graph(n_nodes, node_dim, trig_circle_init)
+
+batch_process_func_ = append_distances_
+num_extra_dims = 1
+node_dim += num_extra_dims
+nodes = 10. * nodes
 # nodes = torch.ones_like(nodes)  # doesn't seem to work for ones;
 print(nodes, expert_edge_index)
-encoder_hiddens = [16, 16, 8]
-reward_fn_hiddens = [256, 256]
-gauss_policy_hiddens = [256, 256]
-tsg_policy_hiddens1 = [256, 256]
-tsg_policy_hiddens2 = [256]
-qfunc_hiddens = [256, 256]
+net_hiddens = 256
+encoder_hiddens = [64, 64, 16]
+bet_on_homophily = True
+net2_layer_norm = True
+reward_fn_hiddens = [net_hiddens, net_hiddens]
+gauss_policy_hiddens = [net_hiddens, net_hiddens]
+tsg_policy_hiddens1 = [net_hiddens, net_hiddens]
+tsg_policy_hiddens2 = [net_hiddens]
+qfunc_hiddens = [net_hiddens, net_hiddens]
 which_reward_fn = 'state_reward_fn'
 which_policy_kwargs = 'gauss_policy_kwargs'
 action_is_index = False
@@ -47,13 +56,35 @@ print(f"IRL training for {n_nodes}-node graph")
 
 def get_params():
     encoder_dict = dict(
-        encoder = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=False),
-        encoderq1 = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=False),
-        encoderq2 = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=False),
-        encoderq1t = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=False),
-        encoderq2t = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=False),
-        encoder_reward = GCN(node_dim, encoder_hiddens, with_layer_norm=True, final_tanh=False),
+        encoder = GCN(node_dim, encoder_hiddens, 
+                      with_layer_norm=False, final_tanh=False,
+                      bet_on_homophily=bet_on_homophily, 
+                      net2_layer_norm=net2_layer_norm),
+        encoderq1 = GCN(node_dim, encoder_hiddens, 
+                        with_layer_norm=False, final_tanh=False,
+                        bet_on_homophily=bet_on_homophily, 
+                      net2_layer_norm=net2_layer_norm),
+        encoderq2 = GCN(node_dim, encoder_hiddens, 
+                        with_layer_norm=False, final_tanh=False,
+                        bet_on_homophily=bet_on_homophily, 
+                        net2_layer_norm=net2_layer_norm),
+        encoderq1t = GCN(node_dim, encoder_hiddens, 
+                         with_layer_norm=False, final_tanh=False,
+                         bet_on_homophily=bet_on_homophily, 
+                         net2_layer_norm=net2_layer_norm),
+        encoderq2t = GCN(node_dim, encoder_hiddens, 
+                         with_layer_norm=False, final_tanh=False,
+                         bet_on_homophily=bet_on_homophily, 
+                         net2_layer_norm=net2_layer_norm),
+        encoder_reward = GCN(node_dim, encoder_hiddens, 
+                             with_layer_norm=False, final_tanh=False,
+                             bet_on_homophily=bet_on_homophily, 
+                             net2_layer_norm=net2_layer_norm),
     )
+
+    if bet_on_homophily:
+        encoder_hiddens[-1] = encoder_hiddens[-1] * 2
+        action_dim = encoder_hiddens[-1] * 2
 
     reward_funcs = dict(
         reward_fn = GraphReward(
@@ -128,15 +159,15 @@ def get_params():
             Q2_optim=torch.optim.Adam,
         ),
         entropy_lb=encoder_hiddens[-1],
-        policy_lr=3e-4,
-        temperature_lr=3e-4,
-        qfunc_lr=1e-3, #3e-4,
+        policy_lr=1e-3,
+        temperature_lr=1e-2,
+        qfunc_lr=1e-3,
         tau=0.005,
         discount=1.,
         save_to=TEST_OUTPUTS_PATH,
         cache_best_policy=False,
         clip_grads=False,
-        zero_temperature=False,
+        fixed_temperature=None,
         UT_trick=False,
         with_entropy=False,
     )
@@ -144,12 +175,12 @@ def get_params():
     config = dict(
         training_kwargs=dict(
             seed=seed,
-            num_iters=50,
+            num_iters=100,
             num_steps_to_sample=100,
             num_grad_steps=1,
             batch_size=200,
             num_eval_steps_to_sample=n_nodes,
-            min_steps_to_presample=200,
+            min_steps_to_presample=300,
         ),
         Q1_kwargs=Q1_kwargs,
         Q2_kwargs=Q2_kwargs,
@@ -161,6 +192,7 @@ def get_params():
             nodes=nodes,
             state_reward=which_reward_fn == 'state_reward_fn',
             seed=seed,
+            batch_process_func_=batch_process_func_,
             drop_repeats_or_self_loops=True,
             graphs_per_batch=100,
             action_is_index=action_is_index,
@@ -175,16 +207,20 @@ def get_params():
         ),
         env_kwargs=dict(
             x=nodes,
+            expert_edge_index=None,
+            num_edges_start_from=0,
             reward_fn=reward_fn,
             max_episode_steps=n_nodes,
             num_expert_steps=n_nodes,
-            max_repeats=n_nodes,
-            max_self_loops=n_nodes,
+            max_repeats=1,#n_nodes,
+            max_self_loops=1,#n_nodes,
             drop_repeats_or_self_loops=True,
             id=None,
             reward_fn_termination=False,
             calculate_reward=False,
             min_steps_to_do=3,
+            similarity_func=sigmoid_similarity,
+            forbid_self_loops_repeats=True,
         )
     )
     return agent_kwargs, config, reward_fn
@@ -197,9 +233,10 @@ agent = SACAgentGraph(
 )
 
 irl_trainer_config = dict(
-    num_expert_traj=10,
+    num_expert_traj=30,
     graphs_per_batch=config['buffer_kwargs']['graphs_per_batch'],
-    num_extra_paths_gen=40,
+    num_extra_paths_gen=20,
+    num_edges_start_from=config['env_kwargs']['num_edges_start_from'],
     reward_optim_lr_scheduler=None,
     reward_grad_clip=False,
     reward_scale=config['buffer_kwargs']['reward_scale'],
@@ -207,7 +244,7 @@ irl_trainer_config = dict(
     unnorm_policy=config['buffer_kwargs']['unnorm_policy'],
     add_expert_to_generated=False,
     lcr_regularisation_coef=(expert_edge_index.shape[-1] // 2) * 1.,
-    mono_regularisation_on_demo_coef=(expert_edge_index.shape[-1] // 2),
+    mono_regularisation_on_demo_coef=0., #(expert_edge_index.shape[-1] // 2),
     verbose=True,
 )
 
@@ -220,7 +257,7 @@ irl_trainer = IRLGraphTrainer(
     **irl_trainer_config,
 )
 
-irl_trainer_config['num_iters'] = 12
+irl_trainer_config['num_iters'] = 10
 irl_trainer_config['policy_epochs'] = 1
 irl_trainer_config['vis_graph'] = True
 irl_trainer_config['log_offset'] = config['buffer_kwargs']['log_offset']
@@ -229,7 +266,7 @@ irl_trainer_config['temperature_lr']=agent_kwargs['temperature_lr']
 irl_trainer_config['qfunc_lr']=agent_kwargs['qfunc_lr']
 irl_trainer_config['tau']=agent_kwargs['tau']
 irl_trainer_config['discount']=agent_kwargs['discount']
-irl_trainer_config['zero_temperature'] = agent_kwargs['zero_temperature']
+irl_trainer_config['fixed_temperature'] = agent_kwargs['fixed_temperature']
 
 
 irl_trainer.train_irl(

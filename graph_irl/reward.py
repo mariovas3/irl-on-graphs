@@ -109,4 +109,4 @@ class StateGraphReward(nn.Module):
     def forward(self, graph_batch):
         obs, _ = self.encoder(graph_batch)
         # return the negative of the cost -> reward;
-        return -self.net(obs)
+        return - self.net(obs)

@@ -26,6 +26,7 @@ class IRLGraphTrainer:
         num_expert_traj,
         graphs_per_batch,
         num_extra_paths_gen=0,
+        num_edges_start_from=0,
         reward_optim_lr_scheduler=None,
         reward_grad_clip=False,
         reward_scale=1.,
@@ -62,6 +63,10 @@ class IRLGraphTrainer:
         self.num_expert_traj = num_expert_traj
         self.graphs_per_batch = graphs_per_batch
         self.num_extra_paths_gen = num_extra_paths_gen
+        # if True, then starting state is some 
+        # expert path with num_edges_start_from number of edges;
+        # this is so that gnn can actually pass some messages;
+        self.num_edges_start_from = num_edges_start_from
 
         # reward-loss-related params;
         self.per_decision_imp_sample = per_decision_imp_sample
@@ -101,6 +106,12 @@ class IRLGraphTrainer:
         # get avg(expert_returns)
         expert_avg_returns, expert_rewards = self.get_avg_expert_returns()
         assert expert_rewards.requires_grad
+        
+        # get rewards for half trajectories;
+        if self.num_edges_start_from > 0:
+            expert_rewards = expert_rewards[:, self.num_edges_start_from:]
+            expert_avg_returns = expert_rewards.sum(-1).mean()
+        
         if self.verbose:
             print("expert_rewards shape: ", expert_rewards.shape)
 
@@ -135,9 +146,9 @@ class IRLGraphTrainer:
 
         print(f"expert avg rewards: {expert_avg_returns.item()}")
         print(f"imp sampled rewards: {imp_sampled_gen_rewards.item()}")
-        print(f"mono loss: {mono_loss}")
-        print(f"lcr_expert_loss: {lcr_loss1}")
-        print(f"lcr_sampled_loss: {lcr_loss2}")
+        print(f"mono loss: {mono_loss.item()}")
+        print(f"lcr_expert_loss: {lcr_loss1.item()}")
+        print(f"lcr_sampled_loss: {lcr_loss2.item()}")
         print(f"overall reward loss: {loss.item()}")
         if self.verbose:
             for p in self.reward_fn.parameters():
@@ -383,6 +394,8 @@ class IRLGraphTrainer:
 
             # create batch of graphs;
             batch = Batch.from_data_list(batch_list)
+            if self.agent.buffer.batch_process_func_ is not None:
+                self.agent.buffer.batch_process_func_(batch)
             pointer += 1
             if self.agent.buffer.state_reward:
                 curr_rewards = self.reward_fn(
@@ -394,6 +407,7 @@ class IRLGraphTrainer:
                 ).view(-1) * self.reward_scale
             return_val += curr_rewards.sum()
             cached_rewards.append(curr_rewards)
+        
         global DO_PLOT
         if DO_PLOT:
             G = Graph()

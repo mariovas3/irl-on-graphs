@@ -1,8 +1,41 @@
+from numpy.random import choice
 from scipy.spatial import KDTree
+import numpy as np
 import torch
 from typing import Callable
 from torch_geometric.data import Data
 from collections import namedtuple
+from itertools import groupby
+
+
+def append_distances_(batch):
+    # prep vector to append as a node feature;
+    b =  - torch.ones((len(batch.x), )).view(-1, 1)
+
+    if batch.edge_index.numel() == 0:
+        # augment node features inplace;
+        batch.x = torch.cat((batch.x, b), -1)
+        return
+    # assumes batch of undirected graphs with edges
+    # (from, to), (to, from) one after the other;
+    idxs = batch.edge_index[:, ::2].tolist()
+    # get square euclid norm;
+    ds = ((batch.x[idxs[0], :] - batch.x[idxs[1], :]) ** 2).sum(-1).tolist()
+    
+    # get list of (node_idx, score) tuples sorted by node_idx;
+    a = sorted(zip(idxs[0] + idxs[1], ds * 2), key=lambda x: x[0])
+
+    # get node_idxs as keys, and sum of scores as vals; 
+    keys, vals = zip(*[
+        (k, sum([v[1] for v in g])) 
+        for (k, g) in groupby(a, key=lambda x: x[0])
+    ])
+
+    # subtract sum of distances in appropriate places;
+    b[keys, :] = - torch.tensor(vals).view(-1, 1)
+
+    # augment node features inplace;
+    batch.x = torch.cat((batch.x, b), -1)
 
 
 def inc_lcr_reg(r1, r2, curr_rewards):
@@ -19,10 +52,78 @@ def inc_lcr_reg(r1, r2, curr_rewards):
     return r1, r2, inc
 
 
+def get_rand_edge_index(edge_index, num_edges):
+    if num_edges == 0:
+        return torch.tensor([[], []], dtype=torch.long)
+    T = edge_index.shape[-1]
+    num_edges = min(T // 2, num_edges)
+    idxs = choice(range(0, T, 2), size=num_edges, replace=False)
+    idxs = sum([(i, i+1) for i in idxs], ())
+    return edge_index[:, idxs]
+
+
+def get_unique_edges(edge_index):
+    return set(
+        [
+            (i, j) if i < j else (j, i)
+            for (i, j) in zip(*edge_index.tolist())
+        ]
+    )
+
+
+def kdtree_similarity(
+    node_embeds: np.ndarray, 
+    a1: np.ndarray, 
+    a2: np.ndarray,
+    forbid_self_loops_repeats=False,
+    edge_set: set=None,
+):
+    tree = KDTree(node_embeds)
+    first = tree.query(a1, k=1)[-1]
+    if forbid_self_loops_repeats:
+        second = tree.query(a2, k=10)[-1]
+        for s in second:
+            temp1, temp2 = min(first, s), max(first, s)
+            if first == s or (temp1, temp2) in edge_set:
+                continue
+            return first, s
+        # signal that we're out of recommends by giving a self loop;
+        return first, first
+    second = tree.query(a2, k=1)[-1]
+    return first, second
+
+
+def sigmoid_similarity(
+    node_embeds: np.ndarray, 
+    a1: np.ndarray, 
+    a2: np.ndarray, 
+    forbid_self_loops_repeats=False, 
+    edge_set: set=None,
+):
+    node_embeds = torch.from_numpy(node_embeds)
+    a1, a2 = torch.from_numpy(a1), torch.from_numpy(a2)
+    actions = torch.cat((a1.view(-1, 1), a2.view(-1, 1)), -1)
+    temp = node_embeds @ actions
+    temp = torch.sigmoid(temp)
+    first = temp[:, 0].argmax().item()
+    if forbid_self_loops_repeats:
+        for s in torch.topk(temp[:, 1], k=10)[-1]:
+            temp1, temp2 = min(s.item(), first), max(s.item(), first)
+            if temp1 == temp2 or (temp1, temp2) in edge_set:
+                continue
+            return first, s.item()
+        # signal that we're out of recommends by giving a self loop;
+        return first, first
+    second = temp[:, 1].argmax().item()
+    return first, second
+
+
 class GraphEnv:
     def __init__(
         self,
         x: torch.Tensor,
+        expert_edge_index: torch.Tensor,
+        num_edges_start_from: int,
         reward_fn: Callable,
         max_episode_steps: int,
         num_expert_steps: int,
@@ -33,6 +134,8 @@ class GraphEnv:
         reward_fn_termination: bool = False,
         calculate_reward: bool=True,
         min_steps_to_do: int=3,
+        similarity_func: Callable=None,
+        forbid_self_loops_repeats: bool=False,
     ):
         """
         Args:
@@ -51,13 +154,19 @@ class GraphEnv:
                 or info['is_repeated'].
         """
         self.spec = namedtuple("spec", "id max_episode_steps")
-        self.spec.id = id if id is not None else "GraphEnv"
+        self.spec.id = id or "GraphEnv"
         self.x = x
+        self.expert_edge_index = expert_edge_index
+        self.num_edges_start_from = num_edges_start_from
+        self.similarity_func = similarity_func or kdtree_similarity
+        self.forbid_self_loops_repeats = forbid_self_loops_repeats
         self.spec.max_episode_steps = max_episode_steps
         self.num_expert_steps = num_expert_steps
         self.drop_repeats_or_self_loops = drop_repeats_or_self_loops
         self.max_repeats = max_repeats
         self.max_self_loops = max_self_loops
+        if self.forbid_self_loops_repeats:
+            assert self.max_repeats == 1 and self.max_self_loops == 1
         self.reward_fn_termination = reward_fn_termination
         self.min_steps_to_do = min_steps_to_do
         # reward fn should have its own GNN encoder;
@@ -67,9 +176,15 @@ class GraphEnv:
         self.calculate_reward = calculate_reward
 
         # attributes to be reset when reset called;
-        self.edge_index = torch.tensor([[], []], dtype=torch.long)
-        self.unique_edges = set()
-        self.steps_done = 0
+        if self.expert_edge_index is None:
+            self.edge_index = torch.tensor([[], []], dtype=torch.long)
+        else: 
+            self.edge_index = get_rand_edge_index(
+                expert_edge_index, 
+                self.num_edges_start_from
+            )
+        self.unique_edges = get_unique_edges(self.edge_index)
+        self.steps_done = len(self.unique_edges)
         self.repeats_done = 0
         self.self_loops_done = 0
         self.terminated, self.truncated = False, False
@@ -82,12 +197,20 @@ class GraphEnv:
         used.
         """
         self.reward_fn.reset()
+        if self.expert_edge_index is None:
+            self.edge_index = torch.tensor([[], []], dtype=torch.long)
+        else:
+            self.edge_index = get_rand_edge_index(
+                self.expert_edge_index, 
+                self.num_edges_start_from
+            )
+
         data = Data(
-            x=self.x, edge_index=torch.tensor([[], []], dtype=torch.long)
+            x=self.x, edge_index=self.edge_index.clone()
         )
-        self.edge_index = torch.tensor([[], []], dtype=torch.long)
-        self.unique_edges = set()
-        self.steps_done = 0
+        # self.edge_index = torch.tensor([[], []], dtype=torch.long)
+        self.unique_edges = get_unique_edges(self.edge_index)
+        self.steps_done = len(self.unique_edges)
         self.repeats_done = 0
         self.self_loops_done = 0
         self.terminated, self.truncated = False, False
@@ -102,7 +225,8 @@ class GraphEnv:
     def _update_info_terminals(self, info):
         self.terminated = (
             # enforce at least min steps to do;
-            (self.steps_done >= self.min_steps_to_do) and (
+            (self.steps_done >= self.min_steps_to_do + self.num_edges_start_from) 
+            and (
                 len(self.unique_edges) >= self.num_expert_steps
                 or (
                     self.reward_fn_termination and self.reward_fn.should_terminate
@@ -111,7 +235,8 @@ class GraphEnv:
         )
         self.truncated = (
             # enforce at least min steps to do;
-            (self.steps_done >= self.min_steps_to_do) and (
+            (self.steps_done >= self.min_steps_to_do + self.num_edges_start_from) 
+            and (
                 self.steps_done >= self.spec.max_episode_steps
                 or self.repeats_done >= self.max_repeats
                 or self.self_loops_done >= self.max_self_loops
@@ -164,20 +289,21 @@ class GraphEnv:
         # unpack action; a1 and a2 are numpy arrays;
         (a1, a2), node_embeds = action
 
-        # a1 and a2 should be flattened;
+        # a1 and a2 should be flattened and have same len as node embeds;
         assert len(a1.shape) == 1 == len(a2.shape)
-        tree = KDTree(node_embeds)
-        obs_dim = node_embeds.shape[-1]
         action_dim = len(a1)
-
-        # action vectors should have the same
-        # length as node embeddings;
+        obs_dim = node_embeds.shape[-1]
         assert action_dim == obs_dim
-        data = Data(x=self.x, edge_index=self.edge_index)
 
-        # find node embeddings closest to the action vector(s);
-        first = tree.query(a1, k=1)[-1]
-        second = tree.query(a2, k=1)[-1]
+        # get idx of proposed nodes to connect;
+        first, second = self.similarity_func(
+            node_embeds, a1, a2,
+            forbid_self_loops_repeats=self.forbid_self_loops_repeats,
+            edge_set=self.unique_edges,
+        )
+
+        # make data object;
+        data = Data(x=self.x, edge_index=self.edge_index)
 
         # see which nodes will be connected;
         # order matters since the first node is the commiting node

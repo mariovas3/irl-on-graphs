@@ -12,6 +12,17 @@ TESTS_DIR_PATH = Path(__file__).absolute().parent.parent / 'tests'
 print(TESTS_DIR_PATH)
 
 
+def vis_single_graph(edge_index, save_to, pos):
+    fig = plt.figure(figsize=(8, 8))
+    G = nx.Graph()
+    save_to = save_to / 'single_graph_vis.png'
+    G.add_edges_from(list(zip(*edge_index)))
+    nx.draw_networkx(G, pos=pos)
+    fig.tight_layout()
+    plt.savefig(save_to)
+    plt.close()
+
+
 def see_one_episode(env, agent, seed, save_to):
     obs, info = env.reset(seed=seed)
     done = False

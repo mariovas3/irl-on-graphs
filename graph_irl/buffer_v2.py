@@ -12,17 +12,25 @@ from torch_geometric.data import Data, Batch
 from graph_irl.graph_rl_utils import get_action_vector_from_idx, inc_lcr_reg
 
 import warnings
+from typing import Callable
 
 np.random.seed(0)
 
 
 class BufferBase:
-    def __init__(self, max_size, state_reward=False, seed=None):
+    def __init__(
+        self,
+        max_size, 
+        state_reward=False, 
+        seed=None,
+        batch_process_func_: Callable=None
+    ):
         self.seed = 0 if seed is None else seed
         self.idx, self.max_size = 0, max_size
         self.reward_idx = 0
         self.looped = False
         self.state_reward = state_reward
+        self.batch_process_func_ = batch_process_func_
 
         # log variables;
         self.undiscounted_returns = []
@@ -65,6 +73,7 @@ class GraphBuffer(BufferBase):
         nodes: torch.Tensor,
         state_reward=False,
         seed=None,
+        batch_process_func_=None,
         drop_repeats_or_self_loops=False,
         graphs_per_batch=None,
         action_is_index=True,
@@ -77,7 +86,9 @@ class GraphBuffer(BufferBase):
         unnorm_policy=False,
         be_deterministic=False
     ):
-        super(GraphBuffer, self).__init__(max_size, state_reward, seed)
+        super(GraphBuffer, self).__init__(
+            max_size, state_reward, seed, batch_process_func_
+        )
         # I will only keep state action trajectories and eval the reward 
         # as I sample a batch in the sac training loop - for more efficiency;
 
@@ -106,7 +117,7 @@ class GraphBuffer(BufferBase):
                                      dtype=np.int64)
         else:
             self.action_t = np.empty((max_size, action_dim), 
-                                     dtype=np.int64)
+                                     dtype=np.float32)
         self.obs_tp1 = [
             Data(x=nodes, edge_index=edge_index) 
             for _ in range(self.max_size)
@@ -197,11 +208,25 @@ class GraphBuffer(BufferBase):
 
         # always sample without replacement;
         idxs = np.random.choice(self.__len__(), size=batch_size, replace=False)
+        
+        # get batch of graphs;
+        batch = Batch.from_data_list([self.obs_t[idx] for idx in idxs])
+        batch_tp1 = Batch.from_data_list([self.obs_tp1[idx] for idx in idxs])
+        
+        # see if should process inplace;
+        # it's either this compute overhead
+        # or it will be a memory overhead that 
+        # scales as O(buffer_max_len * num_nodes_of_graph * new_columns)
+        if self.batch_process_func_ is not None:
+            self.batch_process_func_(batch)
+            self.batch_process_func_(batch_tp1)
+        
+        # return batch, actions, no_reward, future_batch, terminated
         return (
-            Batch.from_data_list([self.obs_t[idx] for idx in idxs]),
+            batch,
             torch.from_numpy(self.action_t[idxs]),
             None,
-            Batch.from_data_list([self.obs_tp1[idx] for idx in idxs]),
+            batch_tp1,
             torch.tensor(self.terminal_tp1[idxs], dtype=torch.float32),
         )
 
@@ -276,6 +301,8 @@ class GraphBuffer(BufferBase):
         
         # start the episode;
         obs, info = env.reset(seed=self.seed)
+        if self.batch_process_func_ is not None:
+            self.batch_process_func_(obs)
 
         # eval policy and reward fn in batch mode;
         action_idxs = []
@@ -339,6 +366,9 @@ class GraphBuffer(BufferBase):
             
             # add action to action list and observation in batch_list;
             if not skip_sample:
+                if self.batch_process_func_ is not None:
+                    self.batch_process_func_(new_obs)
+                
                 if self.action_is_index:
                         action_idxs.append(
                             torch.tensor([first, second], 
@@ -427,12 +457,16 @@ class GraphBuffer(BufferBase):
             elif truncated:
                 code = 2
             if code != -1:
-                assert steps == env.steps_done
+                assert steps == env.steps_done - env.num_edges_start_from
+                if self.verbose:
+                    print(f"steps done: {steps}, code: {code}")
                 if self.per_decision_imp_sample:
                     return self._process_rewards_log_weights(rewards, log_weights, code) + (lcr_reg_term, obs)
                 return return_val, log_imp_weight, code, env.steps_done, lcr_reg_term, obs
 
-        assert steps == env.steps_done
+        assert steps == env.steps_done - env.num_edges_start_from
+        if self.verbose:
+            print(f"steps done: {steps}, code: {code}")
         if self.per_decision_imp_sample:
             # in the per dicision case, need to cumsum the log_weights
             # until the current time point;
@@ -469,6 +503,10 @@ class GraphBuffer(BufferBase):
         # get at least num_steps_to_collect steps
         # and exit when terminated or truncated;
         while t < num_steps_to_collect or not (terminated or truncated):
+            # see if should preprocess;
+            if self.batch_process_func_ is not None and obs_t.x.shape[-1] == self.nodes.shape[-1]:
+                self.batch_process_func_(obs_t)
+            
             # sample action;
             (a1, a2), node_embeds = agent.sample_action(obs_t)
             a1, a2 = a1.numpy(), a2.numpy()
@@ -494,6 +532,12 @@ class GraphBuffer(BufferBase):
                     or info['is_repeat']
                 )
             )
+
+            # this is if obs_t was set to point to memory of obs_tp1
+            # and was then modified inplace but not added to buffer
+            # and consequently not with original node features;
+            # obs_t.x = self.nodes
+            obs_t.x = self.nodes
 
             # see if this step should be skipped;
             t -= int(skip_sample)

@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from torch_geometric.nn import global_mean_pool
+from torch_geometric.nn import global_max_pool
 
 from graph_irl.policy import *
 from graph_irl.distributions import batch_UT_trick_from_samples
@@ -62,14 +62,14 @@ class SACAgentBase:
         save_to: Optional[Path] = TEST_OUTPUTS_PATH,
         cache_best_policy=False,
         clip_grads=False,
-        zero_temperature=False,
+        fixed_temperature=None,
         **kwargs,
     ):
         self.name = name
         self.save_to = save_to
         self.clip_grads = clip_grads
         self.num_policy_updates = 0
-        self.zero_temperature = zero_temperature
+        self.fixed_temperature = fixed_temperature
 
         # experimental:
         # chache best nets;
@@ -117,8 +117,8 @@ class SACAgentBase:
             self.num_eval_steps_to_sample = self.env.spec.max_episode_steps
         
         # init temperature and other parameters;
-        if self.zero_temperature:
-            self.log_temperature = torch.tensor(-1e6, dtype=torch.float)
+        if self.fixed_temperature:
+            self.log_temperature = torch.tensor(np.log(self.fixed_temperature))
         else:
             self.log_temperature = torch.tensor(0.0, requires_grad=True)
             self.temperature_optim = optimiser_constructors['temperature_optim'](
@@ -149,7 +149,7 @@ class SACAgentBase:
         self.policy_losses = []
         self.temperature_losses = []
         self.Q1_losses, self.Q2_losses = [], []
-        if not self.zero_temperature:
+        if self.fixed_temperature is None:
             self.temperatures = [math.exp(self.log_temperature.item())]
         self.eval_path_returns, self.eval_path_lens = [], []
 
@@ -195,7 +195,7 @@ class SACAgentBase:
         self.policy_optim.step()
 
         # update temperature;
-        if not self.zero_temperature:
+        if self.fixed_temperature is None:
             self.temperature_optim.zero_grad()
             self.temperature_loss.backward()
             self.temperature_optim.step()
@@ -271,7 +271,7 @@ class SACAgentBase:
                 self.eval_path_lens,
                 get_moving_avgs(self.eval_path_lens, 30),
             ]
-            if not self.zero_temperature:
+            if self.fixed_temperature is None:
                 metric_names.extend(['temperature-loss', 'temperatures'])
                 metrics.append(self.temperature_losses)
                 metrics.append(self.temperatures)
@@ -344,7 +344,7 @@ class SACAgentGraph(SACAgentBase):
         save_to: Optional[Path] = TEST_OUTPUTS_PATH,
         cache_best_policy=False,
         clip_grads=False,
-        zero_temperature=False,
+        fixed_temperature=None,
         UT_trick=False,
         with_entropy=False,
         **kwargs,
@@ -365,7 +365,7 @@ class SACAgentGraph(SACAgentBase):
             save_to,
             cache_best_policy,
             clip_grads,
-            zero_temperature,
+            fixed_temperature,
             **kwargs,
         )
         self.UT_trick = UT_trick
@@ -434,7 +434,7 @@ class SACAgentGraph(SACAgentBase):
             ).mean()
 
             # get temperature loss;
-            if not self.zero_temperature:
+            if self.fixed_temperature is None:
                 self.temperature_loss = -(
                     self.log_temperature.exp()
                     * (log_pi_integral + self.entropy_lb).detach()
@@ -451,7 +451,7 @@ class SACAgentGraph(SACAgentBase):
                     repr_trick1, repr_trick2
                 ).sum(-1)
 
-            obs_t = global_mean_pool(
+            obs_t = global_max_pool(
                 node_embeds, obs_t.batch
             ).detach()  # pretend this was input with no grad tracking;
             qfunc_in = torch.cat((obs_t, repr_trick1, repr_trick2), -1)
@@ -464,7 +464,7 @@ class SACAgentGraph(SACAgentBase):
                 math.exp(self.log_temperature.item()) * log_prob - q_est
             ).mean()
 
-            if not self.zero_temperature:
+            if self.fixed_temperature is None:
                 # get temperature loss;
                 self.temperature_loss = -(
                     self.log_temperature.exp()
@@ -473,7 +473,7 @@ class SACAgentGraph(SACAgentBase):
 
         # housekeeping;
         self.policy_losses.append(self.policy_loss.item())
-        if not self.zero_temperature:
+        if self.fixed_temperature is None:
             self.temperature_losses.append(self.temperature_loss.item())
         self.policy.eval()
 
@@ -536,7 +536,7 @@ class SACAgentGraph(SACAgentBase):
                 )
 
             # input for target nets;
-            obs_tp1 = global_mean_pool(node_embeds, obs_tp1.batch)
+            obs_tp1 = global_max_pool(node_embeds, obs_tp1.batch)
             # action_tp1 = (a1, a2) -> tuple of action vectors;
             obs_action_tp1 = torch.cat((obs_tp1,) + action_tp1, -1)
             qt1_est, qt2_est = self.Q1t.net(obs_action_tp1), self.Q2t.net(
@@ -586,7 +586,7 @@ class SACAgentGraph(SACAgentBase):
             else:
                 r = r.item()
             self.eval_path_returns.append(r)
-            assert ep_len == obs.edge_index.shape[-1] // 2
+            assert ep_len == obs.edge_index.shape[-1] // 2 - self.env.num_edges_start_from
             self.eval_path_lens.append(ep_len)
 
             if self.cache_best_policy:
@@ -912,6 +912,7 @@ def save_metrics(
 
     # illustrate the graph building stages if edge_index supplied;
     if edge_index is not None:
+        vis_single_graph(edge_index, save_returns_to, pos=pos)
         vis_graph_building(edge_index, save_returns_to, pos=pos)
         file_name = save_returns_to / "edge-index.pkl"
         with open(file_name, "wb") as f:
