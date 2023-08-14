@@ -11,7 +11,7 @@ import torch.distributions as dists
 from pathlib import Path
 from graph_irl.distributions import *
 from graph_irl.graph_rl_utils import get_action_vector_from_idx
-from torch_geometric.nn import GCNConv, global_max_pool
+import torch_geometric.nn as tgnn
 
 
 TEST_OUTPUTS_PATH = Path(__file__).absolute().parent.parent / "test_output"
@@ -22,57 +22,57 @@ if not TEST_OUTPUTS_PATH.exists():
 class GCN(nn.Module):
     def __init__(
         self, in_dim, hiddens, 
-        with_layer_norm=False, final_tanh=False,
-        bet_on_homophily=False, net2_layer_norm=False,
+        with_batch_norm=False, final_tanh=False,
+        bet_on_homophily=False, net2_batch_norm=False,
     ):
         super(GCN, self).__init__()
 
         # set attributes from constructor;
-        self.hiddens = hiddens
-        self.with_layer_norm = with_layer_norm
+        self.hiddens = hiddens.copy()
+        self.with_batch_norm = with_batch_norm
         self.final_tanh = final_tanh
         self.bet_on_homophily = bet_on_homophily
+        if self.bet_on_homophily:
+            assert self.hiddens[-1] % 2 == 0
+            self.hiddens[-1] = self.hiddens[-1] // 2
 
         # init network;
-        self.net = nn.ModuleList()
+        tgnet = []
         if bet_on_homophily:
             self.net2 = nn.Sequential()
 
         # create a dummy list for ease of creating net;
-        temp = [in_dim] + hiddens
+        temp = [in_dim] + self.hiddens
 
         for i in range(len(temp) - 1):
-            self.net.add_module(f"GCNCov{i}", GCNConv(temp[i], temp[i + 1]))
+            tgnet.append((tgnn.GCNConv(temp[i], temp[i + 1]), 
+                          f"x, edge_index -> x"))
+            if i < len(temp) - 2:
+                tgnet.append(nn.ReLU())
+                if self.with_batch_norm:
+                    tgnet.append(nn.BatchNorm1d(temp[i + 1], affine=True))
             if bet_on_homophily:
                 self.net2.append(nn.Linear(temp[i], temp[i + 1]))
                 if i < len(temp) - 2:
                     self.net2.append(nn.ReLU())
-                    if net2_layer_norm:
-                        self.net2.append(nn.LayerNorm(temp[i + 1]))
+                    if net2_batch_norm:
+                        self.net2.append(nn.BatchNorm1d(temp[i + 1], affine=True))
+        
+        # get graph net in Sequential container;
+        self.net = tgnn.Sequential('x, edge_index', tgnet)
 
     def forward(self, batch):
         x, edge_index = batch.x, batch.edge_index
         if self.bet_on_homophily:
-            x2 = self.net2(x)
-        for i, f in enumerate(self.net):
-            # GNN pass;
-            x = f(x, edge_index)
-
-            # activation follow-up;
-            if i == len(self.net) - 2:
-                if self.final_tanh:
-                    x = torch.tanh(x)
-            elif i < len(self.net) - 2:
-                x = torch.relu(x)
-                
-                # see if layer norm is needed;
-                if self.with_layer_norm:
-                    x = torch.layer_norm(x, (self.hiddens[i],))
+            mlp_x = self.net2(x)
+        x = self.net(x, edge_index)
         # return avg node embedding for each graph in the batch;
         # together with node embeddings;
         if self.bet_on_homophily:
-            x = torch.cat((x, x2), -1)
-        return global_max_pool(x, batch.batch), x
+            x = torch.cat((x, mlp_x), -1)
+        if self.final_tanh:
+            x = torch.tanh(x)
+        return tgnn.global_max_pool(x, batch.batch), x
 
 
 class AmortisedGaussNet(nn.Module):
@@ -201,32 +201,37 @@ class TanhGaussPolicy(nn.Module):
         hiddens,
         with_layer_norm=False,
         encoder=None,
-        two_actions=False,
+        two_action_vectors=False,
     ):
         super(TanhGaussPolicy, self).__init__()
-        if two_actions:
-            raise NotImplementedError(
-                "Haven't implemented " "TanhGaussPolicy for " "graphs yet."
-            )
+        self.two_action_vectors = two_action_vectors
+        self.encoder = encoder
+
         self.name = (
             "TanhGaussPolicy"
             if self.encoder is None
             else "GraphTanhGaussPolicy"
         )
-        self.gauss_dist = GaussPolicy(
-            obs_dim,
-            action_dim,
-            hiddens,
-            with_layer_norm,
-            encoder,
-            two_actions,
+
+        if two_action_vectors:
+            out_dim = 2 * action_dim
+        else:
+            out_dim = action_dim
+        
+        self.net = AmortisedGaussNet(
+            obs_dim, out_dim, hiddens, with_layer_norm
         )
 
     def forward(self, obs):
-        if self.gauss_dist.encoder is not None:
-            p, embeds = self.gauss_dist(obs)
-            return TanhGauss(p), embeds
-        return TanhGauss(self.gauss_dist(obs))
+        if self.encoder is not None:
+            obs, node_embeds = self.encoder(obs)
+        mus, sigmas = self.net(obs)
+        if self.encoder is not None:
+            return (
+                TanhGauss(dists.Normal(mus, sigmas), self.two_action_vectors),
+                node_embeds
+            )
+        return TanhGauss(dists.Normal(mus, sigmas))
 
 
 class Qfunc(nn.Module):

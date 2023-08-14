@@ -169,28 +169,45 @@ class TwoStageGaussDist(GaussInputDist):
 
 
 class TanhGauss(GaussInputDist):
-    def __init__(self, diag_gauss):
+    def __init__(self, diag_gauss, two_action_vectors=False):
         super(TanhGauss, self).__init__(diag_gauss)
+        self.two_action_vectors = two_action_vectors
 
-    def log_prob(self, tanh_domain_x):
-        gauss_domain_x = (
-            torch.log(1.0 + tanh_domain_x) / 2
-            - torch.log(1.0 - tanh_domain_x) / 2
+    def _tanh_var_to_gauss_var(self, tanh_domain_x):
+        return (
+            torch.log(1. + tanh_domain_x) / 2
+            - torch.log(1. - tanh_domain_x) / 2
         )
+    
+    def log_prob(self, *tanh_domain_x):
+        if self.two_action_vectors:
+            tanh_domain_x = torch.cat(tanh_domain_x, -1)
+        gauss_domain_x = self._tanh_var_to_gauss_var(tanh_domain_x)
         return self._log_prob_from_gauss(gauss_domain_x)
+    
+    def get_unnorm_log_prob(self, *tanh_domain_x):
+        raise NotImplementedError
 
     def _log_prob_from_gauss(self, x):
         """
         x can be (*, B, x_dim)
         """
-        tanh_term = (1.0 - torch.tanh(x) ** 2).log().sum(-1)
-        return self.diag_gauss.log_prob(x).sum(-1) - tanh_term
+        tanh_term = (1.0 - torch.tanh(x) ** 2).log()
+        return self.diag_gauss.log_prob(x) - tanh_term
 
     def sample(self):
-        return torch.tanh(self.diag_gauss.sample())
+        a = torch.tanh(self.diag_gauss.sample())
+        if self.two_action_vectors:
+            mid = a.shape[-1] // 2
+            return a[:, :mid].squeeze(), a[:, mid:].squeeze()
+        return a
 
     def rsample(self):
-        return torch.tanh(self.diag_gauss.rsample())
+        a = torch.tanh(self.diag_gauss.rsample())
+        if self.two_action_vectors:
+            mid = a.shape[-1] // 2
+            return a[:, :mid].squeeze(), a[:, mid:].squeeze()
+        return a
 
     def get_UT_trick_input(self):
         return torch.tanh(super().get_UT_trick_input())
@@ -198,10 +215,17 @@ class TanhGauss(GaussInputDist):
     @property
     def mean(self):
         """Return tanh at the mean of the gaussian."""
-        return torch.tanh(self.diag_gauss.mean)
+        mus = torch.tanh(self.diag_gauss.mean)
+        if self.two_action_vectors:
+            mid = mus.shape[-1] // 2
+            return mus[:, :mid].squeeze(), mus[:, mid:].squeeze()
+        return mus
 
     @property
     def stddev(self):
+        raise NotImplementedError
+
+    def entropy(self):
         raise NotImplementedError
 
     def log_prob_UT_trick(self):

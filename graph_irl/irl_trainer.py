@@ -6,7 +6,8 @@ from torch_geometric.data import Data, Batch
 
 import matplotlib.pyplot as plt
 from networkx import Graph, draw_networkx
-import time
+
+from graph_irl.graph_rl_utils import *
 
 from typing import Tuple
 import warnings
@@ -36,6 +37,8 @@ class IRLGraphTrainer:
         lcr_regularisation_coef=None,
         mono_regularisation_on_demo_coef=None,
         verbose=False,
+        do_dfs_expert_paths=True,
+        num_reward_grad_steps=1,
     ):
         self.verbose = verbose
         # reward-related params;
@@ -44,6 +47,7 @@ class IRLGraphTrainer:
         self.reward_optim_lr_scheduler = reward_optim_lr_scheduler
         self.reward_grad_clip = reward_grad_clip
         self.reward_scale = reward_scale
+        self.num_reward_grad_steps = num_reward_grad_steps
 
         # set agent;
         self.agent = agent
@@ -54,6 +58,9 @@ class IRLGraphTrainer:
         # set expert example;
         self.nodes = nodes
         self.expert_edge_index = expert_edge_index
+        self.adj_list = edge_index_to_adj_list(expert_edge_index[:, ::2], 
+                                               len(nodes))
+        self.do_dfs_expert_paths = do_dfs_expert_paths
 
         # sampling params;
         # generated trajectories will match
@@ -121,7 +128,7 @@ class IRLGraphTrainer:
             mono_loss = (
                 (
                     torch.relu(
-                        expert_rewards[:, :-1] - expert_rewards[:, 1:] - 1.0
+                        expert_rewards[:, :-1] - expert_rewards[:, 1:]
                     ) ** 2
                 ).sum(-1).mean()
             ) * self.mono_regularisation_on_demo_coef
@@ -194,6 +201,7 @@ class IRLGraphTrainer:
         
         # avg lcr reularisation over episodes;
         avg_lcr_reg_term, n_episodes = 0.0, 0
+        maxes = torch.zeros((1, T), dtype=torch.float32)
 
         while n_steps_done < n_steps_to_sample:
             (
@@ -217,6 +225,11 @@ class IRLGraphTrainer:
             # update avg lcr_reg_term;
             n_episodes += 1
 
+            # get max abs values of cumsum of logs across batch dim;
+            maxes[0, :len(log_w)] = torch.maximum(
+                    maxes[0, :len(log_w)], log_w.view(1, -1).abs()
+            )
+
             # pad all log_weights to the right with neginf;
             # so that I can do max later;
             log_weights.append(F.pad(log_w, 
@@ -235,10 +248,8 @@ class IRLGraphTrainer:
         rewards = torch.stack(rewards)
         log_weights = torch.stack(log_weights)
 
-        # get max cumsum of logs across batch dim;
-        maxes = log_weights[:, :longest].max(0, keepdim=True).values
         # each entry is now exp{log(wi) - log(w_max)} = wi / w_max;
-        log_weights[:, :longest] = (log_weights[:, :longest] - maxes).exp()
+        log_weights[:, :longest] = (log_weights[:, :longest] - maxes[:, :longest]).exp()
         # each entry is now (wi / w_max) / sum_j(wj / w_max) = wi / sum_j(wj)
         log_weights[:, :longest] = (
             log_weights[:, :longest] / log_weights[:, :longest].nansum(
@@ -291,7 +302,7 @@ class IRLGraphTrainer:
             )
 
             # update trajectory params;
-            max_log_w = max(max_log_w, log_w)
+            max_log_w = max(max_log_w, abs(log_w))
             log_ws.append(log_w)
             returns.append(r)
 
@@ -324,7 +335,11 @@ class IRLGraphTrainer:
         N = 0
         cached_expert_rewards = []
         for _ in range(self.num_expert_traj):
-            R, rewards = self._get_single_ep_expert_return()
+            if self.do_dfs_expert_paths:
+                source = np.random.randint(0, len(self.nodes))
+                R, rewards = self._get_single_ep_dfs_return(source)
+            else:
+                R, rewards = self._get_single_ep_expert_return()
             if self.verbose:
                 print(f"expert return: {R}")
             N += 1
@@ -347,10 +362,17 @@ class IRLGraphTrainer:
         # this is because in torch_geometric, undirected graph duplicates
         # each edge e.g., (from, to), (to, from) are both in edge_index;
         idxs = sum([(i, i + 1) for i in perm], ())
-
-        # put episode in batches of no more than self.graphs_per_batch
-        # graphs. Deep Learning is usually faster when applied to batches
-        # rather than single input at a time.
+        return self._get_return_and_rewards_on_path(
+            self.expert_edge_index, idxs
+        )
+    
+    def _get_single_ep_dfs_return(self, source):
+        edge_index = get_dfs_edge_order(self.adj_list, source)
+        assert edge_index.shape == self.expert_edge_index.shape
+        idxs = list(range(edge_index.shape[-1]))
+        return self._get_return_and_rewards_on_path(edge_index, idxs)
+    
+    def _get_return_and_rewards_on_path(self, edge_index, idxs):
         pointer = 0
         return_val = 0.0
         cached_rewards = []
@@ -358,7 +380,7 @@ class IRLGraphTrainer:
         # and effectively each edge is duplicated in edge_index;
         while (
             pointer * self.graphs_per_batch * 2
-            < self.expert_edge_index.shape[-1]
+            < edge_index.shape[-1]
         ):
             batch_list = []
             action_idxs = []
@@ -366,21 +388,21 @@ class IRLGraphTrainer:
                 pointer * self.graphs_per_batch * 2,
                 min(
                     (pointer + 1) * self.graphs_per_batch * 2,
-                    self.expert_edge_index.shape[-1],
+                    edge_index.shape[-1],
                 ),
                 2,
             ):
                 batch_list.append(
                     Data(
                         x=self.nodes,
-                        edge_index=self.expert_edge_index[
+                        edge_index=edge_index[
                             :, idxs[pointer * self.graphs_per_batch * 2 : i]
                         ],
                     )
                 )
                 first, second = (
-                    self.expert_edge_index[0, idxs[i]],
-                    self.expert_edge_index[1, idxs[i]],
+                    edge_index[0, idxs[i]],
+                    edge_index[1, idxs[i]],
                 )
                 action_idxs.append([first, second])
                 if self.agent.buffer.state_reward:
@@ -388,10 +410,10 @@ class IRLGraphTrainer:
                         (
                             batch_list[-1].edge_index, 
                             torch.tensor([[first, second], 
-                                          [second, first]], dtype=torch.long)
+                                            [second, first]], dtype=torch.long)
                         ), -1
                     )
-
+    
             # create batch of graphs;
             batch = Batch.from_data_list(batch_list)
             if self.agent.buffer.batch_process_func_ is not None:
@@ -429,7 +451,8 @@ class IRLGraphTrainer:
             self.reward_fn.requires_grad_(True)
             self.reward_fn.train()
             self.agent.policy.requires_grad_(False)
-            self.do_reward_grad_step()
+            for _ in range(self.num_reward_grad_steps):
+                self.do_reward_grad_step()
 
             # when training policy, set policy to train mode
             # and reward to eval mode;

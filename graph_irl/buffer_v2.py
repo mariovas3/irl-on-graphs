@@ -10,6 +10,7 @@ import torch
 from torch_geometric.data import Data, Batch
 
 from graph_irl.graph_rl_utils import get_action_vector_from_idx, inc_lcr_reg
+from graph_irl.distributions import GaussDist, TanhGauss
 
 import warnings
 from typing import Callable
@@ -413,7 +414,7 @@ class GraphBuffer(BufferBase):
                 
                 # see if should print stuff;
                 if self.verbose:
-                    print("reward range within buffer sampling: ", 
+                    print("\nreward range within buffer sampling: ", 
                           curr_rewards.min().item(),
                           curr_rewards.max().item(), sep=' ')
                     i = log_probs.argmin().item()
@@ -422,9 +423,21 @@ class GraphBuffer(BufferBase):
                           log_probs[i].item(), 
                           log_probs[j].item(), 
                           sep=' ')
-                    print(f"corresponding entropies: ",
-                          policy_dists.entropy().sum(-1)[[i, j]].detach().numpy(),
-                          sep=' ', end='\n\n')
+                    if not isinstance(policy_dists, TanhGauss):
+                        print(f"corresponding entropies: ",
+                            policy_dists.entropy().sum(-1)[[i, j]].detach().numpy())
+                    print(f"means: ",
+                          torch.cat(policy_dists.mean, -1)[[i, j], :].detach().numpy())
+                    if isinstance(policy_dists, GaussDist):
+                        print(f"stddevs: ",
+                            torch.cat(policy_dists.stddev, -1)[[i, j], :].detach().numpy())
+                    print(f"first node_embed: ",
+                          node_embeds[0, :].detach().numpy())
+                    print(f"node_embed mean: ",
+                          node_embeds.detach().numpy().mean(0))
+                    print(f"node_embded stddev: ",
+                          node_embeds.detach().numpy().std(0),
+                          end='\n\n')
 
                 # rewards and log_weights
                 if self.per_decision_imp_sample:

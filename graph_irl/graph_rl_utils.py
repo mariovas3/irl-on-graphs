@@ -4,8 +4,58 @@ import numpy as np
 import torch
 from typing import Callable
 from torch_geometric.data import Data
+from torch_geometric.utils import degree
 from collections import namedtuple
 from itertools import groupby
+
+
+def get_dfs_edge_order(adj_list, source):
+    state = [0 for _ in range(len(adj_list))]
+    state[source] = 1
+    edge_index = [[], []]
+    def f(i):
+        if state[i] != 2:
+            state[i] = 1
+            for j in adj_list[i]:
+                if state[j] != 1:
+                    edge_index[0].extend([i, j])
+                    edge_index[1].extend([j, i])
+                    f(j)
+            state[i] = 2
+    f(source)
+    for source in range(len(adj_list)):
+        if state[source] != 2:
+            assert state[source] == 0
+            f(source)
+    return torch.tensor(edge_index, dtype=torch.long)
+
+
+def edge_index_to_adj_list(edge_index, n_nodes):
+    """
+    edge_index should be edge_index[:, ::2] i.e., no 
+    duplicate edges;
+    """
+    adj_list = [[] for _ in range(n_nodes)]
+    for i in range(edge_index.shape[-1]):
+        first, second = edge_index[0, i].item(), edge_index[1, i].item()
+        adj_list[first].append(second)
+        adj_list[second].append(first)
+    return adj_list
+
+
+def append_degrees_(batch):
+    if batch.edge_index.numel() == 0:
+        b =  torch.zeros((len(batch.x), )).view(-1, 1)
+        # augment node features inplace;
+        batch.x = torch.cat((batch.x, b), -1)
+        return
+    num_graphs = 1
+    if hasattr(batch, 'num_graphs'):
+        num_graphs = batch.num_graphs
+    n_nodes = len(batch.x)
+    degrees = degree(batch.edge_index[0, :], num_nodes=n_nodes).view(-1, 1)
+    assert len(batch.x) == len(degrees)
+    batch.x = torch.cat((batch.x, degrees), -1)
 
 
 def append_distances_(batch):
