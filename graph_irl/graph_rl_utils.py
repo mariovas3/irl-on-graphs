@@ -43,51 +43,6 @@ def edge_index_to_adj_list(edge_index, n_nodes):
     return adj_list
 
 
-def append_degrees_(batch):
-    if batch.edge_index.numel() == 0:
-        b =  torch.zeros((len(batch.x), )).view(-1, 1)
-        # augment node features inplace;
-        batch.x = torch.cat((batch.x, b), -1)
-        return
-    num_graphs = 1
-    if hasattr(batch, 'num_graphs'):
-        num_graphs = batch.num_graphs
-    n_nodes = len(batch.x)
-    degrees = degree(batch.edge_index[0, :], num_nodes=n_nodes).view(-1, 1)
-    assert len(batch.x) == len(degrees)
-    batch.x = torch.cat((batch.x, degrees), -1)
-
-
-def append_distances_(batch):
-    # prep vector to append as a node feature;
-    b =  - torch.ones((len(batch.x), )).view(-1, 1)
-
-    if batch.edge_index.numel() == 0:
-        # augment node features inplace;
-        batch.x = torch.cat((batch.x, b), -1)
-        return
-    # assumes batch of undirected graphs with edges
-    # (from, to), (to, from) one after the other;
-    idxs = batch.edge_index[:, ::2].tolist()
-    # get square euclid norm;
-    ds = ((batch.x[idxs[0], :] - batch.x[idxs[1], :]) ** 2).sum(-1).tolist()
-    
-    # get list of (node_idx, score) tuples sorted by node_idx;
-    a = sorted(zip(idxs[0] + idxs[1], ds * 2), key=lambda x: x[0])
-
-    # get node_idxs as keys, and sum of scores as vals; 
-    keys, vals = zip(*[
-        (k, sum([v[1] for v in g])) 
-        for (k, g) in groupby(a, key=lambda x: x[0])
-    ])
-
-    # subtract sum of distances in appropriate places;
-    b[keys, :] = - torch.tensor(vals).view(-1, 1)
-
-    # augment node features inplace;
-    batch.x = torch.cat((batch.x, b), -1)
-
-
 def inc_lcr_reg(r1, r2, curr_rewards):
     inc = 0
     if r1 is not None and r2 is not None:
@@ -281,6 +236,12 @@ class GraphEnv:
                 or (
                     self.reward_fn_termination and self.reward_fn.should_terminate
                 )
+                # experimental, terminate when max repeats or max_ep_steps reached;
+                # or (
+                #     self.steps_done >= self.spec.max_episode_steps
+                #     or self.repeats_done >= self.max_repeats
+                #     or self.self_loops_done >= self.max_self_loops
+                # )
             )
         )
         self.truncated = (
@@ -365,6 +326,14 @@ class GraphEnv:
         idxs = torch.tensor([[first, second]], dtype=torch.long)
         reward = None
         if self.calculate_reward:
+            raise NotImplementedError(
+                'currently only state-action experience is stored in '
+                'buffer and reward is calculated at batch-sampling '
+                'time, given current config of reward. This is '
+                'so that buffer does not be cleared after reward grad '
+                'step and is efficient since deep learning is good with '
+                'batch computation rather than per-instance computation.'
+            )
             reward = self.reward_fn((data, idxs), action_is_index=True)
 
         # if self loop;

@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from torch_geometric.nn import global_max_pool
+from torch_geometric.nn import global_mean_pool
 
 from graph_irl.policy import *
 from graph_irl.distributions import batch_UT_trick_from_samples
@@ -451,7 +451,7 @@ class SACAgentGraph(SACAgentBase):
                     repr_trick1, repr_trick2
                 ).sum(-1)
 
-            obs_t = global_max_pool(
+            obs_t = global_mean_pool(
                 node_embeds, obs_t.batch
             ).detach()  # pretend this was input with no grad tracking;
             qfunc_in = torch.cat((obs_t, repr_trick1, repr_trick2), -1)
@@ -536,7 +536,7 @@ class SACAgentGraph(SACAgentBase):
                 )
 
             # input for target nets;
-            obs_tp1 = global_max_pool(node_embeds, obs_tp1.batch)
+            obs_tp1 = global_mean_pool(node_embeds, obs_tp1.batch)
             # action_tp1 = (a1, a2) -> tuple of action vectors;
             obs_action_tp1 = torch.cat((obs_tp1,) + action_tp1, -1)
             qt1_est, qt2_est = self.Q1t.net(obs_action_tp1), self.Q2t.net(

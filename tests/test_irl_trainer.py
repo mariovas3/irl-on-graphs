@@ -8,10 +8,14 @@ print(str(p))
 from graph_irl.buffer_v2 import GraphBuffer
 from graph_irl.policy import GaussPolicy, TwoStageGaussPolicy, TanhGaussPolicy, GCN, Qfunc
 from graph_irl.graph_rl_utils import *
+from graph_irl.transforms import *
 from graph_irl.sac import SACAgentGraph, TEST_OUTPUTS_PATH
 from graph_irl.reward import GraphReward, StateGraphReward
 from graph_irl.examples.circle_graph import create_circle_graph
 from graph_irl.irl_trainer import IRLGraphTrainer
+from graph_irl.eval_metrics import save_graph_stats_k_runs_GO1
+
+from torch_geometric.data import Data
 
 import random
 import numpy as np
@@ -20,6 +24,7 @@ seed = 123
 random.seed(seed)
 np.random.seed(seed)
 torch.manual_seed(seed)
+
 
 def trig_circle_init(*args):
     n_nodes = args[0]
@@ -34,14 +39,13 @@ nodes, expert_edge_index = create_circle_graph(n_nodes, node_dim, trig_circle_in
 batch_process_func_ = append_degrees_
 num_extra_dims = 1
 node_dim += num_extra_dims
-nodes = nodes
 # nodes = torch.ones_like(nodes)  # doesn't seem to work for ones;
 print(nodes, expert_edge_index)
 net_hiddens = 256
-encoder_hiddens = [64, 64, 6]
-bet_on_homophily = True
-net2_batch_norm = True
-with_batch_norm = True
+encoder_hiddens = [24, 24, 24]
+bet_on_homophily = False
+net2_batch_norm = False
+with_batch_norm = False
 final_tanh = True
 
 reward_fn_hiddens = [net_hiddens, net_hiddens]
@@ -51,7 +55,7 @@ tsg_policy_hiddens2 = [net_hiddens]
 qfunc_hiddens = [net_hiddens, net_hiddens]
 which_reward_fn = 'state_reward_fn'
 which_policy_kwargs = 'tanh_gauss_policy_kwargs'
-action_is_index = False
+action_is_index = True
 action_dim = encoder_hiddens[-1] * 2
 reward_scale = encoder_hiddens[-1]
 
@@ -192,7 +196,7 @@ def get_params():
             num_iters=100,
             num_steps_to_sample=100,
             num_grad_steps=1,
-            batch_size=200,
+            batch_size=100,
             num_eval_steps_to_sample=n_nodes,
             min_steps_to_presample=300,
         ),
@@ -284,7 +288,7 @@ irl_trainer_config['tau']=agent_kwargs['tau']
 irl_trainer_config['discount']=agent_kwargs['discount']
 irl_trainer_config['fixed_temperature'] = agent_kwargs['fixed_temperature']
 
-
+# train IRL;
 irl_trainer.train_irl(
     num_iters=irl_trainer_config['num_iters'], 
     policy_epochs=irl_trainer_config['policy_epochs'], 
@@ -293,19 +297,23 @@ irl_trainer.train_irl(
     config=irl_trainer_config
 )
 
-
 agent_kwargs, config, reward_fn = get_params()
 reward_fn = irl_trainer.reward_fn
 reward_fn.eval()
 config['env_kwargs']['reward_fn'] = reward_fn
+# will just copy the save_to attribute of irl_trainer.agent;
+agent_kwargs['save_to'] = None
+config['buffer_kwargs']['verbose'] = False
 
-agent = SACAgentGraph(
-    **agent_kwargs,
-    **config
+# Run experiment suite 1. from GraphOpt paper;
+# this compares graph stats like degrees, triangle, clust coef;
+# from graphs made by 
+# (1) training new policy with learned reward_fn on target graph;
+# (2) deploying learned policy from IRL task directly on source graph;
+save_graph_stats_k_runs_GO1(
+    irl_trainer.agent, SACAgentGraph, 
+    num_epochs_new_policy=10,
+    target_graph=Data(x=nodes, edge_index=expert_edge_index),
+    run_k_times=3, 
+    **agent_kwargs, **config
 )
-
-agent.buffer.verbose = False
-agent.tau = 0.005
-
-agent.train_k_epochs(k=10, vis_graph=True, with_pos=True)
-

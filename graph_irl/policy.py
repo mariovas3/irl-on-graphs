@@ -21,7 +21,8 @@ if not TEST_OUTPUTS_PATH.exists():
 
 class GCN(nn.Module):
     def __init__(
-        self, in_dim, hiddens, 
+        self, in_dim, 
+        hiddens, heads=1,
         with_batch_norm=False, final_tanh=False,
         bet_on_homophily=False, net2_batch_norm=False,
     ):
@@ -45,7 +46,9 @@ class GCN(nn.Module):
         temp = [in_dim] + self.hiddens
 
         for i in range(len(temp) - 1):
-            tgnet.append((tgnn.GCNConv(temp[i], temp[i + 1]), 
+            assert temp[i + 1] % heads == 0
+            tgnet.append((tgnn.GATv2Conv(temp[i], temp[i + 1] // heads, 
+                                         heads=heads), 
                           f"x, edge_index -> x"))
             if i < len(temp) - 2:
                 tgnet.append(nn.ReLU())
@@ -72,7 +75,7 @@ class GCN(nn.Module):
             x = torch.cat((x, mlp_x), -1)
         if self.final_tanh:
             x = torch.tanh(x)
-        return tgnn.global_max_pool(x, batch.batch), x
+        return tgnn.global_mean_pool(x, batch.batch), x
 
 
 class AmortisedGaussNet(nn.Module):
