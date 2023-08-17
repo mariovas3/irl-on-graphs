@@ -38,10 +38,28 @@ def trig_circle_init(*args):
 n_nodes, node_dim = 20, 2
 nodes, expert_edge_index = create_circle_graph(n_nodes, node_dim, trig_circle_init)
 
-batch_process_func_ = partial(append_distances_, with_degrees=True)
-num_extra_dims = 2
-node_dim += num_extra_dims
-# nodes = torch.ones_like(nodes)  # doesn't seem to work for ones;
+
+# graph transform setup;
+transform_fn_ = partial(append_distances_, with_degrees=True)
+n_cols_append = 2  # based on transform_fn_
+
+get_graph_level_feats_fn = partial(
+    get_columns_aggr, col_idxs=[-1], aggr='max', 
+    check_in_dim=node_dim + n_cols_append
+)
+n_extra_cols_append = 1  # based on get_graph_level_feats_fn
+
+col_names_ridxs = {
+    'degrees': -2,
+    'euclid2d_distance': -1
+}
+
+# instantiate transform;
+transform_ = InplaceBatchNodeFeatTransform(
+    node_dim, transform_fn_, n_cols_append, 
+    col_names_ridxs, n_extra_cols_append, get_graph_level_feats_fn
+)
+
 print(nodes, expert_edge_index)
 net_hiddens = 256
 encoder_hiddens = [24, 24, 24]
@@ -65,32 +83,32 @@ print(f"IRL training for {n_nodes}-node graph")
 
 def get_params():
     encoder_dict = dict(
-        encoder = GCN(node_dim, encoder_hiddens, 
+        encoder = GCN(node_dim + n_cols_append, encoder_hiddens, 
                       with_batch_norm=with_batch_norm, 
                       final_tanh=final_tanh,
                       bet_on_homophily=bet_on_homophily, 
                       net2_batch_norm=net2_batch_norm),
-        encoderq1 = GCN(node_dim, encoder_hiddens, 
+        encoderq1 = GCN(node_dim + n_cols_append, encoder_hiddens, 
                       with_batch_norm=with_batch_norm, 
                       final_tanh=final_tanh,
                       bet_on_homophily=bet_on_homophily, 
                       net2_batch_norm=net2_batch_norm), 
-        encoderq2 = GCN(node_dim, encoder_hiddens, 
+        encoderq2 = GCN(node_dim + n_cols_append, encoder_hiddens, 
                       with_batch_norm=with_batch_norm, 
                       final_tanh=final_tanh,
                       bet_on_homophily=bet_on_homophily, 
                       net2_batch_norm=net2_batch_norm),
-        encoderq1t = GCN(node_dim, encoder_hiddens, 
+        encoderq1t = GCN(node_dim + n_cols_append, encoder_hiddens, 
                       with_batch_norm=with_batch_norm, 
                       final_tanh=final_tanh,
                       bet_on_homophily=bet_on_homophily, 
                       net2_batch_norm=net2_batch_norm),
-        encoderq2t = GCN(node_dim, encoder_hiddens, 
+        encoderq2t = GCN(node_dim + n_cols_append, encoder_hiddens, 
                       with_batch_norm=with_batch_norm, 
                       final_tanh=final_tanh,
                       bet_on_homophily=bet_on_homophily, 
                       net2_batch_norm=net2_batch_norm),
-        encoder_reward = GCN(node_dim, encoder_hiddens, 
+        encoder_reward = GCN(node_dim + n_cols_append, encoder_hiddens, 
                       with_batch_norm=with_batch_norm, 
                       final_tanh=final_tanh,
                       bet_on_homophily=bet_on_homophily, 
@@ -100,14 +118,14 @@ def get_params():
     reward_funcs = dict(
         reward_fn = GraphReward(
             encoder_dict['encoder_reward'], 
-            encoder_hiddens[-1], 
+            embed_dim=encoder_hiddens[-1] + n_extra_cols_append, 
             hiddens=reward_fn_hiddens, 
             with_layer_norm=True,
             with_batch_norm=False,
         ),
         state_reward_fn=StateGraphReward(
             encoder_dict['encoder_reward'], 
-            encoder_hiddens[-1], 
+            embed_dim=encoder_hiddens[-1] + n_extra_cols_append, 
             hiddens=reward_fn_hiddens, 
             with_layer_norm=True,
             with_batch_norm=False,
@@ -124,7 +142,7 @@ def get_params():
     
     policy_kwargs = dict(
         gauss_policy_kwargs = dict(
-            obs_dim=encoder_hiddens[-1],
+            obs_dim=encoder_hiddens[-1] + n_extra_cols_append,
             action_dim=encoder_hiddens[-1],
             hiddens=gauss_policy_hiddens,
             with_layer_norm=True,
@@ -132,7 +150,7 @@ def get_params():
             two_action_vectors=True,
         ),
         tanh_gauss_policy_kwargs = dict(
-            obs_dim=encoder_hiddens[-1],
+            obs_dim=encoder_hiddens[-1] + n_extra_cols_append,
             action_dim=encoder_hiddens[-1],
             hiddens=gauss_policy_hiddens,
             with_layer_norm=True,
@@ -140,7 +158,7 @@ def get_params():
             two_action_vectors=True,
         ),
         tsg_policy_kwargs = dict(
-            obs_dim=encoder_hiddens[-1],
+            obs_dim=encoder_hiddens[-1] + n_extra_cols_append,
             action_dim=encoder_hiddens[-1],
             hiddens1=tsg_policy_hiddens1,
             hiddens2=tsg_policy_hiddens2,
@@ -150,7 +168,7 @@ def get_params():
     )
 
     qfunc_kwargs = dict(
-        obs_action_dim=encoder_hiddens[-1] * 3, 
+        obs_action_dim=encoder_hiddens[-1] * 3 + n_extra_cols_append,
         hiddens=qfunc_hiddens, 
         with_layer_norm=True, 
         with_batch_norm=False,
@@ -212,7 +230,7 @@ def get_params():
             nodes=nodes,
             state_reward=which_reward_fn == 'state_reward_fn',
             seed=seed,
-            batch_process_func_=batch_process_func_,
+            transform_=transform_,
             drop_repeats_or_self_loops=True,
             graphs_per_batch=100,
             action_is_index=action_is_index,
@@ -272,14 +290,14 @@ irl_trainer_config = dict(
 
 irl_trainer = IRLGraphTrainer(
     reward_fn=reward_fn,
-    reward_optim=torch.optim.Adam(reward_fn.parameters(), lr=1e-2),
+    reward_optim=torch.optim.Adam(reward_fn.parameters(), lr=1e-3),
     agent=agent,
     nodes=nodes,
     expert_edge_index=expert_edge_index,
     **irl_trainer_config,
 )
 
-irl_trainer_config['num_iters'] = 2
+irl_trainer_config['num_iters'] = 5
 irl_trainer_config['policy_epochs'] = 1
 irl_trainer_config['vis_graph'] = True
 irl_trainer_config['log_offset'] = config['buffer_kwargs']['log_offset']
@@ -301,6 +319,7 @@ irl_trainer.train_irl(
 
 reward_fn = irl_trainer.reward_fn
 reward_fn.eval()
+agent_kwargs['save_to'] = None
 
 # Run experiment suite 1. from GraphOpt paper;
 # this compares graph stats like degrees, triangle, clust coef;
@@ -311,7 +330,7 @@ save_graph_stats_k_runs_GO1(
     irl_trainer.agent,
     reward_fn, 
     SACAgentGraph, 
-    num_epochs_new_policy=1,
+    num_epochs_new_policy=5,
     target_graph=Data(x=nodes, edge_index=expert_edge_index),
     run_k_times=3,
     new_policy_param_getter_fn=get_params,

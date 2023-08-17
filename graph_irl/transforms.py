@@ -11,6 +11,7 @@ from torch_geometric.utils import degree
 from torch_geometric.nn import global_mean_pool, global_max_pool, global_add_pool
 
 from itertools import groupby
+from typing import Callable
 
 
 class InplaceBatchNodeFeatTransform:
@@ -20,10 +21,11 @@ class InplaceBatchNodeFeatTransform:
     def __init__(
         self,
         in_dim,
-        transform_fn_,
-        n_cols_appended,
+        transform_fn_: Callable,
+        n_cols_append,
         col_names_ridxs,
-        graph_level_aggr: str=None
+        n_extra_cols_append,
+        get_graph_level_feats_fn: Callable=None,
     ):
         """
         Note:
@@ -33,46 +35,35 @@ class InplaceBatchNodeFeatTransform:
         """
         self.in_dim = in_dim
         self.transform_fn_ = transform_fn_
-        self.n_cols_appended = n_cols_appended
+        self.n_cols_append = n_cols_append
         self.col_names_ridxs = col_names_ridxs
-        assert n_cols_appended == len(col_names_ridxs)
+        assert n_cols_append == len(col_names_ridxs)
         
         # see if anything to append to graph-level representation;
-        self.n_extra_cols_append = 0
-        for k in col_names_ridxs.keys():
-            if 'distance' in k:
-                self.n_extra_cols_append += 1
+        self.n_extra_cols_append = n_extra_cols_append
         
-        self.graph_level_aggr = graph_level_aggr
         # compute extra graph-level-feats according to graph_level_aggr;
-        self.graph_level_feats = None
+        self.get_graph_level_feats_fn = get_graph_level_feats_fn
     
     def __call__(self, batch):
         # don't transform stuff that are not of expected input dimension;
         if batch.x.shape[-1] == self.in_dim:
             self.transform_fn_(batch)
-    
-    def get_graph_level_feats(self, batch):
-        # aggregate only new columns with distance substring;
-        if self.graph_level_aggr is not None:
-            idxs = []
-            for k, v in self.col_names_ridxs.items():
-                if 'distance' in k:
-                    idxs.append(v)
-            if self.graph_level_aggr == 'sum':
-                return global_add_pool(
-                    batch.x[:, idxs], batch.batch
-                )
-            elif self.graph_level_aggr == 'mean':
-                return global_mean_pool(
-                    batch.x[:, idxs], batch.batch
-                )
-            elif self.graph_level_aggr == "max":
-                return global_max_pool(
-                    batch.x[:, idxs], batch.batch
-                )
-        else:
-            raise ValueError('graph-level aggregation not specified')
+
+
+def get_columns_aggr(batch, col_idxs, aggr: str='sum', check_in_dim: int=None):
+    if check_in_dim is not None:
+        assert batch.x.shape[-1] == check_in_dim
+    if aggr == 'sum':
+        aggr = global_add_pool
+    elif aggr == 'mean':
+        aggr = global_mean_pool
+    elif aggr == 'max':
+        aggr = global_max_pool
+    else:
+        raise ValueError("aggr expected to be one of 'sum', 'mean' or 'max', "
+                         f"but {aggr} was found.")
+    return aggr(batch.x[:, col_idxs], batch.batch).view(-1, len(col_idxs))
 
 
 def append_degrees_(batch):

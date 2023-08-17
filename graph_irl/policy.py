@@ -64,7 +64,7 @@ class GCN(nn.Module):
         # get graph net in Sequential container;
         self.net = tgnn.Sequential('x, edge_index', tgnet)
 
-    def forward(self, batch):
+    def forward(self, batch, extra_graph_level_feats=None):
         x, edge_index = batch.x, batch.edge_index
         if self.bet_on_homophily:
             mlp_x = self.net2(x)
@@ -75,7 +75,12 @@ class GCN(nn.Module):
             x = torch.cat((x, mlp_x), -1)
         if self.final_tanh:
             x = torch.tanh(x)
-        return tgnn.global_mean_pool(x, batch.batch), x
+        graph_level_feats = tgnn.global_mean_pool(x, batch.batch)
+        if extra_graph_level_feats is not None:
+            graph_level_feats = torch.cat(
+                (graph_level_feats, extra_graph_level_feats), -1
+            )
+        return graph_level_feats, x
 
 
 class AmortisedGaussNet(nn.Module):
@@ -154,11 +159,21 @@ class GaussPolicy(nn.Module):
             obs_dim, out_dim, hiddens, with_layer_norm
         )
 
-    def forward(self, obs):
+    def forward(
+            self, obs, extra_graph_level_feats=None, get_graph_embeds=False
+    ):
         if self.encoder is not None:
-            obs, node_embeds = self.encoder(obs)  # (B, obs_dim)
+            obs, node_embeds = self.encoder(
+                obs, extra_graph_level_feats
+            )  # (B, obs_dim + extra_graph_level_feats.shape[-1])
         mus, sigmas = self.net(obs)
         if self.encoder is not None:
+            if get_graph_embeds:
+                return (
+                    GaussDist(dists.Normal(mus, sigmas), self.two_action_vectors),
+                    node_embeds,
+                    obs
+                )    
             return (
                 GaussDist(dists.Normal(mus, sigmas), self.two_action_vectors),
                 node_embeds,
@@ -187,9 +202,17 @@ class TwoStageGaussPolicy(nn.Module):
             obs_dim + action_dim, action_dim, hiddens2, with_layer_norm
         )
 
-    def forward(self, obs):
-        obs, node_embeds = self.encoder(obs)
+    def forward(
+            self, obs, extra_graph_level_feats=None, get_graph_embeds=False
+    ):
+        obs, node_embeds = self.encoder(obs, extra_graph_level_feats)
         mus, sigmas = self.net1(obs)
+        if get_graph_embeds:
+            return (
+                TwoStageGaussDist(dists.Normal(mus, sigmas), obs, self.net2),
+                node_embeds,
+                obs
+            )    
         return (
             TwoStageGaussDist(dists.Normal(mus, sigmas), obs, self.net2),
             node_embeds,
@@ -225,11 +248,21 @@ class TanhGaussPolicy(nn.Module):
             obs_dim, out_dim, hiddens, with_layer_norm
         )
 
-    def forward(self, obs):
+    def forward(
+            self, obs, extra_graph_level_feats=None, get_graph_embeds=False
+    ):
         if self.encoder is not None:
-            obs, node_embeds = self.encoder(obs)
+            obs, node_embeds = self.encoder(
+                obs, extra_graph_level_feats
+            )
         mus, sigmas = self.net(obs)
         if self.encoder is not None:
+            if get_graph_embeds:
+                return (
+                    TanhGauss(dists.Normal(mus, sigmas), self.two_action_vectors),
+                    node_embeds,
+                    obs
+                )
             return (
                 TanhGauss(dists.Normal(mus, sigmas), self.two_action_vectors),
                 node_embeds
@@ -269,7 +302,12 @@ class Qfunc(nn.Module):
         # Q-func maps to scalar;
         self.net.append(nn.Linear(hiddens[-1], 1))
 
-    def forward(self, obs_action, action_is_index=False):
+    def forward(
+            self, 
+            obs_action, 
+            extra_graph_level_feats=None, 
+            action_is_index=False
+    ):
         """
         If self.encoder is not None, then obs_action is (batch, actions).
 
@@ -278,7 +316,9 @@ class Qfunc(nn.Module):
         """
         if self.encoder is not None:
             batch, actions = obs_action
-            obs, node_embeds = self.encoder(batch)
+            obs, node_embeds = self.encoder(
+                batch, extra_graph_level_feats
+            )
             if action_is_index:
                 num_graphs = 1
                 if hasattr(batch, 'num_graphs'):

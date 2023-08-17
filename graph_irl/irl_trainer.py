@@ -414,16 +414,22 @@ class IRLGraphTrainer:
     
             # create batch of graphs;
             batch = Batch.from_data_list(batch_list)
-            if self.agent.buffer.batch_process_func_ is not None:
-                self.agent.buffer.batch_process_func_(batch)
+            extra_graph_level_feats = None
+            if self.agent.buffer.transform_ is not None:
+                self.agent.buffer.transform_(batch)
+                if self.agent.buffer.transform_.get_graph_level_feats_fn is not None:
+                    extra_graph_level_feats = self.agent.buffer.transform_.get_graph_level_feats_fn(batch)
+
             pointer += 1
             if self.agent.buffer.state_reward:
                 curr_rewards = self.reward_fn(
-                    batch
+                    batch, extra_graph_level_feats,
                 ).view(-1) * self.reward_scale
             else:
                 curr_rewards = self.reward_fn(
-                    (batch, torch.tensor(action_idxs)), action_is_index=True
+                    (batch, torch.tensor(action_idxs)), 
+                    extra_graph_level_feats,
+                    action_is_index=True
                 ).view(-1) * self.reward_scale
             return_val += curr_rewards.sum()
             cached_rewards.append(curr_rewards)

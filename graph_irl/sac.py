@@ -5,7 +5,6 @@ TODO:
 """
 
 import math
-import random
 import numpy as np
 
 import torch
@@ -153,7 +152,7 @@ class SACAgentBase:
             self.temperatures = [math.exp(self.log_temperature.item())]
         self.eval_path_returns, self.eval_path_lens = [], []
 
-    def sample_action(self, obs):
+    def sample_action(self, obs, extra_graph_level_feats=None):
         pass
 
     def clear_buffer(self):
@@ -173,7 +172,7 @@ class SACAgentBase:
         self.best_Q2t = deepcopy(self.Q2t)
         self.best_log_temp = deepcopy(self.log_temperature)
 
-    def sample_deterministic(self, obs):
+    def sample_deterministic(self, obs, extra_graph_level_feats=None):
         pass
 
     def get_policy_loss_and_temperature_loss(self, *args, **kwargs):
@@ -319,11 +318,6 @@ class SACAgentBase:
                 ),
                 pos=pos
             )
-            # print(self.buffer.idx, 
-            #       self.buffer.action_t[:5], 
-            #       self.buffer.action_t[len(self.buffer)-5:len(self.buffer)],
-            #       self.buffer.obs_t[:5],
-            #       self.buffer.obs_t[len(self.buffer)-5:len(self.buffer)])
 
 
 class SACAgentGraph(SACAgentBase):
@@ -389,16 +383,23 @@ class SACAgentGraph(SACAgentBase):
             if not self.save_to.exists():
                 self.save_to.mkdir(parents=True)
 
-    def sample_action(self, obs):
-        policy_dist, node_embeds = self.policy(obs)
+    def sample_action(self, obs, extra_graph_level_feats=None, get_graph_embeds=False):
+        if get_graph_embeds:
+            policy_dist, node_embeds, obs = self.policy(obs, extra_graph_level_feats, get_graph_embeds)
+            return policy_dist.sample(), node_embeds, obs
+        policy_dist, node_embeds = self.policy(obs, extra_graph_level_feats)
         return policy_dist.sample(), node_embeds
 
-    def sample_deterministic(self, obs):
-        policy_dist, node_embeds = self.policy(obs)
+    def sample_deterministic(self, obs, extra_graph_level_feats=None, get_graph_embeds=False):
+        if get_graph_embeds:
+            policy_dist, node_embeds, obs = self.policy(obs, extra_graph_level_feats, get_graph_embeds)
+        policy_dist, node_embeds = self.policy(obs, extra_graph_level_feats)
         mus1, mus2 = policy_dist.mean
+        if get_graph_embeds:
+            return (mus1.detach(), mus2.detach()), node_embeds, obs    
         return (mus1.detach(), mus2.detach()), node_embeds
 
-    def get_policy_loss_and_temperature_loss(self, obs_t):
+    def get_policy_loss_and_temperature_loss(self, obs_t, extra_graph_level_feats=None):
         # freeze q-nets and eval at current observation
         # and reparam trick action and choose min for policy loss;
         self.Q1.requires_grad_(False)
@@ -408,7 +409,9 @@ class SACAgentGraph(SACAgentBase):
         self.policy.train()
 
         # get policy;
-        policy_density, node_embeds = self.policy(obs_t)
+        policy_density, node_embeds, graph_embeds = self.policy(
+            obs_t, extra_graph_level_feats, get_graph_embeds=True
+        )
 
         if self.UT_trick:
             # currently works for gaussian policy;
@@ -420,10 +423,10 @@ class SACAgentGraph(SACAgentBase):
             
             # encoder(obs_t)[0] gives one vector per graph in batch;
             q1_integral = batch_UT_trick_from_samples(
-                self.Q1.net, self.Q1.encoder(obs_t)[0], UT_trick_samples
+                self.Q1.net, self.Q1.encoder(obs_t, extra_graph_level_feats)[0], UT_trick_samples
             )
             q2_integral = batch_UT_trick_from_samples(
-                self.Q2.net, self.Q2.encoder(obs_t)[0], UT_trick_samples
+                self.Q2.net, self.Q2.encoder(obs_t, extra_graph_level_feats)[0], UT_trick_samples
             )
             q_integral = torch.min(q1_integral, q2_integral).view(-1)
 
@@ -451,9 +454,7 @@ class SACAgentGraph(SACAgentBase):
                     repr_trick1, repr_trick2
                 ).sum(-1)
 
-            obs_t = global_mean_pool(
-                node_embeds, obs_t.batch
-            ).detach()  # pretend this was input with no grad tracking;
+            obs_t = graph_embeds.detach()  # pretend this was input with no grad tracking;
             qfunc_in = torch.cat((obs_t, repr_trick1, repr_trick2), -1)
             q_est = torch.min(
                 self.Q1.net(qfunc_in), self.Q2.net(qfunc_in)
@@ -484,6 +485,8 @@ class SACAgentGraph(SACAgentBase):
         reward_t,
         obs_tp1,
         terminated_tp1,
+        extra_graph_feats_t=None,
+        extra_graph_feats_tp1=None,
     ):
         self.Q1.requires_grad_(True)
         self.Q2.requires_grad_(True)
@@ -493,15 +496,17 @@ class SACAgentGraph(SACAgentBase):
 
         # get predictions from q functions;
         obs_action_t = (obs_t, action_t)
-        policy_density, node_embeds = self.policy(obs_tp1)
+        policy_density, node_embeds, graph_embeds = self.policy(
+            obs_tp1, extra_graph_feats_tp1, get_graph_embeds=True
+        )
         node_embeds = node_embeds.detach()  # use embeds only as inputs;
 
         # the action_is_index boolean will only be considered
         # if self.encoder is not None;
-        q1_est = self.Q1(obs_action_t, 
+        q1_est = self.Q1(obs_action_t, extra_graph_feats_t,
                          action_is_index=self.buffer.action_is_index
                          ).view(-1)
-        q2_est = self.Q2(obs_action_t, 
+        q2_est = self.Q2(obs_action_t, extra_graph_feats_t,
                          action_is_index=self.buffer.action_is_index
                          ).view(-1)
 
@@ -512,10 +517,10 @@ class SACAgentGraph(SACAgentBase):
             # eval expectation of q-target functions by averaging over the
             # 2 * action_dim + 1 samples and get (B, 1) output;
             qt1_est = batch_UT_trick_from_samples(
-                self.Q1t.net, self.Q1t.encoder(obs_tp1)[0], UT_trick_samples
+                self.Q1t.net, self.Q1t.encoder(obs_tp1, extra_graph_feats_tp1)[0], UT_trick_samples
             )
             qt2_est = batch_UT_trick_from_samples(
-                self.Q2t.net, self.Q2t.encoder(obs_tp1)[0], UT_trick_samples
+                self.Q2t.net, self.Q2t.encoder(obs_tp1, extra_graph_feats_tp1)[0], UT_trick_samples
             )
 
             # get negative entropy by using the UT trick;
@@ -536,7 +541,7 @@ class SACAgentGraph(SACAgentBase):
                 )
 
             # input for target nets;
-            obs_tp1 = global_mean_pool(node_embeds, obs_tp1.batch)
+            obs_tp1 = graph_embeds.detach()
             # action_tp1 = (a1, a2) -> tuple of action vectors;
             obs_action_tp1 = torch.cat((obs_tp1,) + action_tp1, -1)
             qt1_est, qt2_est = self.Q1t.net(obs_action_tp1), self.Q2t.net(
@@ -603,21 +608,27 @@ class SACAgentGraph(SACAgentBase):
                     obs_tp1,
                     terminated_tp1,
                 ) = self.buffer.sample(self.batch_size)
+                extra_graph_level_feats_t = None
+                extra_graph_level_feats_tp1 = None
+                if self.buffer.transform_.get_graph_level_feats_fn is not None:
+                    assert self.buffer.transform_.n_extra_cols_append > 0
+                    extra_graph_level_feats_t = self.buffer.transform_.get_graph_level_feats_fn(obs_t)
+                    extra_graph_level_feats_tp1 = self.buffer.transform_.get_graph_level_feats_fn(obs_tp1)
 
                 assert reward_t is None
                 if self.buffer.state_reward:
                     reward_t = self.env.reward_fn(
-                        obs_tp1
+                        obs_tp1, extra_graph_level_feats_tp1
                     ).detach().view(-1) * self.buffer.reward_scale
                 else:
                     reward_t = self.env.reward_fn(
-                        (obs_t, action_t), 
+                        (obs_t, action_t), extra_graph_level_feats_t, 
                         action_is_index=self.buffer.action_is_index
                     ).detach().view(-1) * self.buffer.reward_scale
                 
                 # print(action_t.T, reward_t, sep='\n', end='\n\n')
                 # get temperature and policy loss;
-                self.get_policy_loss_and_temperature_loss(obs_t)
+                self.get_policy_loss_and_temperature_loss(obs_t, extra_graph_level_feats_t)
 
                 # value func updates;
                 self.get_q_losses(
@@ -626,6 +637,8 @@ class SACAgentGraph(SACAgentBase):
                     reward_t,
                     obs_tp1,
                     terminated_tp1,
+                    extra_graph_level_feats_t,
+                    extra_graph_level_feats_tp1
                 )
 
                 # grad step on policy, temperature, Q1 and Q2;

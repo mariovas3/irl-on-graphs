@@ -45,9 +45,14 @@ class GraphReward(nn.Module):
     def verbose(self):
         pass
     
-    def forward(self, obs_action, action_is_index=False):
+    def forward(
+            self, 
+            obs_action, 
+            extra_graph_level_feats=None, 
+            action_is_index=False
+    ):
         batch, actions = obs_action
-        obs, node_embeds = self.encoder(batch)
+        obs, node_embeds = self.encoder(batch, extra_graph_level_feats)
         if action_is_index:
             num_graphs = 1
             if hasattr(batch, 'num_graphs'):
@@ -106,7 +111,7 @@ class StateGraphReward(nn.Module):
     def verbose(self):
         pass
     
-    def forward(self, graph_batch):
-        obs, _ = self.encoder(graph_batch)
+    def forward(self, graph_batch, extra_graph_level_feats=None):
+        obs, _ = self.encoder(graph_batch, extra_graph_level_feats)
         # return the negative of the cost -> reward;
         return - self.net(obs)
