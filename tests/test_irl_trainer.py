@@ -13,7 +13,9 @@ from graph_irl.sac import SACAgentGraph, TEST_OUTPUTS_PATH
 from graph_irl.reward import GraphReward, StateGraphReward
 from graph_irl.examples.circle_graph import create_circle_graph
 from graph_irl.irl_trainer import IRLGraphTrainer
-from graph_irl.eval_metrics import save_graph_stats_k_runs_GO1
+from graph_irl.eval_metrics import save_graph_stats_k_runs_GO1, save_analysis_graph_stats
+
+from functools import partial
 
 from torch_geometric.data import Data
 
@@ -36,8 +38,8 @@ def trig_circle_init(*args):
 n_nodes, node_dim = 20, 2
 nodes, expert_edge_index = create_circle_graph(n_nodes, node_dim, trig_circle_init)
 
-batch_process_func_ = append_degrees_
-num_extra_dims = 1
+batch_process_func_ = partial(append_distances_, with_degrees=True)
+num_extra_dims = 2
 node_dim += num_extra_dims
 # nodes = torch.ones_like(nodes)  # doesn't seem to work for ones;
 print(nodes, expert_edge_index)
@@ -261,7 +263,7 @@ irl_trainer_config = dict(
     per_decision_imp_sample=config['buffer_kwargs']['per_decision_imp_sample'],
     unnorm_policy=config['buffer_kwargs']['unnorm_policy'],
     add_expert_to_generated=False,
-    lcr_regularisation_coef=0.,#(expert_edge_index.shape[-1] // 2) * 1.,
+    lcr_regularisation_coef=(expert_edge_index.shape[-1] // 2) * 1.,
     mono_regularisation_on_demo_coef=(expert_edge_index.shape[-1] // 2),
     verbose=True,
     do_dfs_expert_paths=True,
@@ -277,7 +279,7 @@ irl_trainer = IRLGraphTrainer(
     **irl_trainer_config,
 )
 
-irl_trainer_config['num_iters'] = 10
+irl_trainer_config['num_iters'] = 2
 irl_trainer_config['policy_epochs'] = 1
 irl_trainer_config['vis_graph'] = True
 irl_trainer_config['log_offset'] = config['buffer_kwargs']['log_offset']
@@ -297,13 +299,8 @@ irl_trainer.train_irl(
     config=irl_trainer_config
 )
 
-agent_kwargs, config, reward_fn = get_params()
 reward_fn = irl_trainer.reward_fn
 reward_fn.eval()
-config['env_kwargs']['reward_fn'] = reward_fn
-# will just copy the save_to attribute of irl_trainer.agent;
-agent_kwargs['save_to'] = None
-config['buffer_kwargs']['verbose'] = False
 
 # Run experiment suite 1. from GraphOpt paper;
 # this compares graph stats like degrees, triangle, clust coef;
@@ -311,9 +308,21 @@ config['buffer_kwargs']['verbose'] = False
 # (1) training new policy with learned reward_fn on target graph;
 # (2) deploying learned policy from IRL task directly on source graph;
 save_graph_stats_k_runs_GO1(
-    irl_trainer.agent, SACAgentGraph, 
-    num_epochs_new_policy=10,
+    irl_trainer.agent,
+    reward_fn, 
+    SACAgentGraph, 
+    num_epochs_new_policy=1,
     target_graph=Data(x=nodes, edge_index=expert_edge_index),
-    run_k_times=3, 
-    **agent_kwargs, **config
+    run_k_times=3,
+    new_policy_param_getter_fn=get_params,
+    sort_metrics=False,
+    **agent_kwargs
+)
+
+# currently prints summary stats of graph and saves plot of stats;
+save_analysis_graph_stats(
+    irl_trainer.agent.save_to / 'target_graph_stats',
+    'graph_stats_hist_kde_plots.png',
+    suptitle=None,
+    verbose=False
 )

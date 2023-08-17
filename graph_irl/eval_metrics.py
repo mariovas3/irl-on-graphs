@@ -1,6 +1,14 @@
 import networkx as nx
 import networkx.algorithms as nxalgos
 
+from math import sqrt
+import numpy as np
+from scipy.stats import gaussian_kde
+import matplotlib.pyplot as plt
+
+from typing import Callable
+from pathlib import Path
+
 from torch_geometric.data import Data
 import pickle
 
@@ -86,12 +94,14 @@ def eval_irl_policy(irl_policy, env):
 
 def save_graph_stats_k_runs_GO1(
         irl_policy, 
+        irl_reward_fn,
         new_policy_constructor,
         num_epochs_new_policy,
         target_graph: Data,
         run_k_times: int,
+        new_policy_param_getter_fn: Callable,
         sort_metrics: bool=False,
-        **new_policy_kwargs,
+        **policy_extra_params,
 ):
     """
     Save graph statistics of target_graph, as well as run_k_times
@@ -122,10 +132,20 @@ def save_graph_stats_k_runs_GO1(
 
     # init empty edge set for target graph;
     for k in range(run_k_times):
-        new_policy = new_policy_constructor(**new_policy_kwargs)
+        # get params for new policy;
+        _, new_policy_kwargs, _ = new_policy_param_getter_fn()
+        new_policy_kwargs['env_kwargs']['reward_fn'] = irl_reward_fn
+        new_policy_kwargs['buffer_kwargs']['verbose'] = False
+        
+        # instantiate new policy/agent;
+        new_policy = new_policy_constructor(
+            **policy_extra_params, **new_policy_kwargs
+        )
         
         # save to same dir;
         new_policy.save_to = irl_policy.save_to
+        
+        # train new policy and then run eval and get constructed graph;
         out_graph = train_eval_new_policy(
             new_policy, num_epochs_new_policy
         )
@@ -134,6 +154,7 @@ def save_graph_stats_k_runs_GO1(
                          stats,
                          prefix_name_of_stats=f"newpolicy_{k}_")
         
+        # eval policy from irl training directly on target graph;
         out_graph = eval_irl_policy(irl_policy, 
                                     new_policy.env)
         stats = get_graph_stats(out_graph, sort_metrics)
@@ -141,3 +162,102 @@ def save_graph_stats_k_runs_GO1(
             target_graph_dir, names_of_stats, stats, 
             prefix_name_of_stats=f"irlpolicy_{k}_"
         )
+
+
+def get_five_num_summary(data):
+    low, high = min(data), max(data)
+    mean, median, std = np.mean(data), np.median(data), np.std(data)
+    return [low, median, high, mean, std]
+
+
+def get_means_and_stds(metrics):
+    ms = np.array(metrics)
+    if ms.ndim < 2:
+        ms = ms.reshape(1, -1)
+    return np.vstack(
+        (ms.mean(0, keepdims=True), ms.std(0, keepdims=True))
+    )
+
+
+def get_stats_of_metrics_and_metrics_in_dict(read_from, verbose=False):
+    groups = {}
+    summary_stats_over_runs = {}
+    for f in read_from.iterdir():
+        file_name = str(f).split('/')[-1]
+        tokens = file_name.split('_')
+        who = tokens[0]
+        metric_name = tokens[-1][:-4]
+        g = who + metric_name
+        with open(f, 'rb') as f:
+            # data should be list;
+            data = pickle.load(f)
+        five_num_summary = get_five_num_summary(data)
+        if g not in groups:
+            groups[g] = data
+            summary_stats_over_runs[g] = [five_num_summary]
+        else:
+            groups[g] += data
+            summary_stats_over_runs[g].append(five_num_summary)
+    if verbose:
+        print("metric names:\n", list(groups.keys()))
+    f = get_means_and_stds
+    summary_stats_over_runs = {
+        n: f(s) for (n, s)
+        in summary_stats_over_runs.items()
+    }
+    for k, v in sorted(summary_stats_over_runs.items(), key=lambda x: x[0]):
+        print(k, v, sep='\n', end="\n\n")
+    return summary_stats_over_runs, groups
+
+
+def plot_dists(file_name, groups, suptitle):
+    rows = int(sqrt(len(groups)))
+    cols = int(len(groups) / rows) + (1 if len(groups) % rows else 0)
+    cols *= 2  # hist and kde -> 2 plots per metric;
+    fig = plt.figure(figsize=(14, 8))
+    for i, (metric_name, metric) in enumerate(
+        sorted(groups.items(), key=lambda x: x[0])
+    ):
+        xlow, xhigh = min(metric) - .01, max(metric) + .01
+        
+        # get hist;
+        plt.subplot(rows, cols, 2 * i + 1)
+        ax = plt.gca()
+        ax.hist(metric)
+        ax.set_ylabel(metric_name)
+        ax.set_xticks(np.arange(xlow, xhigh, (xhigh - xlow) / 5).round(1))
+        ax.set_xticklabels(ax.get_xticks(), rotation=90)
+        
+        # get gauss kde;
+        plt.subplot(rows, cols, 2 * (i + 1))
+        ax = plt.gca()
+        try:
+            metric = sorted(metric)
+            kde = gaussian_kde(metric)
+            plt.plot(metric, kde(metric))
+            ax.set_ylabel(metric_name)
+            ax.set_title('scipy gauss_kde')
+            ax.set_xticks(np.arange(xlow, xhigh, 
+                                    (xhigh - xlow) / 5).round(1))
+            ax.set_xticklabels(ax.get_xticks(), rotation=90)
+        except np.linalg.LinAlgError:
+            print(f'problem with covariance in {metric_name}'
+                " probably all values are the same")
+    if suptitle is not None:
+        fig.suptitle(suptitle)
+    fig.tight_layout()
+    # plt.show()
+    plt.savefig(file_name)
+    plt.close()
+
+
+def save_analysis_graph_stats(test_output_path,
+                              file_name, 
+                              suptitle=None, verbose=False):
+    p = Path(__file__).absolute().parent.parent
+    p = p / test_output_path
+    summary_stats, groups = get_stats_of_metrics_and_metrics_in_dict(
+        p, verbose
+    )
+    file_name = p / file_name
+    plot_dists(file_name, groups, suptitle)

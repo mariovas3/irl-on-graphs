@@ -1,20 +1,14 @@
 """
 TODO:
-    (1): Make batch processing functions take x, and edge_index 
-        as input similarly to tgnn layers. This is so that I can 
-        apply a transform exactly before global_agg_pool function 
-        in the encoder pass.
-    (2): Adapt existing code for change in (1).
-    (3): Dynamic node attributes should be features of the graph, 
+    (1): Dynamic node attributes should be features of the graph, 
         so should be computed before the GNN pass. It might also 
         be good to append graph-level info such as sum of distances
         to the output of the global_pool operator in the GNN model.
-    (4): To this end, transform should be passed as param to 
-        the GNN instance rather than done outside of it.
 """
 
 import torch
 from torch_geometric.utils import degree
+from torch_geometric.nn import global_mean_pool, global_max_pool, global_add_pool
 
 from itertools import groupby
 
@@ -25,10 +19,10 @@ class InplaceBatchNodeFeatTransform:
     """
     def __init__(
         self,
+        in_dim,
         transform_fn_,
         n_cols_appended,
         col_names_ridxs,
-        in_dim,
         graph_level_aggr: str=None
     ):
         """
@@ -40,35 +34,45 @@ class InplaceBatchNodeFeatTransform:
         self.in_dim = in_dim
         self.transform_fn_ = transform_fn_
         self.n_cols_appended = n_cols_appended
+        self.col_names_ridxs = col_names_ridxs
+        assert n_cols_appended == len(col_names_ridxs)
+        
+        # see if anything to append to graph-level representation;
         self.n_extra_cols_append = 0
         for k in col_names_ridxs.keys():
             if 'distance' in k:
                 self.n_extra_cols_append += 1
-        assert n_cols_appended == len(col_names_ridxs)
-        self.col_names_ridxs = col_names_ridxs
-        # this should be populated after transform_fn_ cal;
-        self.graph_level_feats = None
+        
         self.graph_level_aggr = graph_level_aggr
+        # compute extra graph-level-feats according to graph_level_aggr;
+        self.graph_level_feats = None
     
     def __call__(self, batch):
-        # don't transform stuff that are not of expected
-        # input dimension;
-        if batch.x.shape[-1] == in_dim:
+        # don't transform stuff that are not of expected input dimension;
+        if batch.x.shape[-1] == self.in_dim:
             self.transform_fn_(batch)
-        
+    
+    def get_graph_level_feats(self, batch):
         # aggregate only new columns with distance substring;
-        idxs = []
-        for k, v in self.col_names_ridxs.items():
-            if 'distance' in k:
-                idxs.append(v)
-        if self.graph_level_aggr == 'sum':
-            self.graph_level_feats = batch.x[:, idxs].sum(
-                0, keepdim=True
-            )
-        elif self.graph_level_aggr == 'mean':
-            self.graph_level_feats = batch.x[:, idxs].mean(
-                0, keepdim=True
-            )
+        if self.graph_level_aggr is not None:
+            idxs = []
+            for k, v in self.col_names_ridxs.items():
+                if 'distance' in k:
+                    idxs.append(v)
+            if self.graph_level_aggr == 'sum':
+                return global_add_pool(
+                    batch.x[:, idxs], batch.batch
+                )
+            elif self.graph_level_aggr == 'mean':
+                return global_mean_pool(
+                    batch.x[:, idxs], batch.batch
+                )
+            elif self.graph_level_aggr == "max":
+                return global_max_pool(
+                    batch.x[:, idxs], batch.batch
+                )
+        else:
+            raise ValueError('graph-level aggregation not specified')
 
 
 def append_degrees_(batch):
@@ -86,14 +90,31 @@ def append_degrees_(batch):
     batch.x = torch.cat((batch.x, degrees), -1)
 
 
-def append_distances_(batch):
+def get_sum_count(group):
+    c, s = 0, 0.
+    for it in group:
+        c += 1
+        s += it[1]
+    return [c, s]
+
+
+def append_distances_(batch, with_degrees=False):
     # prep vector to append as a node feature;
-    b =  - torch.ones((len(batch.x), )).view(-1, 1)
+    dim = 1
+    if with_degrees:
+        dim = 2
+    b =  torch.zeros((len(batch.x), dim)).view(-1, dim)
 
     if batch.edge_index.numel() == 0:
         # augment node features inplace;
         batch.x = torch.cat((batch.x, b), -1)
         return
+    
+    if with_degrees:
+        f = get_sum_count
+    else:
+        f = lambda group: [sum([v[1] for v in group])]
+    
     # assumes batch of undirected graphs with edges
     # (from, to), (to, from) one after the other;
     idxs = batch.edge_index[:, ::2].tolist()
@@ -105,12 +126,12 @@ def append_distances_(batch):
 
     # get node_idxs as keys, and sum of scores as vals; 
     keys, vals = zip(*[
-        (k, sum([v[1] for v in g])) 
+        (k, f(g)) 
         for (k, g) in groupby(a, key=lambda x: x[0])
     ])
 
-    # subtract sum of distances in appropriate places;
-    b[keys, :] = - torch.tensor(vals).view(-1, 1)
+    # populate new columns with relevant values;
+    b[keys, :] = torch.tensor(vals).view(-1, dim)
 
     # augment node features inplace;
     batch.x = torch.cat((batch.x, b), -1)

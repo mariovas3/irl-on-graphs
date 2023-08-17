@@ -226,9 +226,8 @@ class IRLGraphTrainer:
             n_episodes += 1
 
             # get max abs values of cumsum of logs across batch dim;
-            maxes[0, :len(log_w)] = torch.maximum(
-                    maxes[0, :len(log_w)], log_w.view(1, -1).abs()
-            )
+            msk = maxes[:, :len(log_w)].abs() < log_w.view(1, -1).abs()
+            maxes[:, :len(log_w)][msk] = log_w.view(1, -1)[msk]
 
             # pad all log_weights to the right with neginf;
             # so that I can do max later;
@@ -302,7 +301,7 @@ class IRLGraphTrainer:
             )
 
             # update trajectory params;
-            max_log_w = max(max_log_w, abs(log_w))
+            max_log_w = log_w if abs(log_w) > abs(max_log_w) else max_log_w
             log_ws.append(log_w)
             returns.append(r)
 
@@ -319,7 +318,6 @@ class IRLGraphTrainer:
         log_ws = log_ws / log_ws.sum()
         if self.verbose:
             print("actual weights vanilla", log_ws, sep='\n')
-        # 
         return returns @ log_ws, avg_lcr_reg_term
 
     def get_avg_expert_returns(self) -> Tuple[float, torch.Tensor]:
