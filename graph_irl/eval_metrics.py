@@ -12,6 +12,8 @@ from pathlib import Path
 from torch_geometric.data import Data
 import pickle
 
+import torch
+
 
 """
 Stats computation section.
@@ -92,6 +94,16 @@ def eval_irl_policy(irl_policy, env):
     return obs
 
 
+def get_sum_euc_dist(tgdata, idxs: torch.Tensor=None):
+    if idxs is None:
+        idxs = torch.arange(tgdata.x.shape[-1]).view(1, -1)
+    e = tgdata.edge_index[:, ::2]
+    print(f"shape of node features:", tgdata.x[e[0].view(-1, 1), idxs].shape)
+    ans = torch.norm(tgdata.x[e[0].view(-1, 1), idxs] - tgdata.x[e[1].view(-1, 1), idxs], 
+                     p=2, dim=-1).sum().item()
+    return ans
+
+
 def save_graph_stats_k_runs_GO1(
         irl_policy, 
         irl_reward_fn,
@@ -101,6 +113,7 @@ def save_graph_stats_k_runs_GO1(
         run_k_times: int,
         new_policy_param_getter_fn: Callable,
         sort_metrics: bool=False,
+        euc_dist_idxs=None,
         **policy_extra_params,
 ):
     """
@@ -130,6 +143,15 @@ def save_graph_stats_k_runs_GO1(
         prefix_name_of_stats='og_target_'
     )
 
+    # see if should calculate euclidean distances;
+    if euc_dist_idxs is not None:
+        ans = get_sum_euc_dist(target_graph,
+                               euc_dist_idxs)
+        save_graph_stats(target_graph_dir, ['eucdist'],
+                         [ans],
+                         prefix_name_of_stats='og_target_')
+        print(f"og graph has sum of edge dists: {ans}")
+
     # init empty edge set for target graph;
     for k in range(run_k_times):
         # get params for new policy;
@@ -141,6 +163,8 @@ def save_graph_stats_k_runs_GO1(
         new_policy = new_policy_constructor(
             **policy_extra_params, **new_policy_kwargs
         )
+        # init weights with orthogonal;
+        new_policy.OI_init_nets()
         
         # save to same dir;
         new_policy.save_to = irl_policy.save_to
@@ -149,6 +173,16 @@ def save_graph_stats_k_runs_GO1(
         out_graph = train_eval_new_policy(
             new_policy, num_epochs_new_policy
         )
+
+        # see if should calculate euclidean distances;
+        if euc_dist_idxs is not None:
+            ans = get_sum_euc_dist(out_graph, euc_dist_idxs)
+            save_graph_stats(target_graph_dir, ['eucdist'],
+                             [ans], 
+                             prefix_name_of_stats=f"newpolicy_{k}_")
+            print(f"new policy has sum of edge dists: {ans}")
+        
+        # get graph stats;
         stats = get_graph_stats(out_graph, sort_metrics)
         save_graph_stats(target_graph_dir, names_of_stats,
                          stats,
@@ -157,6 +191,16 @@ def save_graph_stats_k_runs_GO1(
         # eval policy from irl training directly on target graph;
         out_graph = eval_irl_policy(irl_policy, 
                                     new_policy.env)
+        
+        # see if should calculate euclidean distances;
+        if euc_dist_idxs is not None:
+            ans = get_sum_euc_dist(out_graph, euc_dist_idxs)
+            save_graph_stats(target_graph_dir, ['eucdist'],
+                             [ans], 
+                             prefix_name_of_stats=f"newpolicy_{k}_")
+            print(f"irl policy has sum of edge dists: {ans}")
+        
+        # get graph stats;
         stats = get_graph_stats(out_graph, sort_metrics)
         save_graph_stats(
             target_graph_dir, names_of_stats, stats, 

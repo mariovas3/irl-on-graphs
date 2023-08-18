@@ -16,6 +16,7 @@ from graph_irl.policy import *
 from graph_irl.distributions import batch_UT_trick_from_samples
 from graph_irl.buffer_v2 import *
 from graph_irl.vis_utils import *
+from graph_irl.graph_rl_utils import OI_init
 
 from typing import Optional
 from copy import deepcopy
@@ -151,6 +152,13 @@ class SACAgentBase:
         if self.fixed_temperature is None:
             self.temperatures = [math.exp(self.log_temperature.item())]
         self.eval_path_returns, self.eval_path_lens = [], []
+    
+    def OI_init_nets(self):
+        OI_init(self.Q1)
+        OI_init(self.Q2)
+        OI_init(self.Q1t)
+        OI_init(self.Q2t)
+        OI_init(self.policy)
 
     def sample_action(self, obs, extra_graph_level_feats=None):
         pass

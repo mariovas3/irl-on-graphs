@@ -466,3 +466,7 @@ class IRLGraphTrainer:
             self.agent.policy.requires_grad_(True)
             self.agent.policy.eval()
             self.train_policy_k_epochs(policy_epochs, **kwargs)
+    
+    def OI_init_nets(self):
+        OI_init(self.reward_fn)
+        self.agent.OI_init_nets()
