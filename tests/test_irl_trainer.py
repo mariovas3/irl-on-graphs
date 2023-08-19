@@ -16,6 +16,7 @@ from graph_irl.irl_trainer import IRLGraphTrainer
 from graph_irl.eval_metrics import save_graph_stats_k_runs_GO1, save_analysis_graph_stats
 
 from functools import partial
+import re
 
 from torch_geometric.data import Data
 
@@ -69,6 +70,7 @@ def get_params(
     do_dfs_expert_paths=True,
     UT_trick=False,
     per_decision_imp_sample=True,
+    weight_scaling_type='abs_max',
 ):
     
     # some setup;
@@ -214,7 +216,7 @@ def get_params(
     config = dict(
         training_kwargs=dict(
             seed=seed,
-            num_iters=100,
+            num_iters=31,
             num_steps_to_sample=100,
             num_grad_steps=1,
             batch_size=100,
@@ -273,6 +275,7 @@ def get_params(
         reward_grad_clip=False,
         reward_scale=config['buffer_kwargs']['reward_scale'],
         per_decision_imp_sample=config['buffer_kwargs']['per_decision_imp_sample'],
+        weight_scaling_type=weight_scaling_type,
         unnorm_policy=config['buffer_kwargs']['unnorm_policy'],
         add_expert_to_generated=False,
         lcr_regularisation_coef=num_edges_expert,
@@ -300,14 +303,23 @@ if __name__ == "__main__":
         with_batch_norm=False,
         final_tanh=True,
         action_is_index=True,
+        do_dfs_expert_paths=True,
+        UT_trick=False,
+        per_decision_imp_sample=True,
+        weight_scaling_type='abs_max',
     )
 
     # process extra stuff;
+    # NOTE: boolean values are passed as 0 for False and other int for True;
+    int_regex = re.compile(r'(^[0-9]+$)')
     if len(sys.argv) > 2:
         for a in sys.argv[2:]:
             n, v = a.split('=')
             if n in params_func_config:
-                params_func_config[n] = int(v)
+                if re.match(int_regex, v):
+                    v = int(v)
+                params_func_config[n] = v
+                print(n, v)
 
     # init graph;
     nodes, expert_edge_index = create_circle_graph(n_nodes, node_dim, trig_circle_init)
@@ -372,7 +384,7 @@ if __name__ == "__main__":
         SACAgentGraph, 
         num_epochs_new_policy=15,
         target_graph=Data(x=nodes, edge_index=expert_edge_index),
-        run_k_times=1,
+        run_k_times=3,
         new_policy_param_getter_fn=get_params,
         sort_metrics=False,
         euc_dist_idxs=torch.tensor([[0, 1]], dtype=torch.long),

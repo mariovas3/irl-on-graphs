@@ -2,11 +2,81 @@ from numpy.random import choice
 from scipy.spatial import KDTree
 import numpy as np
 import torch
+import torch.nn.functional as F
 from typing import Callable
 from torch_geometric.data import Data
 from torch_geometric.utils import degree
 from collections import namedtuple
 from itertools import groupby
+
+
+class WeightsProcessor:
+    def __init__(self, weight_type, max_ep_len, scaling_type='abs_max'):
+        self.weight_type = weight_type
+        self.scaling_type = scaling_type
+        self.max_ep_len = max_ep_len
+        self.log_weights = []
+        if self.weight_type == 'vanilla':
+            if self.scaling_type == 'abs_max':
+                self.scale = 0.
+        elif self.weight_type == 'per_dec':
+            self.longest = 0
+            self.scale = torch.zeros((1, max_ep_len), dtype=torch.float32)
+    
+    def __call__(self, log_w):
+        if self.weight_type == 'per_dec':
+            pad_val = float('nan')
+            if self.scaling_type == 'abs_max':
+                pad_val = - float('inf')
+                msk = self.scale[:, :len(log_w)].abs() < log_w.view(1, -1).abs()
+                self.scale[:, :len(log_w)][msk] = log_w.view(1, -1)[msk]
+            elif self.scaling_type == 'median':
+                pad_val = float('nan')
+            self.log_weights.append(
+                F.pad(
+                    log_w,
+                    (0, self.max_ep_len - len(log_w)),
+                    value=pad_val
+                )
+            )
+            self.longest = max(len(log_w), self.longest)
+        elif self.weight_type == 'vanilla':
+            if self.scaling_type == 'abs_max':
+                self.scale = log_w if abs(log_w) > abs(self.scale) else self.scale
+            self.log_weights.append(log_w)
+    
+    def get_weights(self):
+        self.log_weights = torch.stack(self.log_weights)
+        if self.weight_type == 'per_dec':
+            if self.scaling_type == 'median':
+                self.scale[:, :self.longest] = torch.nanmedian(
+                    self.log_weights[:, :self.longest],
+                    0, keepdim=True
+                ).values
+            # subtract some log weight based on self.scale_type
+            # from all log weights, so each weight is log(wi / w_chosen)
+            # and then take exp to get wi / w_chosen;
+            self.log_weights[:, :self.longest] = (
+                self.log_weights[:, :self.longest] 
+                - self.scale[:, :self.longest]
+            ).exp()
+            # normalise over 0 dim (batch dim);
+            # gives pmf for paths of length k for all k;
+            self.log_weights[:, :self.longest] = (
+                self.log_weights[:, :self.longest] / self.log_weights[:, :self.longest].nansum(
+                    dim=0, keepdim=True
+                )
+            )
+            assert torch.allclose(self.log_weights[:, :self.longest].sum(0), torch.ones((1, )))
+        elif self.weight_type == 'vanilla':
+            if self.scaling_type == 'median':
+                self.scale = torch.median(self.log_weights)
+            self.log_weights = (self.log_weights - self.scale).exp()
+            self.log_weights = self.log_weights / self.log_weights.sum()
+            assert torch.allclose(self.log_weights.sum(), torch.ones((1,)))
+        if self.weight_type == 'per_dec':
+            return self.log_weights, self.longest
+        return self.log_weights
 
 
 def OI_init(model):
