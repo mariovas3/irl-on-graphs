@@ -272,7 +272,7 @@ class IRLGraphTrainer:
         T = self.expert_edge_index.shape[-1] // 2
         n_steps_to_sample = (self.num_expert_traj + self.num_extra_paths_gen) * T
         n_steps_done = 0
-        max_log_w = - float('inf')
+        max_log_w = 0.
         returns, log_ws = [], []
         avg_lcr_reg_term, n_episodes = 0.0, 0
 

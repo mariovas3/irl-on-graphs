@@ -31,6 +31,7 @@ def trig_circle_init(*args):
 
 # circular graph with 7 nodes;
 n_nodes, node_dim = 10, 2
+num_edges_expert = n_nodes
 
 # graph transform setup;
 transform_fn_ = partial(append_distances_, with_degrees=True)
@@ -65,6 +66,9 @@ def get_params(
     with_batch_norm=False,
     final_tanh=True,
     action_is_index=True,
+    do_dfs_expert_paths=True,
+    UT_trick=False,
+    per_decision_imp_sample=True,
 ):
     
     # some setup;
@@ -203,7 +207,7 @@ def get_params(
         cache_best_policy=False,
         clip_grads=False,
         fixed_temperature=None,
-        UT_trick=False,
+        UT_trick=UT_trick,
         with_entropy=False,
     )
 
@@ -232,7 +236,7 @@ def get_params(
             graphs_per_batch=100,
             action_is_index=action_is_index,
             action_dim=action_dim,
-            per_decision_imp_sample=True,
+            per_decision_imp_sample=per_decision_imp_sample,
             reward_scale=reward_scale,
             log_offset=0.,
             lcr_reg=True, 
@@ -258,7 +262,26 @@ def get_params(
             forbid_self_loops_repeats=False,
         )
     )
-    return agent_kwargs, config, reward_fn
+
+    # get config for the IRL trainer;
+    irl_trainer_config = dict(
+        num_expert_traj=30,
+        graphs_per_batch=config['buffer_kwargs']['graphs_per_batch'],
+        num_extra_paths_gen=20,
+        num_edges_start_from=config['env_kwargs']['num_edges_start_from'],
+        reward_optim_lr_scheduler=None,
+        reward_grad_clip=False,
+        reward_scale=config['buffer_kwargs']['reward_scale'],
+        per_decision_imp_sample=config['buffer_kwargs']['per_decision_imp_sample'],
+        unnorm_policy=config['buffer_kwargs']['unnorm_policy'],
+        add_expert_to_generated=False,
+        lcr_regularisation_coef=num_edges_expert,
+        mono_regularisation_on_demo_coef=num_edges_expert,
+        verbose=True,
+        do_dfs_expert_paths=do_dfs_expert_paths,
+        num_reward_grad_steps=1,
+    )
+    return agent_kwargs, config, reward_fn, irl_trainer_config
 
 if __name__ == "__main__":
     seed = int(sys.argv[1]) if len(sys.argv) > 1 else 0
@@ -291,26 +314,7 @@ if __name__ == "__main__":
     get_params = partial(get_params, **params_func_config)
     
     # get kwargs;
-    agent_kwargs, config, reward_fn = get_params()
-
-    # get config for the IRL trainer;
-    irl_trainer_config = dict(
-        num_expert_traj=30,
-        graphs_per_batch=config['buffer_kwargs']['graphs_per_batch'],
-        num_extra_paths_gen=20,
-        num_edges_start_from=config['env_kwargs']['num_edges_start_from'],
-        reward_optim_lr_scheduler=None,
-        reward_grad_clip=False,
-        reward_scale=config['buffer_kwargs']['reward_scale'],
-        per_decision_imp_sample=config['buffer_kwargs']['per_decision_imp_sample'],
-        unnorm_policy=config['buffer_kwargs']['unnorm_policy'],
-        add_expert_to_generated=False,
-        lcr_regularisation_coef=(expert_edge_index.shape[-1] // 2) * 1.,
-        mono_regularisation_on_demo_coef=(expert_edge_index.shape[-1] // 2),
-        verbose=True,
-        do_dfs_expert_paths=True,
-        num_reward_grad_steps=1,
-    )
+    agent_kwargs, config, reward_fn, irl_trainer_config = get_params()
     
     # init agent for the IRL training;
     agent = SACAgentGraph(
@@ -368,10 +372,12 @@ if __name__ == "__main__":
         SACAgentGraph, 
         num_epochs_new_policy=15,
         target_graph=Data(x=nodes, edge_index=expert_edge_index),
-        run_k_times=3,
+        run_k_times=1,
         new_policy_param_getter_fn=get_params,
         sort_metrics=False,
-        euc_dist_idxs=torch.tensor([[0, 1]], dtype=torch.long)
+        euc_dist_idxs=torch.tensor([[0, 1]], dtype=torch.long),
+        vis_graph=True,
+        with_pos=True,
         **agent_kwargs
     )
     
@@ -382,4 +388,3 @@ if __name__ == "__main__":
         suptitle=None,
         verbose=False
     )
- 
