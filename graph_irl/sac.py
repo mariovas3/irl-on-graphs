@@ -618,10 +618,11 @@ class SACAgentGraph(SACAgentBase):
                 ) = self.buffer.sample(self.batch_size)
                 extra_graph_level_feats_t = None
                 extra_graph_level_feats_tp1 = None
-                if self.buffer.transform_.get_graph_level_feats_fn is not None:
-                    assert self.buffer.transform_.n_extra_cols_append > 0
-                    extra_graph_level_feats_t = self.buffer.transform_.get_graph_level_feats_fn(obs_t)
-                    extra_graph_level_feats_tp1 = self.buffer.transform_.get_graph_level_feats_fn(obs_tp1)
+                if self.buffer.transform_ is not None:
+                    if self.buffer.transform_.get_graph_level_feats_fn is not None:
+                        assert self.buffer.transform_.n_extra_cols_append > 0
+                        extra_graph_level_feats_t = self.buffer.transform_.get_graph_level_feats_fn(obs_t)
+                        extra_graph_level_feats_tp1 = self.buffer.transform_.get_graph_level_feats_fn(obs_tp1)
 
                 assert reward_t is None
                 if self.buffer.state_reward:

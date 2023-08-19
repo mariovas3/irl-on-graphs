@@ -101,7 +101,7 @@ def get_sum_euc_dist(tgdata, idxs: torch.Tensor=None):
     if idxs is None:
         idxs = torch.arange(tgdata.x.shape[-1]).view(1, -1)
     e = tgdata.edge_index[:, ::2]
-    print(f"shape of node features:", tgdata.x[e[0].view(-1, 1), idxs].shape)
+    print(f"num edges x num features for euc dist:", tgdata.x[e[0].view(-1, 1), idxs].shape)
     ans = torch.norm(tgdata.x[e[0].view(-1, 1), idxs] - tgdata.x[e[1].view(-1, 1), idxs], 
                      p=2, dim=-1).sum().item()
     return ans
@@ -150,12 +150,13 @@ def save_graph_stats_k_runs_GO1(
 
     # see if should calculate euclidean distances;
     if euc_dist_idxs is not None:
-        ans = get_sum_euc_dist(target_graph,
-                               euc_dist_idxs)
-        save_graph_stats(target_graph_dir, ['eucdist'],
-                         [ans],
-                         prefix_name_of_stats='og_target_')
-        print(f"og graph has sum of edge dists: {ans}")
+        if euc_dist_idxs is not None:
+            ans = get_sum_euc_dist(target_graph,
+                                euc_dist_idxs)
+            save_graph_stats(target_graph_dir, ['eucdist'],
+                            [ans],
+                            prefix_name_of_stats='og_target_')
+            print(f"og graph has sum of edge dists: {ans}")
 
     # init empty edge set for target graph;
     for k in range(run_k_times):

@@ -10,6 +10,23 @@ from collections import namedtuple
 from itertools import groupby
 
 
+def get_consec_edge_index(edge_index):
+    edge_set = set()
+    new_index = torch.zeros(edge_index.shape, dtype=torch.long)
+    j = 0
+    for i in range(edge_index.shape[-1]):
+        first, second = edge_index[:, i].min().item(), edge_index[:, i].max().item()
+        if (first, second) in edge_set:
+            continue
+        edge_set.add((first, second))
+        new_index[0, j] = first
+        new_index[1, j] = second
+        new_index[0, j+1] = second
+        new_index[1, j+1] = first
+        j += 2
+    return new_index
+
+
 class WeightsProcessor:
     def __init__(self, weight_type, max_ep_len, scaling_type='abs_max'):
         self.weight_type = weight_type
