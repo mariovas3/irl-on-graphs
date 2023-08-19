@@ -218,8 +218,8 @@ def get_params(
     config = dict(
         training_kwargs=dict(
             seed=seed,
-            num_iters=31,
-            num_steps_to_sample=100,
+            num_iters=100,
+            num_steps_to_sample=300,
             num_grad_steps=1,
             batch_size=100,
             num_eval_steps_to_sample=n_nodes,
@@ -349,7 +349,7 @@ if __name__ == "__main__":
     irl_trainer.OI_init_nets()
     
     # extra info to save in pkl after training is done;
-    irl_trainer_config['num_iters'] = 1
+    irl_trainer_config['num_iters'] = 30
     irl_trainer_config['policy_epochs'] = 1
     irl_trainer_config['vis_graph'] = True
     irl_trainer_config['log_offset'] = config['buffer_kwargs']['log_offset']
@@ -392,9 +392,9 @@ if __name__ == "__main__":
         irl_trainer.agent,
         reward_fn, 
         SACAgentGraph, 
-        num_epochs_new_policy=1,
+        num_epochs_new_policy=15,
         target_graph=target_graph,
-        run_k_times=1,
+        run_k_times=3,
         new_policy_param_getter_fn=get_params_eval,
         sort_metrics=False,
         euc_dist_idxs=None,#torch.tensor([[0, 1]], dtype=torch.long),
