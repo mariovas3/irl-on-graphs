@@ -358,6 +358,8 @@ if __name__ == "__main__":
     irl_trainer_config['tau']=agent_kwargs['tau']
     irl_trainer_config['discount']=agent_kwargs['discount']
     irl_trainer_config['fixed_temperature'] = agent_kwargs['fixed_temperature']
+    for k, v in params_func_config.items():
+        irl_trainer_config[k] = v
     
     # train IRL;
     irl_trainer.train_irl(
