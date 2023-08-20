@@ -71,6 +71,7 @@ def get_params(
     n_nodes=n_nodes,
     node_dim=node_dim,
     nodes=nodes,
+    num_edges_expert=num_edges_expert,
     n_cols_append=n_cols_append,
     n_extra_cols_append=n_extra_cols_append,
 ):
@@ -253,8 +254,8 @@ def get_params(
             expert_edge_index=None,
             num_edges_start_from=0,
             reward_fn=reward_fn,
-            max_episode_steps=n_nodes,
-            num_expert_steps=n_nodes,
+            max_episode_steps=num_edges_expert,
+            num_expert_steps=num_edges_expert,
             max_repeats=n_nodes,
             max_self_loops=n_nodes,
             drop_repeats_or_self_loops=True,
@@ -349,7 +350,7 @@ if __name__ == "__main__":
     irl_trainer.OI_init_nets()
     
     # extra info to save in pkl after training is done;
-    irl_trainer_config['num_iters'] = 30
+    irl_trainer_config['num_iters'] = 12
     irl_trainer_config['policy_epochs'] = 1
     irl_trainer_config['vis_graph'] = True
     irl_trainer_config['log_offset'] = config['buffer_kwargs']['log_offset']
@@ -383,6 +384,7 @@ if __name__ == "__main__":
     params_func_config['n_nodes']= target_nodes.shape[0]
     params_func_config['node_dim']= target_nodes.shape[-1]
     params_func_config['nodes'] = target_nodes
+    params_func_config['num_edges_expert'] = target_edge_index.shape[-1] // 2
     get_params_eval = partial(get_params, **params_func_config)
     
     # Run experiment suite 1. from GraphOpt paper;
@@ -394,7 +396,7 @@ if __name__ == "__main__":
         irl_trainer.agent,
         reward_fn, 
         SACAgentGraph, 
-        num_epochs_new_policy=15,
+        num_epochs_new_policy=5,
         target_graph=target_graph,
         run_k_times=3,
         new_policy_param_getter_fn=get_params_eval,
