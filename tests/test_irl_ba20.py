@@ -359,11 +359,8 @@ if __name__ == "__main__":
     irl_trainer_config['tau']=agent_kwargs['tau']
     irl_trainer_config['discount']=agent_kwargs['discount']
     irl_trainer_config['fixed_temperature'] = agent_kwargs['fixed_temperature']
-    irl_trainer_config['net_hiddens'] = params_func_config['net_hiddens']
-    irl_trainer_config['embed_dim'] = params_func_config['embed_dim']
-    irl_trainer_config['encoder_h'] = params_func_config['encoder_h']
-    irl_trainer_config['do_dfs_expert_paths'] = params_func_config['do_dfs_expert_paths']
-
+    for k, v in params_func_config.items():
+        irl_trainer_config[k] = v
     
     # train IRL;
     irl_trainer.train_irl(
