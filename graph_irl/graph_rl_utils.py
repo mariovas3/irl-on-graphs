@@ -218,6 +218,33 @@ def sigmoid_similarity(
     return first, second
 
 
+def euc_dist_similariry(
+    node_embeds: np.ndarray,
+    a1: np.ndarray,
+    a2: np.ndarray,
+    forbid_self_loops_repeats=False,
+    edge_set: set=None,
+):
+    node_embeds = torch.from_numpy(node_embeds)
+    a1, a2 = torch.from_numpy(a1), torch.from_numpy(a2)
+    actions = torch.cat((a1.view(-1, 1), a2.view(-1, 1)), -1)
+    criterion = (
+        (node_embeds * node_embeds).sum(-1, keepdims=True) 
+        - 2 * node_embeds @ actions
+    )
+    first = criterion[:, 0].argmax().item()
+    if forbid_self_loops_repeats:
+        for s in torch.topk(criterion[:, 1], k=10)[-1]:
+            temp1, temp2 = min(s.item(), first), max(s.item(), first)
+            if temp1 == temp2 or (temp1, temp2) in edge_set:
+                continue
+            return first, s.item()
+        # return self loops if second not among first 10 options;
+        return first, first
+    second = criterion[:, 1].argmax().item()
+    return first, second
+
+
 class GraphEnv:
     def __init__(
         self,

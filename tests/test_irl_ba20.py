@@ -13,7 +13,7 @@ from graph_irl.sac import SACAgentGraph, TEST_OUTPUTS_PATH
 from graph_irl.reward import GraphReward, StateGraphReward
 from graph_irl.examples.circle_graph import create_circle_graph
 from graph_irl.irl_trainer import IRLGraphTrainer
-from graph_irl.eval_metrics import save_graph_stats_k_runs_GO1, save_analysis_graph_stats
+from graph_irl.eval_metrics import *
 
 from functools import partial
 import re
@@ -34,15 +34,6 @@ def trig_circle_init(*args):
     return torch.cat((torch.cos(inputs), torch.sin(inputs)), -1)
 
 
-n_nodes = 20
-expert_edge_index = get_consec_edge_index(barabasi_albert_graph(n_nodes, 3))
-nodes = trig_circle_init(n_nodes)
-ba20 = Data(x=nodes, edge_index=expert_edge_index)
-
-# circular graph with 7 nodes;
-n_nodes, node_dim = ba20.x.shape
-num_edges_expert = ba20.edge_index.shape[-1] // 2
-
 # graph transform setup;
 transform_fn_ = None
 n_cols_append = 0  # based on transform_fn_
@@ -53,11 +44,14 @@ n_extra_cols_append = 0  # based on get_graph_level_feats_fn
 # instantiate transform;
 transform_ = None
 
-print(f"IRL training for {n_nodes}-node graph")
 
 def get_params(
+    n_nodes,
+    node_dim,
+    nodes,
+    num_edges_expert,
     net_hiddens=64,
-    encoder_h=[8, 64],
+    encoder_h=64,
     embed_dim=8,
     bet_on_homophily=False,
     net2_batch_norm=False,
@@ -68,14 +62,11 @@ def get_params(
     UT_trick=False,
     per_decision_imp_sample=True,
     weight_scaling_type='abs_max',
-    n_nodes=n_nodes,
-    node_dim=node_dim,
-    nodes=nodes,
-    num_edges_expert=num_edges_expert,
     n_cols_append=n_cols_append,
     n_extra_cols_append=n_extra_cols_append,
+    ortho_init=True,
 ):
-    print(n_nodes, node_dim, nodes.shape)
+    print(n_nodes, node_dim, nodes.shape, num_edges_expert)
     # some setup;
     encoder_hiddens = [encoder_h, encoder_h, embed_dim] if isinstance(encoder_h, int) else encoder_h + [embed_dim]
     reward_fn_hiddens = [net_hiddens, net_hiddens]
@@ -220,7 +211,7 @@ def get_params(
         training_kwargs=dict(
             seed=seed,
             num_iters=100,
-            num_steps_to_sample=300,
+            num_steps_to_sample=num_edges_expert * 2,
             num_grad_steps=1,
             batch_size=100,
             num_eval_steps_to_sample=n_nodes,
@@ -286,20 +277,39 @@ def get_params(
         verbose=True,
         do_dfs_expert_paths=do_dfs_expert_paths,
         num_reward_grad_steps=1,
+        ortho_init=ortho_init,
     )
     return agent_kwargs, config, reward_fn, irl_trainer_config
 
 if __name__ == "__main__":
     seed = int(sys.argv[1]) if len(sys.argv) > 1 else 0
-    print(f"seed is: {seed}")
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
+    # init graphs now, not to mess up the seed if 
+    # experiments are with different NN architectures
+    # since diff layer sizes require different num of 
+    # random param inits;
+    n_nodes_source = 20
+    edge_index_source = get_consec_edge_index(
+        barabasi_albert_graph(n_nodes_source, 3)
+    )
+    nodes_source = trig_circle_init(n_nodes_source)
+    graph_source = Data(x=nodes_source, edge_index=edge_index_source)
+    
+    # target graph;
+    n_nodes_target = 50
+    edge_index_target = get_consec_edge_index(
+        barabasi_albert_graph(n_nodes_target, 3)
+    )
+    nodes_target = trig_circle_init(50)
+    graph_target = Data(x=nodes_target, edge_index=edge_index_target)
+
     # this is to be passed to get_params()
     params_func_config = dict(
         net_hiddens=64,
-        encoder_h=[8, 64],
+        encoder_h=64,
         embed_dim=8,
         bet_on_homophily=False,
         net2_batch_norm=False,
@@ -310,11 +320,18 @@ if __name__ == "__main__":
         UT_trick=False,
         per_decision_imp_sample=True,
         weight_scaling_type='abs_max',
+        ortho_init=True,
     )
 
     # process extra stuff;
     # NOTE: boolean values are passed as 0 for False and other int for True;
     int_regex = re.compile(r'(^[0-9]+$)')
+    print("\n------------------: USAGE :------------------\n"
+          f"\nIf kwargs are given, first pass an int for seed as \n"
+          "positional argument; then valid kwargs to the script are: ",
+          params_func_config.keys(), 
+          sep='\n', end="\n\n")
+    print(f"\nseed is: {seed}")
     if len(sys.argv) > 2:
         for a in sys.argv[2:]:
             n, v = a.split('=')
@@ -322,7 +339,16 @@ if __name__ == "__main__":
                 if re.match(int_regex, v):
                     v = int(v)
                 params_func_config[n] = v
-                print(n, v)
+                print(f"{n}={v}")
+            else:
+                print(f"{n} not a valid argument")
+    print('\n')
+    
+    # add the graph parameters;
+    params_func_config['n_nodes'] = n_nodes_source
+    params_func_config['node_dim'] = nodes_source.shape[-1]
+    params_func_config['nodes'] = nodes_source
+    params_func_config['num_edges_expert'] = edge_index_source.shape[-1] // 2
 
     # IRL train config;
     get_params_train = partial(get_params, **params_func_config)
@@ -341,13 +367,30 @@ if __name__ == "__main__":
         reward_fn=reward_fn,
         reward_optim=torch.optim.Adam(reward_fn.parameters(), lr=1e-2),
         agent=agent,
-        nodes=nodes,
-        expert_edge_index=expert_edge_index,
+        nodes=nodes_source,
+        expert_edge_index=edge_index_source,
         **irl_trainer_config,
     )
 
-    # get orthogonal init of nets;
-    irl_trainer.OI_init_nets()
+    # save metrics of source graph;
+    names_of_stats = [
+        'triangles',
+        'degrees',
+        'clustcoefs'
+    ]
+    target_graph_dir = agent.save_to / 'target_graph_stats'
+    if not target_graph_dir.exists():
+        target_graph_dir.mkdir(parents=True)
+    stats = get_graph_stats(graph_source)
+    save_graph_stats(target_graph_dir, names_of_stats, stats,
+                     prefix_name_of_stats='sourcegraph_')
+    with open(agent.save_to / 'source_edge_idx.pkl', 'wb') as f:
+        pickle.dump(graph_source.edge_index.tolist(), f)
+    
+    # save edge_index of target graph, since its stats 
+    # are saved in the eval loop;
+    with open(agent.save_to / 'target_edge_idx.pkl', 'wb') as f:
+        pickle.dump(graph_target.edge_index.tolist(), f)
     
     # extra info to save in pkl after training is done;
     irl_trainer_config['num_iters'] = 12
@@ -363,6 +406,9 @@ if __name__ == "__main__":
     for k, v in params_func_config.items():
         irl_trainer_config[k] = v
     
+    # start IRL training;
+    print(f"IRL training for {n_nodes_source}-node graph")
+    
     # train IRL;
     irl_trainer.train_irl(
         num_iters=irl_trainer_config['num_iters'], 
@@ -377,14 +423,11 @@ if __name__ == "__main__":
     reward_fn.eval()
     agent_kwargs['save_to'] = None
 
-    # init graph;
-    target_edge_index = get_consec_edge_index(barabasi_albert_graph(50, 3))
-    target_nodes = trig_circle_init(50)
-    target_graph = Data(x=target_nodes, edge_index=target_edge_index)
-    params_func_config['n_nodes']= target_nodes.shape[0]
-    params_func_config['node_dim']= target_nodes.shape[-1]
-    params_func_config['nodes'] = target_nodes
-    params_func_config['num_edges_expert'] = target_edge_index.shape[-1] // 2
+    # set relevant target graphs params;
+    params_func_config['n_nodes']= n_nodes_target
+    params_func_config['node_dim']= nodes_target.shape[-1]
+    params_func_config['nodes'] = nodes_target
+    params_func_config['num_edges_expert'] = edge_index_target.shape[-1] // 2
     get_params_eval = partial(get_params, **params_func_config)
     
     # Run experiment suite 1. from GraphOpt paper;
@@ -397,7 +440,7 @@ if __name__ == "__main__":
         reward_fn, 
         SACAgentGraph, 
         num_epochs_new_policy=5,
-        target_graph=target_graph,
+        target_graph=graph_target,
         run_k_times=3,
         new_policy_param_getter_fn=get_params_eval,
         sort_metrics=False,

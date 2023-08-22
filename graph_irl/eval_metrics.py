@@ -63,7 +63,7 @@ def save_graph_stats(
     target_graph_dir, 
     names_of_stats, 
     stats, 
-    prefix_name_of_stats='og_target_'
+    prefix_name_of_stats='targetgraph_'
 ):
     for n, s in zip(names_of_stats, stats):
         p = prefix_name_of_stats + n + '.pkl'
@@ -145,7 +145,7 @@ def save_graph_stats_k_runs_GO1(
     # save stats of original target graph;
     save_graph_stats(
         target_graph_dir, names_of_stats, stats, 
-        prefix_name_of_stats='og_target_'
+        prefix_name_of_stats='targetgraph_'
     )
 
     # see if should calculate euclidean distances;
@@ -155,7 +155,7 @@ def save_graph_stats_k_runs_GO1(
                                 euc_dist_idxs)
             save_graph_stats(target_graph_dir, ['eucdist'],
                             [ans],
-                            prefix_name_of_stats='og_target_')
+                            prefix_name_of_stats='targetgraph_')
             print(f"og graph has sum of edge dists: {ans}")
 
     # init empty edge set for target graph;

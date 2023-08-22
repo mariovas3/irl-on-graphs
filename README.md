@@ -60,6 +60,8 @@
 
 * The goal should be: given Citeseer nodes, build a graph with similar structure to Cora where the structure is judged by the reward learned during the IRL task performed on Cora. Then they also predictably say the learned policy during IRL on Cora does not lead to reconstructing/mimicking the structure of Citeseer (obviously since it was trained to build graphs similar to Cora and not Citeseer).
 
+## Ideas:
+
 ### Graph policy - OUTDATED! - SEE CODE FOR E.G., TwoStageGaussPolicy or GaussPolicy:
 * Stochastic policy $\pi(a|graph)$ that samples vector $a$ and finds 1-NN in gnn embedding space (KDTree implementation). Then calculate cos distance with other node GNN embeddings and concat this vector to GNN embeddings and do another MLP that maps $NN^{(2)}: \mathbb{R}^{emb\_dim+1}\rightarrow \mathbb{R}$ and take softmax to spit out a node index to connect to:
     * $Z = GNN(graph)\in \mathbb{R}^{num\_nodes\times emb\_dim}$.
@@ -74,7 +76,7 @@
 * The policy, the reward function and the value functions should have their own GNN encoders. For the reward this is necessary since we don't want to let the policy gradients implicitly change the reward function (would be the case if the GNN was shared by the policy and the reward function).
 * For the sake of compatibility with the openai gym Env, the action in this graph setting will be $\tilde{a}=(a, Z)$.
 
-### Graph  Buffer:
+### Graph  Buffer - mostly old notes below, but valid points nevertheless:
 * The observations should be instances of `torch_geometric.data.Data`. The actions should be tuples `(idx1, idx2)` of length 2 containing the indexes of the nodes to be connected. Based on these indexes, `x_embeds[idx1], x_embeds[idx2]` should be passed to the `log_prob` method of the `TwoStageGaussDist` instance. The `x_embeds` will be computed anew for each batch during the gradient steps. The state will be the graph itself rather than its embedding from the GNN to allow training of the GNN, therefore. And the actions' interpretation is that we emitted vectors close to the embeddings of the selected vectors.
     * Given this setup, I might need a new Graph Buffer class, to accommodate for these formats.
 * The alternative would be to store `(a1, a2)` - a tuple of two vectors for for the actions from when the path was sampled (some point in the past). These, however, would have been output based on a different encoding from the GNN, so are not in general guaranteed to map to the same node embeddings given the new parameters of the GNN.

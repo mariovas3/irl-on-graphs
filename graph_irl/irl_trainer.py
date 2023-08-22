@@ -40,6 +40,7 @@ class IRLGraphTrainer:
         verbose=False,
         do_dfs_expert_paths=True,
         num_reward_grad_steps=1,
+        ortho_init=True,
     ):
         self.verbose = verbose
         # reward-related params;
@@ -90,6 +91,11 @@ class IRLGraphTrainer:
         # it involves more complicated imp samp weights because
         # we now effectively sample from 2 behaviour dists;
         self.add_expert_to_generated = add_expert_to_generated
+
+        # see if should init with (pseudo)orthogonal mats
+        self.ortho_init = ortho_init
+        if ortho_init:
+            self.OI_init_nets()
 
     def train_policy_k_epochs(self, k, **kwargs):
         self.agent.train_k_epochs(k, **kwargs)
