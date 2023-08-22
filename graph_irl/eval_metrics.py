@@ -161,7 +161,7 @@ def save_graph_stats_k_runs_GO1(
     # init empty edge set for target graph;
     for k in range(run_k_times):
         # get params for new policy;
-        _, new_policy_kwargs, _, _ = new_policy_param_getter_fn()
+        _, new_policy_kwargs, _, irl_kwargs = new_policy_param_getter_fn()
         new_policy_kwargs['env_kwargs']['reward_fn'] = irl_reward_fn
         new_policy_kwargs['buffer_kwargs']['verbose'] = False
         
@@ -169,8 +169,8 @@ def save_graph_stats_k_runs_GO1(
         new_policy = new_policy_constructor(
             **policy_extra_params, **new_policy_kwargs
         )
-        # init weights with orthogonal;
-        new_policy.OI_init_nets()
+        if irl_kwargs['ortho_init']:
+            new_policy.OI_init_nets()
         
         # save to same dir;
         new_policy.save_to = irl_policy.save_to
