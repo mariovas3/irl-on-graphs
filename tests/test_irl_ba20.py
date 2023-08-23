@@ -5,21 +5,15 @@ if sys.path[-1] != str(p):
     sys.path.append(str(p))
 print(str(p))
 
-from graph_irl.buffer_v2 import GraphBuffer
-from graph_irl.policy import GaussPolicy, TwoStageGaussPolicy, TanhGaussPolicy, GCN, Qfunc
 from graph_irl.graph_rl_utils import *
 from graph_irl.transforms import *
 from graph_irl.sac import SACAgentGraph, TEST_OUTPUTS_PATH
-from graph_irl.reward import GraphReward, StateGraphReward
 from graph_irl.irl_trainer import IRLGraphTrainer
 from graph_irl.eval_metrics import *
 from graph_irl.experiments_init_utils import *
 
 from functools import partial
 import re
-
-from torch_geometric.data import Data
-from torch_geometric.utils import barabasi_albert_graph
 
 import random
 import numpy as np
