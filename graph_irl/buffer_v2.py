@@ -464,18 +464,6 @@ class GraphBuffer(BufferBase):
                     if not isinstance(policy_dists, TanhGauss):
                         print(f"corresponding entropies: ",
                             policy_dists.entropy().sum(-1)[[i, j]].detach().numpy())
-                    print(f"means: ",
-                          torch.cat(policy_dists.mean, -1)[[i, j], :].detach().numpy())
-                    if isinstance(policy_dists, GaussDist):
-                        print(f"stddevs: ",
-                            torch.cat(policy_dists.stddev, -1)[[i, j], :].detach().numpy())
-                    print(f"first node_embed: ",
-                          node_embeds[0, :].detach().numpy())
-                    print(f"node_embed mean: ",
-                          node_embeds.detach().numpy().mean(0))
-                    print(f"node_embded stddev: ",
-                          node_embeds.detach().numpy().std(0),
-                          end='\n\n')
 
                 # rewards and log_weights
                 if self.per_decision_imp_sample:

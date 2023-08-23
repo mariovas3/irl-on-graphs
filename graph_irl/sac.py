@@ -65,6 +65,7 @@ class SACAgentBase:
         fixed_temperature=None,
         **kwargs,
     ):
+        self.device = None
         self.name = name
         self.save_to = save_to
         self.clip_grads = clip_grads
@@ -236,13 +237,12 @@ class SACAgentBase:
 
     def train_k_epochs(
         self, k, *args, config=None, vis_graph=False, 
-        with_pos=False, **kwargs
+        with_pos=False, save_edge_index=False, **kwargs
     ):
         for _ in tqdm(range(k)):
             self.train_one_epoch(*args, **kwargs)
         
         self.num_policy_updates += 1
-        pos = None
         # assert np.max(self.buffer.path_lens) <= self.env.spec.max_episode_steps
         # assert np.max(self.eval_path_lens) <= self.env.spec.max_episode_steps
 
@@ -283,8 +283,8 @@ class SACAgentBase:
                 metrics.append(self.temperature_losses)
                 metrics.append(self.temperatures)
 
-            edge_index, last_eval_rewards = None, None
-            if vis_graph:
+            edge_index, last_eval_rewards, pos = None, None, None
+            if save_edge_index:
                 if self.best_policy is not None:
                     self.policy = self.best_policy
                     self.Q1 = self.best_Q1
@@ -293,7 +293,6 @@ class SACAgentBase:
                     self.Q2t = self.best_Q2t
                     self.log_temperature = self.best_log_temp
                     print(f"final eval with best policy")
-                
                 # this is only for graph problems;
                 # mujoco should have vis_graph=False
                 r, _, code, ep_len, _, obs = self.buffer.get_single_ep_rewards_and_weights(
@@ -306,9 +305,9 @@ class SACAgentBase:
                     r = r.item()
                 print(f"code from sampling eval episode: {code}")
                 edge_index = obs.edge_index.tolist()
-                if with_pos:
-                    pos = obs.x.numpy()[:, :2]
-                # last_eval_rewards = rewards
+
+                if vis_graph and with_pos:
+                        pos = obs.x.numpy()[:, :2]
 
             save_metrics(
                 self.save_to,
@@ -319,6 +318,7 @@ class SACAgentBase:
                 self.seed,
                 config,
                 edge_index=edge_index,
+                vis_graph=vis_graph,
                 last_eval_rewards=last_eval_rewards,
                 suptitle=(
                     f"figure after {self.num_policy_updates}" 
@@ -922,6 +922,7 @@ def save_metrics(
     seed,
     config=None,
     edge_index=None,
+    vis_graph=False,
     last_eval_rewards=None,
     suptitle=None,
     pos=None,
@@ -935,10 +936,11 @@ def save_metrics(
     # illustrate the graph building stages if edge_index supplied;
     if edge_index is not None:
         vis_single_graph(edge_index, save_returns_to, pos=pos)
-        vis_graph_building(edge_index, save_returns_to, pos=pos)
         file_name = save_returns_to / "edge-index.pkl"
         with open(file_name, "wb") as f:
             pickle.dump(edge_index, f)
+        if vis_graph:
+            vis_graph_building(edge_index, save_returns_to, pos=pos)
 
     # save rewards from last eval episode if given;
     if last_eval_rewards is not None:

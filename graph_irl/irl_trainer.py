@@ -232,7 +232,8 @@ class IRLGraphTrainer:
             assert r.requires_grad and not log_w.requires_grad
             if self.verbose:
                 print(f"per dec sampled return: {r.detach().sum()}")
-                print(f"cumsum log weights of episode ", log_w, sep='\n')
+                print(f"cumsum log weights range: {log_w.min().item()}, "
+                      f"{log_w.max().item()}")
 
             # update avg lcr_reg_term;
             n_episodes += 1

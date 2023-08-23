@@ -1,30 +1,10 @@
-from numpy.random import choice
 from scipy.spatial import KDTree
 import numpy as np
 import torch
 import torch.nn.functional as F
 from typing import Callable
 from torch_geometric.data import Data
-from torch_geometric.utils import degree
 from collections import namedtuple
-from itertools import groupby
-
-
-def get_consec_edge_index(edge_index):
-    edge_set = set()
-    new_index = torch.zeros(edge_index.shape, dtype=torch.long)
-    j = 0
-    for i in range(edge_index.shape[-1]):
-        first, second = edge_index[:, i].min().item(), edge_index[:, i].max().item()
-        if (first, second) in edge_set:
-            continue
-        edge_set.add((first, second))
-        new_index[0, j] = first
-        new_index[1, j] = second
-        new_index[0, j+1] = second
-        new_index[1, j+1] = first
-        j += 2
-    return new_index
 
 
 class WeightsProcessor:
@@ -157,8 +137,12 @@ def get_rand_edge_index(edge_index, num_edges):
         return torch.tensor([[], []], dtype=torch.long)
     T = edge_index.shape[-1]
     num_edges = min(T // 2, num_edges)
-    idxs = choice(range(0, T, 2), size=num_edges, replace=False)
-    idxs = sum([(i, i+1) for i in idxs], ())
+    idxs = np.random.choice(
+        range(0, T, 2), 
+        size=num_edges, 
+        replace=False
+    )
+    idxs = sum([(i, i + 1) for i in idxs], ())
     return edge_index[:, idxs]
 
 

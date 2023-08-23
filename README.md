@@ -45,8 +45,33 @@
     * I think it might be beneficial to use per-decision importance weights to decrease the variance. This is possible since the rewards don't depend on the future actions. This will be a bit more expensive to implement though as I may need to store rewards and weights along the sampled episodes.
     * In the future, I may try implementing a control-variate approach or an adaptive bootstrap approach to further try reduce variance. It would be interesting to see how these approaches will compare.
 
+## Eval suite so far:
+* 1. Is implemented for BA20N3E as source and BA50N3E as target. It is also implemented for London tube as source and Paris tube as target.
+### Given irl-policy and irl-objective from IRL phase:
+1. Topology comparison after learning behaviours based on irl-objective:
+    * The goal is to observe graph properties of constructed graphs, 
+    starting from target vertex set and empty edge index, that are similar to the graph properties of the source graph. In GraphOpt they also claim the reward should transfer over all graphs from the same domain (e.g., citation), which is not clear why that should be the case. Nevertheless, their tests are oblivious to their claims I have implemented them.
+    * For k trials Do:
+        * Deploy irl-policy on target graph starting with 0 edges and record the new graph.
+            * Report min, median, max, mean and std of triangle count, degree and cluster coef
+        * Learn a new policy on target graph using irl-objective and then construct a full graph starting from node set of target graph with empty edge set.
+            * Report min, median, max, mean and std of triangle count, degree and cluster coef
+    * Report the mean and std of the 5 number stats computed over the k runs (e.g. for min degrees, compute avg minimum over the k runs and std of minima over the k runs respectively).
+    * Plot histograms and GaussKDE of triangles, degrees and clust coefs, comparing the reconstruction quality of irl-policy, policies learned from irl-objective, the quantities from the target graph itself, and the quantities for the source graph, which we used for the IRL phase.
+2. Missing link prediction:
+    * This is typically done with supervised learning with typical train/test splits. Train on subset of edges and test on disjoint subset of edges.
+3. Deploy irl-policy on training nodes and empty edge-sets and see if the constructed graphs resemble the structure of the source graph. Then you might claim you found a generative mechanism for graphs that resemble the structure of the source graph.
+    * A baseline for this might be some of the probabilistic models on graphs out there that aim to learn to generate graphs from some distribution (think NetGan and the Deepmind graph generation stuff).
+
+
 ## Note:
 * I think the GraphOpt people are doing something different than style transfer via IRL.
+
+* GraphOpt deffinitely makes a strong and, IMO, unreasonable claim that the irl-policy on Cora does poor construction of Citeseer. They don't have grounds to claim this, since they had to change their graph encoder when moving to Citeseer, to account for the difference in input node feature dimensionality. Since in their implementation, the policy and the encoder are trained jointly, it is no surprise that the new encoder, trained with the new policy, is not compatible with the old policy in producing a good Citeseer reconstruction.
+    * Here I should claim, that my approach with keeping the encoders together with MLPs at all times gives us fairer comparisons (this obviously only works when source and target have same input node feature dims, to be compatible with the graph encoder). In that case I think I actually get to the Chelsea Finn claim that the irl-policy seems to do better than learning a new policy based on the irl-objective from scratch on the target task.
+* Their first eval suite, aims to see if the irl-objective serves as an objective for all graphs in a given domain - in plain words "can we find an objective that is explains the construction/generation of all graphs in a particular domain (e.g., citation graphs)". In their example, the source graph is Cora, and they want to claim that the learned objective from Cora is an objective that, when optimised, can specify or guide the construction of all citation graphs, so they try that on Citeseer as target graph. So in this case, their aim is to be able to be able to learn a policy that can reconstruct Citeseer, based on the objective recovered from Cora. 
+
+* To me this seems like a big assumption, that "citation graphs are all the same". My idea is to follow the maths, which aim to recover an objective that explains the construction of the source. As such, things, constructed by learning a policy based on that objective, should end up looking similar to the structure of the source graph, rather than necessarily look like the target graph itself. Here they kind of played the salesman role of overselling their product.
 
 * The point of IRL is to learn a reward given expert examples. The transfer bit should try to impose the style of the source task to the target task and not necessarily be good for reconstructing the target task itself (would only be the case if target task is very similar to the source task). 
 

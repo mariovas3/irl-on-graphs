@@ -73,8 +73,10 @@ def save_graph_stats(
 
 
 def train_eval_new_policy(new_policy, num_epochs, 
+                          save_edge_index=False,
                           vis_graph=False, with_pos=False):
     new_policy.train_k_epochs(num_epochs, 
+                              save_edge_index=save_edge_index,
                               vis_graph=vis_graph,
                               with_pos=with_pos)
     _, _, code, _, _, obs = new_policy.buffer.get_single_ep_rewards_and_weights(
@@ -117,6 +119,7 @@ def save_graph_stats_k_runs_GO1(
         new_policy_param_getter_fn: Callable,
         sort_metrics: bool=False,
         euc_dist_idxs=None,
+        save_edge_index=False,
         vis_graph=False,
         with_pos=False,
         **policy_extra_params,
@@ -178,6 +181,7 @@ def save_graph_stats_k_runs_GO1(
         # train new policy and then run eval and get constructed graph;
         out_graph = train_eval_new_policy(
             new_policy, num_epochs_new_policy,
+            save_edge_index=save_edge_index,
             vis_graph=vis_graph,
             with_pos=with_pos,
         )
@@ -239,7 +243,7 @@ def get_stats_of_metrics_and_metrics_in_dict(read_from, verbose=False):
         tokens = file_name.split('_')
         who = tokens[0]
         metric_name = tokens[-1][:-4]
-        g = who + metric_name
+        g = who + '_' + metric_name
         with open(f, 'rb') as f:
             # data should be list;
             data = pickle.load(f)
@@ -314,3 +318,17 @@ def save_analysis_graph_stats(test_output_path,
     )
     file_name = p / file_name
     plot_dists(file_name, groups, suptitle)
+
+
+def save_stats_edge_index(
+    path, names_of_stats, tgdata, prefix_name_of_stats
+):
+    target_graph_dir = path / 'target_graph_stats'
+    if not target_graph_dir.exists():
+        target_graph_dir.mkdir(parents=True)
+    stats = get_graph_stats(tgdata)
+    save_graph_stats(
+        target_graph_dir, names_of_stats, stats, prefix_name_of_stats
+    )
+    with open(path / (prefix_name_of_stats + 'edgeidx.pkl'), 'wb') as f:
+        pickle.dump(tgdata.edge_index.tolist(), f)
