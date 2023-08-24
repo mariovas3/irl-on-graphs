@@ -250,8 +250,8 @@ def get_params(
             reward_fn=reward_fn,
             max_episode_steps=num_edges_expert,
             num_expert_steps=num_edges_expert,
-            max_repeats=min(num_edges_expert, 50),
-            max_self_loops=min(num_edges_expert, 50),
+            max_repeats=num_edges_expert,  # as much as longest possible path;
+            max_self_loops=num_edges_expert,
             drop_repeats_or_self_loops=True,
             id=None,
             reward_fn_termination=False,
