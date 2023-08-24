@@ -142,7 +142,7 @@ if __name__ == "__main__":
         pickle.dump(graph_target.edge_index.tolist(), f)
     
     # extra info to save in pkl after training is done;
-    irl_trainer_config['irl_iters'] = 12
+    irl_trainer_config['irl_iters'] = 8
     irl_trainer_config['policy_epochs'] = 1
     irl_trainer_config['vis_graph'] = False
     irl_trainer_config['save_edge_index'] = True
