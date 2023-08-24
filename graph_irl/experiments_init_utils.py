@@ -66,6 +66,7 @@ def get_params(
     clip_grads=False,
     fixed_temperature: Optional[int]=None,
     num_steps_to_sample=None,
+    unnorm_policy=False,
 ):
     print(n_nodes, node_dim, nodes.shape, num_edges_expert)
     # some setup;
@@ -239,7 +240,7 @@ def get_params(
             log_offset=0.,
             lcr_reg=True, 
             verbose=True,
-            unnorm_policy=False,
+            unnorm_policy=unnorm_policy,
             be_deterministic=False,
         ),
         env_kwargs=dict(

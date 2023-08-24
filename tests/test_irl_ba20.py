@@ -57,6 +57,7 @@ params_func_config = dict(
     clip_grads=False,
     fixed_temperature=None,
     num_steps_to_sample=None,
+    unnorm_policy=False,
 )
 
 

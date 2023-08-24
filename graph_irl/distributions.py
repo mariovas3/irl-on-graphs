@@ -186,7 +186,14 @@ class TanhGauss(GaussInputDist):
         return self._log_prob_from_gauss(gauss_domain_x)
     
     def get_unnorm_log_prob(self, *tanh_domain_x):
-        raise NotImplementedError
+        if self.two_action_vectors:
+            tanh_domain_x = torch.cat(tanh_domain_x, -1)
+        gauss_domain_x = self._tanh_var_to_gauss_var(tanh_domain_x)
+        tanh_term = (1. - torch.tanh(gauss_domain_x) ** 2).log()
+        unnormed_gausses = GaussInputDist.unnorm_log_prob(
+            gauss_domain_x, self.diag_gauss
+        )
+        return unnormed_gausses - tanh_term
 
     def _log_prob_from_gauss(self, x):
         """
