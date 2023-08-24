@@ -13,6 +13,7 @@ SOURCE_TOPO_PATH = DATA_PATH / 'london-tube/London-topologies/London-2009-adjace
 TARGET_POSITIONS_PATH = DATA_PATH / 'Paris/liste_stations_positions.txt'
 TARGET_TOPO_PATH = DATA_PATH / 'Paris/Paris-topologies/Paris-2009-adjacency.txt'
 
+from graph_irl.experiments_init_utils import *
 from graph_irl.graph_rl_utils import *
 from graph_irl.transforms import *
 from graph_irl.sac import SACAgentGraph, TEST_OUTPUTS_PATH
