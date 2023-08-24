@@ -268,15 +268,14 @@ def get_stats_of_metrics_and_metrics_in_dict(read_from, verbose=False):
 
 
 def plot_dists(file_name, groups, suptitle):
-    rows = int(sqrt(len(groups)))
-    cols = int(len(groups) / rows) + (1 if len(groups) % rows else 0)
+    rows = len(set([gr.split('_')[0] for gr in groups.keys()]))
+    cols = int(len(groups) / rows)
     cols *= 2  # hist and kde -> 2 plots per metric;
     fig = plt.figure(figsize=(14, 8))
     for i, (metric_name, metric) in enumerate(
         sorted(groups.items(), key=lambda x: x[0])
     ):
         xlow, xhigh = min(metric) - .01, max(metric) + .01
-        
         # get hist;
         plt.subplot(rows, cols, 2 * i + 1)
         ax = plt.gca()
