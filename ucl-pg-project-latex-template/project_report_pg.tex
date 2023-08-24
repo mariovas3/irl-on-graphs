@@ -2,8 +2,19 @@
 \usepackage{setspace}
 %\usepackage{subfigure}
 
+% my extra package imports;
+\usepackage{caption}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{subcaption}
+\usepackage{graphicx}
+\usepackage{graphics}
+\usepackage{tikz}
+\usetikzlibrary {positioning, shapes, bayesnet}
+\graphicspath{{./}}
+
 \pagestyle{plain}
-\usepackage{amssymb,graphicx,color}
+\usepackage{amssymb,color}
 \usepackage{amsfonts}
 \usepackage{latexsym}
 \usepackage{a4wide}
@@ -36,7 +47,7 @@ $\Box$ \end{quotation}}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%
 
-
+% COVER PAGE;
 \title{
   { \includegraphics[scale=.5]{ucl_logo.png}}\\
   {{\Huge Graph style transfer via Inverse Reinforcement Learning}}\\
@@ -46,31 +57,44 @@ $\Box$ \end{quotation}}
 \date{Submission date: Day Month Year}
 \author{
   Candidate Number: YLLK3\thanks{
-  {\bf Disclaimer:}
-    This report is submitted as part requirement 
-    for the MSc Machine Learning at UCL. It is
-    substantially the result of my own work except 
-    where explicitly indicated in the text.
-    \emph{Either:} The report may be freely copied and 
-    distributed provided the source is explicitly acknowledged.
-    \newline  %% \\ screws it up
-    \emph{Or:}\newline
-    The report will be distributed to the internal and external examiners, but thereafter may not be copied or distrbuted except with permission from the author.}
+      {\bf Disclaimer:}
+      This report is submitted as part requirement 
+      for the MSc Machine Learning at UCL. It is
+      substantially the result of my own work except 
+      where explicitly indicated in the text.
+      The report may be freely copied and 
+      distributed provided the source is explicitly acknowledged.
+    }
     \\ \\
   MSc Machine Learning\\ \\
   Supervisor's name
 }
 
+\numberwithin{equation}{section}
+\numberwithin{figure}{section}
+\numberwithin{table}{section}  
 
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% START DOCUMENT;
 \begin{document}
 \onehalfspacing
 \maketitle
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% ABSTRACT;
 \begin{abstract}
   Summarise your report concisely.
 \end{abstract}
 \tableofcontents
 \setcounter{page}{1}
+
+\chapter{Introduction}
+\chapter{Reinforcement Learning Background}
+\chapter{Inverse Reinforcement Learning}
+\chapter{Graph representations}
+\chapter{Our Contribution}
+\chapter{Experiments}
+\chapter{Conclusion and Further work}
 
 
 \chapter{title of first chapter}

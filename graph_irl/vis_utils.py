@@ -6,10 +6,31 @@ import time
 import torch
 import pickle
 import networkx as nx
-from pathlib import Path
 
-TESTS_DIR_PATH = Path(__file__).absolute().parent.parent / 'tests'
-print(TESTS_DIR_PATH)
+
+def plot_overlayed_hists(
+    entity_names, 
+    metric_names, 
+    *metrics_for_all,
+    figsize=(14, 8),
+    path_to_save=None,
+):
+    fig = plt.figure(figsize=figsize)
+    for i, n in enumerate(metric_names):
+        plt.subplot(1, len(metric_names), i+1)
+        ax = plt.gca()
+        for j, metrics_for_one in enumerate(metrics_for_all):
+            plt.hist(metrics_for_one[i], 
+                     log=True, 
+                     alpha=.5, 
+                     label=entity_names[j])
+        plt.legend()
+        plt.xlabel(n)
+    fig.tight_layout()
+    if path_to_save is not None:
+        plt.savefig(path_to_save)
+    else:
+        plt.show()
 
 
 def vis_single_graph(edge_index, save_to, pos):
