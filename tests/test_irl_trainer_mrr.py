@@ -137,7 +137,7 @@ if __name__ == "__main__":
         policy_epochs=irl_trainer_config['policy_epochs'], 
         vis_graph=irl_trainer_config['vis_graph'], 
         save_edge_index=irl_trainer_config['save_edge_index'],
-        with_pos=False,
+        with_pos=True,  # check the map;
         config=irl_trainer_config
     )
 

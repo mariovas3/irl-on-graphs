@@ -295,7 +295,7 @@ class SACAgentBase:
                     print(f"final eval with best policy")
                 # this is only for graph problems;
                 # mujoco should have vis_graph=False
-                r, _, code, ep_len, _, obs, _ = self.buffer.get_single_ep_rewards_and_weights(
+                r, _, code, ep_len, _, obs, _, _ = self.buffer.get_single_ep_rewards_and_weights(
                     self.env,
                     self,
                 )
@@ -306,7 +306,7 @@ class SACAgentBase:
                 print(f"code from sampling eval episode: {code}")
                 edge_index = obs.edge_index.tolist()
 
-                if vis_graph and with_pos:
+                if with_pos:
                         pos = obs.x.numpy()[:, :2]
 
             save_metrics(
@@ -590,7 +590,7 @@ class SACAgentGraph(SACAgentBase):
             )
 
             # sample paths with delta func policy;
-            r, _, code, ep_len, _, obs, _ = self.buffer.get_single_ep_rewards_and_weights(
+            r, _, code, ep_len, _, obs, _, _ = self.buffer.get_single_ep_rewards_and_weights(
                 self.env,
                 self,
             )

@@ -317,7 +317,8 @@ class GraphBuffer(BufferBase):
             positives_dict=None,
             k_proposals: int=1,
     ):
-        rrs_this_episode = []
+        rrs_this_episode = []  # reciprocal ranks;
+        reward_on_path = []
         if with_mrr or with_auc:
             assert positives_dict is not None
         
@@ -465,6 +466,9 @@ class GraphBuffer(BufferBase):
                     batch_list, action_idxs, env.reward_fn,
                     extra_graph_level_feats_list
                 ).view(-1) * self.reward_scale
+                
+                # track rewards on path;
+                reward_on_path.extend(curr_rewards.detach().tolist())
 
                 # see if lcr_reg should be calculated;
                 # a single lcr reg term requires rewards from 3 time steps;
@@ -531,8 +535,8 @@ class GraphBuffer(BufferBase):
                 if self.verbose:
                     print(f"steps done: {steps}, code: {code}")
                 if self.per_decision_imp_sample:
-                    return self._process_rewards_log_weights(rewards, log_weights, code) + (lcr_reg_term, obs, rrs_this_episode)
-                return return_val, log_imp_weight, code, env.steps_done, lcr_reg_term, obs, rrs_this_episode
+                    return self._process_rewards_log_weights(rewards, log_weights, code) + (lcr_reg_term, obs, rrs_this_episode, reward_on_path)
+                return return_val, log_imp_weight, code, env.steps_done, lcr_reg_term, obs, rrs_this_episode, reward_on_path
 
         assert steps == env.steps_done - env.num_edges_start_from
         if self.verbose:
@@ -540,8 +544,8 @@ class GraphBuffer(BufferBase):
         if self.per_decision_imp_sample:
             # in the per dicision case, need to cumsum the log_weights
             # until the current time point;
-            return self._process_rewards_log_weights(rewards, log_weights, 2) + (lcr_reg_term, obs, rrs_this_episode)
-        return return_val, log_imp_weight, 2, env.steps_done, lcr_reg_term, obs, rrs_this_episode
+            return self._process_rewards_log_weights(rewards, log_weights, 2) + (lcr_reg_term, obs, rrs_this_episode, reward_on_path)
+        return return_val, log_imp_weight, 2, env.steps_done, lcr_reg_term, obs, rrs_this_episode, reward_on_path
 
     def collect_path(
         self,

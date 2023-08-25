@@ -223,6 +223,7 @@ class IRLGraphTrainer:
                 steps,
                 lcr_reg_term,
                 obs,
+                _,
                 _
             ) = self.agent.buffer.get_single_ep_rewards_and_weights(
                 self.agent.env,
@@ -279,6 +280,7 @@ class IRLGraphTrainer:
                 steps,
                 lcr_reg_term,
                 obs,
+                _,
                 _
             ) = self.agent.buffer.get_single_ep_rewards_and_weights(
                 self.agent.env,

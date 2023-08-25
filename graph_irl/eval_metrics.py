@@ -79,24 +79,24 @@ def train_eval_new_policy(new_policy, num_epochs,
                               save_edge_index=save_edge_index,
                               vis_graph=vis_graph,
                               with_pos=with_pos)
-    _, _, code, _, _, obs, _ = new_policy.buffer.get_single_ep_rewards_and_weights(
+    _, _, code, _, _, obs, _, rewards = new_policy.buffer.get_single_ep_rewards_and_weights(
         new_policy.env,
         new_policy,
     )
     print(f"new_policy eval code after {num_epochs} epochs: {code}")
-    return obs
+    return obs, rewards
 
 
 def eval_irl_policy(irl_policy, env):
     old_env = irl_policy.env
     irl_policy.env = env
-    _, _, code, _, _, obs, _ = irl_policy.buffer.get_single_ep_rewards_and_weights(
+    _, _, code, _, _, obs, _, rewards = irl_policy.buffer.get_single_ep_rewards_and_weights(
         irl_policy.env,
         irl_policy,
     )
     irl_policy.env = old_env
     print(f"irl_policy eval code on target_graph: {code}")
-    return obs
+    return obs, rewards
 
 
 def get_sum_euc_dist(tgdata, idxs: torch.Tensor=None):
@@ -179,12 +179,16 @@ def save_graph_stats_k_runs_GO1(
         new_policy.save_to = irl_policy.save_to
         
         # train new policy and then run eval and get constructed graph;
-        out_graph = train_eval_new_policy(
+        out_graph, rewards = train_eval_new_policy(
             new_policy, num_epochs_new_policy,
             save_edge_index=save_edge_index,
             vis_graph=vis_graph,
             with_pos=with_pos,
         )
+        # save rewards on construction path;
+        save_graph_stats(irl_policy.save_to, ['rewards'],
+                         [rewards],
+                         prefix_name_of_stats=f"newpolicyOnTarget_{k}_")
 
         # see if should calculate euclidean distances;
         if euc_dist_idxs is not None:
@@ -201,15 +205,19 @@ def save_graph_stats_k_runs_GO1(
                          prefix_name_of_stats=f"newpolicy_{k}_")
         
         # eval policy from irl training directly on target graph;
-        out_graph = eval_irl_policy(irl_policy, 
+        out_graph, rewards = eval_irl_policy(irl_policy, 
                                     new_policy.env)
-        
+
+        # save rewards along reconstruction path;
+        save_graph_stats(irl_policy.save_to, ['rewards'],
+                         [rewards],
+                         prefix_name_of_stats=f"irlpolicyOnTarget_{k}_")
         # see if should calculate euclidean distances;
         if euc_dist_idxs is not None:
             ans = get_sum_euc_dist(out_graph, euc_dist_idxs)
             save_graph_stats(target_graph_dir, ['eucdist'],
                              [ans], 
-                             prefix_name_of_stats=f"newpolicy_{k}_")
+                             prefix_name_of_stats=f"irlpolicy_{k}_")
             print(f"irl policy has sum of edge dists: {ans}")
         
         # get graph stats;
@@ -340,7 +348,7 @@ def run_on_train_nodes_k_times(irl_agent, names_of_stats, k):
     if not train_graph_gen_dir.exists():
         train_graph_gen_dir.mkdir(parents=True)
     for i in range(k):
-        out_graph = eval_irl_policy(irl_agent, 
+        out_graph, rewards = eval_irl_policy(irl_agent, 
                                         irl_agent.env)
         # get graph stats;
         stats = get_graph_stats(out_graph, sort=False)
@@ -348,6 +356,9 @@ def run_on_train_nodes_k_times(irl_agent, names_of_stats, k):
             train_graph_gen_dir, names_of_stats, stats, 
             prefix_name_of_stats=f"irlpolicy_{i}_"
         )
+        save_graph_stats(p, ['rewards'],
+                         [rewards],
+                         prefix_name_of_stats=f"irlpolicyOnSource_{i}_")
 
 
 def get_mrr_and_avg(
@@ -357,7 +368,7 @@ def get_mrr_and_avg(
     avg_found_rates = []
     for j in range(num_runs):
         positives_dict = {k: 0 for k in positives_dict.keys()}
-        _, _, code, steps_done, _, _, rrs = irl_policy.buffer.get_single_ep_rewards_and_weights(
+        _, _, code, steps_done, _, _, rrs, _ = irl_policy.buffer.get_single_ep_rewards_and_weights(
             env, 
             irl_policy,
             with_mrr=True,

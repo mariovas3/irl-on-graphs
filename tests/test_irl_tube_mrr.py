@@ -32,14 +32,22 @@ import torch
 
 
 # graph transform setup;
-transform_fn_ = None
-n_cols_append = 0  # based on transform_fn_
+transform_fn_ = partial(append_distances_, with_degrees=True)
+n_cols_append = 2  # based on transform_fn_
 
 get_graph_level_feats_fn = None
 n_extra_cols_append = 0  # based on get_graph_level_feats_fn
 
+col_names_ridxs = {
+    'degrees': -2,
+    'euclid2d_distance': -1
+}
+
 # instantiate transform;
-transform_ = None
+transform_ = InplaceBatchNodeFeatTransform(
+    node_dim, transform_fn_, n_cols_append, 
+    col_names_ridxs, n_extra_cols_append, get_graph_level_feats_fn
+)
 
 # this is to be passed to get_params()
 params_func_config['n_cols_append'] = n_cols_append
@@ -140,7 +148,7 @@ if __name__ == "__main__":
         policy_epochs=irl_trainer_config['policy_epochs'], 
         vis_graph=irl_trainer_config['vis_graph'], 
         save_edge_index=irl_trainer_config['save_edge_index'],
-        with_pos=False,
+        with_pos=True,
         config=irl_trainer_config
     )
 
