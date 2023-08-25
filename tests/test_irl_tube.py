@@ -42,34 +42,9 @@ n_extra_cols_append = 0  # based on get_graph_level_feats_fn
 transform_ = None
 
 # this is to be passed to get_params()
-params_func_config = dict(
-    num_iters=100,
-    batch_size=100,
-    graphs_per_batch=100,
-    num_grad_steps=1,
-    reward_scale=1.,
-    net_hiddens=[64],
-    encoder_hiddens=[64],
-    embed_dim=8,
-    bet_on_homophily=False,
-    net2_batch_norm=False,
-    with_batch_norm=False,
-    final_tanh=True,
-    action_is_index=True,
-    do_dfs_expert_paths=True,
-    UT_trick=False,
-    per_decision_imp_sample=True,
-    weight_scaling_type='abs_max',
-    n_cols_append=n_cols_append,
-    n_extra_cols_append=n_extra_cols_append,
-    ortho_init=True,
-    seed=0,
-    transform_=transform_,
-    clip_grads=False,
-    fixed_temperature=None,
-    num_steps_to_sample=None,
-    unnorm_policy=False,
-)
+params_func_config['n_cols_append'] = n_cols_append
+params_func_config['n_extra_cols_append'] = n_extra_cols_append
+params_func_config['transform_'] = transform_
 
 
 if __name__ == "__main__":

@@ -56,6 +56,36 @@ def get_consec_edge_index(edge_index):
     return new_index
 
 
+params_func_config = dict(
+    num_iters=100,
+    batch_size=100,
+    graphs_per_batch=100,
+    num_grad_steps=1,
+    reward_scale=1.,
+    net_hiddens=[64],
+    encoder_hiddens=[64],
+    embed_dim=8,
+    bet_on_homophily=False,
+    net2_batch_norm=False,
+    with_batch_norm=False,
+    final_tanh=True,
+    action_is_index=True,
+    do_dfs_expert_paths=True,
+    UT_trick=False,
+    per_decision_imp_sample=True,
+    weight_scaling_type='abs_max',
+    n_cols_append=None,
+    n_extra_cols_append=None,
+    ortho_init=True,
+    seed=0,
+    transform_=None,
+    clip_grads=False,
+    fixed_temperature=None,
+    num_steps_to_sample=None,
+    unnorm_policy=False,
+)
+
+
 def get_params(
     n_nodes,
     node_dim,
