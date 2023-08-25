@@ -77,7 +77,6 @@ params_func_config = dict(
     fixed_temperature=None,
     num_steps_to_sample=None,
     unnorm_policy=False,
-    forbid_self_loops_repeats=False,
 )
 
 

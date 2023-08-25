@@ -241,7 +241,6 @@ class GraphEnv:
         calculate_reward: bool=True,
         min_steps_to_do: int=3,
         similarity_func: Callable=None,
-        forbid_self_loops_repeats: bool=False,
     ):
         """
         Args:
@@ -265,14 +264,11 @@ class GraphEnv:
         self.expert_edge_index = expert_edge_index
         self.num_edges_start_from = num_edges_start_from
         self.similarity_func = similarity_func or sigmoid_similarity
-        self.forbid_self_loops_repeats = forbid_self_loops_repeats
         self.spec.max_episode_steps = max_episode_steps
         self.num_expert_steps = num_expert_steps
         self.drop_repeats_or_self_loops = drop_repeats_or_self_loops
         self.max_repeats = max_repeats
         self.max_self_loops = max_self_loops
-        if self.forbid_self_loops_repeats:
-            assert self.max_repeats == 1 and self.max_self_loops == 1
         self.reward_fn_termination = reward_fn_termination
         self.min_steps_to_do = min_steps_to_do
         # reward fn should have its own GNN encoder;

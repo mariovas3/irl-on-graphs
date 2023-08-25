@@ -87,7 +87,6 @@ def get_params(
     fixed_temperature: Optional[int]=None,
     num_steps_to_sample=None,
     unnorm_policy=False,
-    forbid_self_loops_repeats=False,
 ):
     print(n_nodes, node_dim, nodes.shape, num_edges_expert)
     # some setup;
@@ -252,7 +251,6 @@ def get_params(
             state_reward=which_reward_fn == 'state_reward_fn',
             seed=seed,
             transform_=transform_,
-            forbid_self_loops_repeats=forbid_self_loops_repeats,
             drop_repeats_or_self_loops=True,
             graphs_per_batch=graphs_per_batch,
             action_is_index=action_is_index,
@@ -280,7 +278,6 @@ def get_params(
             calculate_reward=False,
             min_steps_to_do=3,
             similarity_func=sigmoid_similarity,
-            forbid_self_loops_repeats=forbid_self_loops_repeats,
         )
     )
 

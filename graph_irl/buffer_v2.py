@@ -25,7 +25,6 @@ class BufferBase:
         state_reward=False, 
         seed=None,
         transform_: Callable=None,
-        forbid_self_loops_repeats=False,
     ):
         self.seed = 0 if seed is None else seed
         self.idx, self.max_size = 0, max_size
@@ -33,7 +32,6 @@ class BufferBase:
         self.looped = False
         self.state_reward = state_reward
         self.transform_ = transform_
-        self.forbid_self_loops_repeats = forbid_self_loops_repeats
 
         # log variables;
         self.undiscounted_returns = []
@@ -77,7 +75,6 @@ class GraphBuffer(BufferBase):
         state_reward=False,
         seed=None,
         transform_=None,
-        forbid_self_loops_repeats=False,
         drop_repeats_or_self_loops=False,
         graphs_per_batch=None,
         action_is_index=True,
@@ -92,7 +89,6 @@ class GraphBuffer(BufferBase):
     ):
         super(GraphBuffer, self).__init__(
             max_size, state_reward, seed, transform_,
-            forbid_self_loops_repeats,
         )
         # I will only keep state action trajectories and eval the reward 
         # as I sample a batch in the sac training loop - for more efficiency;
@@ -321,8 +317,6 @@ class GraphBuffer(BufferBase):
             positives_dict=None,
             k_proposals: int=1,
     ):
-        if k_proposals == 1 and self.forbid_self_loops_repeats:
-            k_proposals = 10
         rrs_this_episode = []
         if with_mrr or with_auc:
             assert positives_dict is not None
@@ -576,10 +570,7 @@ class GraphBuffer(BufferBase):
         obs_t, info = env.reset(seed=self.seed)
         extra_graph_level_feats = None
         self.seed += 1
-        if self.forbid_self_loops_repeats:
-            k_proposals = 10
-        else:
-            k_proposals = 1
+        k_proposals = 1  # this is for compatibility
         
         # get at least num_steps_to_collect steps
         # and exit when terminated or truncated;
@@ -589,7 +580,6 @@ class GraphBuffer(BufferBase):
                 self.transform_(obs_t)
                 if self.transform_.get_graph_level_feats_fn is not None:
                     extra_graph_level_feats = self.transform_.get_graph_level_feats_fn(obs_t)
-
             
             # sample action;
             (a1, a2), node_embeds = agent.sample_action(obs_t, k_proposals,
@@ -630,11 +620,6 @@ class GraphBuffer(BufferBase):
                 # indexes of nodes to be connected;
                 first, second = info["first"], info["second"]
 
-                # this is in the case of forbid self loops and repeats;
-                which_action = info['which_action']
-                if which_action:
-                    a1 = a1[which_action, :].reshape(-1)
-                    a2 = a2[which_action, :].reshape(-1)
                 if self.action_is_index:
                     action_t = np.array([first, second])
                 else:
