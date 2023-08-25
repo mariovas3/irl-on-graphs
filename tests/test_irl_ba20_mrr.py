@@ -5,49 +5,30 @@ if sys.path[-1] != str(p):
     sys.path.append(str(p))
 print(str(p))
 
-from graph_irl.experiments_init_utils import *
 from graph_irl.graph_rl_utils import *
 from graph_irl.transforms import *
 from graph_irl.sac import SACAgentGraph, TEST_OUTPUTS_PATH
-from graph_irl.examples.circle_graph import create_circle_graph
 from graph_irl.irl_trainer import IRLGraphTrainer
 from graph_irl.eval_metrics import *
+from graph_irl.experiments_init_utils import *
 
 from functools import partial
 import re
-
-from torch_geometric.data import Data
 
 import random
 import numpy as np
 import torch
 
 
-# circular graph with 7 nodes;
-n_nodes, node_dim = 20, 2
-num_edges_expert = n_nodes
-
 # graph transform setup;
-transform_fn_ = partial(append_distances_, with_degrees=True)
-n_cols_append = 2  # based on transform_fn_
+transform_fn_ = None
+n_cols_append = 0  # based on transform_fn_
 
-# get_graph_level_feats_fn = partial(
-#     get_columns_aggr, col_idxs=[-1], aggr='max', 
-#     check_in_dim=node_dim + n_cols_append
-# )
 get_graph_level_feats_fn = None
-n_extra_cols_append = 0#1  # based on get_graph_level_feats_fn
-
-col_names_ridxs = {
-    'degrees': -2,
-    'euclid2d_distance': -1
-}
+n_extra_cols_append = 0  # based on get_graph_level_feats_fn
 
 # instantiate transform;
-transform_ = InplaceBatchNodeFeatTransform(
-    node_dim, transform_fn_, n_cols_append, 
-    col_names_ridxs, n_extra_cols_append, get_graph_level_feats_fn
-)
+transform_ = None
 
 # this is to be passed to get_params()
 params_func_config['n_cols_append'] = n_cols_append
@@ -65,21 +46,31 @@ if __name__ == "__main__":
     np.random.seed(params_func_config['seed'])
     torch.manual_seed(params_func_config['seed'])
 
-    # init graph;
-    nodes, expert_edge_index = create_circle_graph(n_nodes, node_dim, trig_circle_init)
-    graph_source = Data(x=nodes, edge_index=expert_edge_index)
+    # init graphs now, not to mess up the seed if 
+    # experiments are with different NN architectures
+    # since diff layer sizes require different num of 
+    # random param inits;
+
+    # source graph;
+    n_nodes_source = 50
+    n_edges_source = 3
+    graph_source = get_ba_graph(n_nodes_source, n_edges_source)
 
     # Subsample the edge index and train IRL on it;
     # the remaining subset is used for link prediction eval;
-    train_edge_index, positives_dict = split_edge_index(expert_edge_index, .1)
+    train_edge_index, positives_dict = split_edge_index(
+        graph_source.edge_index, .1
+    )
     print("shape of train index and len of positives dict",
             train_edge_index.shape, len(positives_dict))
     
     # add the graph parameters;
-    params_func_config['n_nodes'] = n_nodes
-    params_func_config['node_dim'] = node_dim
-    params_func_config['nodes'] = nodes
+    params_func_config['n_nodes'] = n_nodes_source
+    params_func_config['node_dim'] = graph_source.x.shape[-1]
+    params_func_config['nodes'] = graph_source.x
     params_func_config['num_edges_expert'] = train_edge_index.shape[-1] // 2
+
+    # IRL train config;
     get_params_train = partial(get_params, **params_func_config)
     
     # get kwargs;
@@ -96,7 +87,7 @@ if __name__ == "__main__":
         reward_fn=reward_fn,
         reward_optim=torch.optim.Adam(reward_fn.parameters(), lr=1e-2),
         agent=agent,
-        nodes=nodes,
+        nodes=graph_source.x,
         expert_edge_index=train_edge_index,
         **irl_trainer_config,
     )
@@ -112,6 +103,7 @@ if __name__ == "__main__":
         agent.save_to, names_of_stats, graph_source, 'sourcegraph_'
     )
     
+    # extra info to save in pkl after training is done;
     irl_trainer_config['irl_iters'] = 1
     irl_trainer_config['policy_epochs'] = 1
     irl_trainer_config['vis_graph'] = False
@@ -129,8 +121,8 @@ if __name__ == "__main__":
         irl_trainer_config[k] = v
     
     # start IRL training;
-    print(f"IRL training for {n_nodes}-node graph")
-
+    print(f"IRL training for {n_nodes_source}-node graph")
+    
     # train IRL;
     irl_trainer.train_irl(
         num_iters=irl_trainer_config['irl_iters'], 
@@ -140,17 +132,19 @@ if __name__ == "__main__":
         with_pos=False,
         config=irl_trainer_config
     )
-
+    
     # make env start from subsampled edge index and sample 
     # remaining num of edges;
     agent.env.expert_edge_index = train_edge_index
     agent.env.num_edges_start_from = train_edge_index.shape[-1] // 2
-    num_expert_steps = expert_edge_index.shape[-1] // 2
-    agent.env.num_expert_steps = num_expert_steps
+    num_expert_steps = graph_source.edge_index.shape[-1] // 2
     agent.env.spec.max_episode_steps = num_expert_steps
+    agent.env.num_expert_steps = num_expert_steps
     agent.env.max_repeats = agent.env.max_self_loops = num_expert_steps
 
-    mrr_stats, found_rate_stats = get_mrr_and_avg(agent, agent.env, positives_dict)
+    mrr_stats, found_rate_stats = get_mrr_and_avg(
+        agent, agent.env, positives_dict
+    )
     mrr_stats_dir = agent.save_to / 'mrr_stats'
     if not mrr_stats_dir.exists():
         mrr_stats_dir.mkdir()
