@@ -137,7 +137,7 @@ class IRLGraphTrainer:
             mono_loss = (
                 (
                     torch.relu(
-                        expert_rewards[:, :-1] - expert_rewards[:, 1:]
+                        expert_rewards[:, :-1] - expert_rewards[:, 1:] + 1.
                     ) ** 2
                 ).sum(-1).mean()
             ) * self.mono_regularisation_on_demo_coef
@@ -222,7 +222,8 @@ class IRLGraphTrainer:
                 code,
                 steps,
                 lcr_reg_term,
-                obs
+                obs,
+                _
             ) = self.agent.buffer.get_single_ep_rewards_and_weights(
                 self.agent.env,
                 self.agent,
@@ -277,7 +278,8 @@ class IRLGraphTrainer:
                 code,
                 steps,
                 lcr_reg_term,
-                obs
+                obs,
+                _
             ) = self.agent.buffer.get_single_ep_rewards_and_weights(
                 self.agent.env,
                 self.agent,

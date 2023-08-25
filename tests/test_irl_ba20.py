@@ -31,34 +31,9 @@ n_extra_cols_append = 0  # based on get_graph_level_feats_fn
 transform_ = None
 
 # this is to be passed to get_params()
-params_func_config = dict(
-    num_iters=100,
-    batch_size=100,
-    graphs_per_batch=100,
-    num_grad_steps=1,
-    reward_scale=1.,
-    net_hiddens=[64],
-    encoder_hiddens=[64],
-    embed_dim=8,
-    bet_on_homophily=False,
-    net2_batch_norm=False,
-    with_batch_norm=False,
-    final_tanh=True,
-    action_is_index=True,
-    do_dfs_expert_paths=True,
-    UT_trick=False,
-    per_decision_imp_sample=True,
-    weight_scaling_type='abs_max',
-    n_cols_append=n_cols_append,
-    n_extra_cols_append=n_extra_cols_append,
-    ortho_init=True,
-    seed=0,
-    transform_=transform_,
-    clip_grads=False,
-    fixed_temperature=None,
-    num_steps_to_sample=None,
-    unnorm_policy=False,
-)
+params_func_config['n_cols_append'] = n_cols_append
+params_func_config['n_extra_cols_append'] = n_extra_cols_append
+params_func_config['transform_'] = transform_
 
 
 if __name__ == "__main__":
@@ -143,6 +118,8 @@ if __name__ == "__main__":
     irl_trainer_config['discount']=agent_kwargs['discount']
     irl_trainer_config['fixed_temperature'] = agent_kwargs['fixed_temperature']
     for k, v in params_func_config.items():
+        if k == 'nodes':
+            continue
         irl_trainer_config[k] = v
     
     # start IRL training;
@@ -169,6 +146,11 @@ if __name__ == "__main__":
     params_func_config['nodes'] = graph_target.x
     params_func_config['num_edges_expert'] = graph_target.edge_index.shape[-1] // 2
     get_params_eval = partial(get_params, **params_func_config)
+
+    # run test suite 3 - gen similar graphs to source graph;
+    run_on_train_nodes_k_times(
+        irl_trainer.agent, names_of_stats, k=3
+    )
     
     # Run experiment suite 1. from GraphOpt paper;
     # this compares graph stats like degrees, triangles, clust coef;

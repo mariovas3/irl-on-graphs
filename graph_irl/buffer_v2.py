@@ -24,7 +24,7 @@ class BufferBase:
         max_size, 
         state_reward=False, 
         seed=None,
-        transform_: Callable=None
+        transform_: Callable=None,
     ):
         self.seed = 0 if seed is None else seed
         self.idx, self.max_size = 0, max_size
@@ -85,10 +85,10 @@ class GraphBuffer(BufferBase):
         lcr_reg=False, 
         verbose=False,
         unnorm_policy=False,
-        be_deterministic=False
+        be_deterministic=False,
     ):
         super(GraphBuffer, self).__init__(
-            max_size, state_reward, seed, transform_
+            max_size, state_reward, seed, transform_,
         )
         # I will only keep state action trajectories and eval the reward 
         # as I sample a batch in the sac training loop - for more efficiency;
@@ -311,8 +311,16 @@ class GraphBuffer(BufferBase):
     def get_single_ep_rewards_and_weights(
             self, 
             env, 
-            agent, 
+            agent,
+            with_mrr=False,
+            with_auc=False,
+            positives_dict=None,
+            k_proposals: int=1,
     ):
+        rrs_this_episode = []
+        if with_mrr or with_auc:
+            assert positives_dict is not None
+        
         # init lcr regularisation term and last two rewards;
         lcr_reg_term = 0.
         r1, r2 = None, None
@@ -358,14 +366,17 @@ class GraphBuffer(BufferBase):
             if self.be_deterministic:
                 (a1, a2), node_embeds = agent.sample_deterministic(obs, extra_graph_level_feats)
             else:
-                (a1, a2), node_embeds = agent.sample_action(obs, extra_graph_level_feats)
+                (a1, a2), node_embeds = agent.sample_action(
+                    obs, k_proposals, extra_graph_level_feats
+                )
 
             # make env step;
             new_obs, reward, terminated, truncated, info = env.step(
                 (
                     (a1.numpy(), a2.numpy()), 
                     node_embeds.detach().numpy()
-                )
+                ),
+                positives_dict
             )
 
             # resample action if repeated edge or self loop;
@@ -393,9 +404,26 @@ class GraphBuffer(BufferBase):
             
             # get idxs of nodes to connect;
             first, second = info["first"], info["second"]
+            which_action = info['which_action']
+            recip_rank = info['recip_rank']
             
             # add action to action list and observation in batch_list;
             if not skip_sample:
+                if which_action is not None:
+                    assert len(a1.shape) == 2
+                    a1 = a1[which_action, :].view(-1)
+                    a2 = a2[which_action, :].view(-1)
+                    
+                    # this is where you track recip rank
+                    if with_mrr:
+                        rrs_this_episode.append(recip_rank)
+                    
+                    # and the entry of positives_dict is turned on
+                    if with_auc:
+                        e1, e2 = env._get_edge_hash(first, second)
+                        # see if a positive was discovered;
+                        if (e1, e2) in positives_dict:
+                            positives_dict[(e1, e2)] = 1
                 if self.transform_ is not None:
                     self.transform_(new_obs)
                     if self.transform_.get_graph_level_feats_fn is not None:
@@ -503,8 +531,8 @@ class GraphBuffer(BufferBase):
                 if self.verbose:
                     print(f"steps done: {steps}, code: {code}")
                 if self.per_decision_imp_sample:
-                    return self._process_rewards_log_weights(rewards, log_weights, code) + (lcr_reg_term, obs)
-                return return_val, log_imp_weight, code, env.steps_done, lcr_reg_term, obs
+                    return self._process_rewards_log_weights(rewards, log_weights, code) + (lcr_reg_term, obs, rrs_this_episode)
+                return return_val, log_imp_weight, code, env.steps_done, lcr_reg_term, obs, rrs_this_episode
 
         assert steps == env.steps_done - env.num_edges_start_from
         if self.verbose:
@@ -512,8 +540,8 @@ class GraphBuffer(BufferBase):
         if self.per_decision_imp_sample:
             # in the per dicision case, need to cumsum the log_weights
             # until the current time point;
-            return self._process_rewards_log_weights(rewards, log_weights, 2) + (lcr_reg_term, obs)
-        return return_val, log_imp_weight, 2, env.steps_done, lcr_reg_term, obs
+            return self._process_rewards_log_weights(rewards, log_weights, 2) + (lcr_reg_term, obs, rrs_this_episode)
+        return return_val, log_imp_weight, 2, env.steps_done, lcr_reg_term, obs, rrs_this_episode
 
     def collect_path(
         self,
@@ -542,6 +570,7 @@ class GraphBuffer(BufferBase):
         obs_t, info = env.reset(seed=self.seed)
         extra_graph_level_feats = None
         self.seed += 1
+        k_proposals = 1  # this is for compatibility
         
         # get at least num_steps_to_collect steps
         # and exit when terminated or truncated;
@@ -551,10 +580,10 @@ class GraphBuffer(BufferBase):
                 self.transform_(obs_t)
                 if self.transform_.get_graph_level_feats_fn is not None:
                     extra_graph_level_feats = self.transform_.get_graph_level_feats_fn(obs_t)
-
             
             # sample action;
-            (a1, a2), node_embeds = agent.sample_action(obs_t, extra_graph_level_feats)
+            (a1, a2), node_embeds = agent.sample_action(obs_t, k_proposals,
+                                                        extra_graph_level_feats)
             a1, a2 = a1.numpy(), a2.numpy()
 
             # sample dynamics;
@@ -590,6 +619,7 @@ class GraphBuffer(BufferBase):
             if not skip_sample:
                 # indexes of nodes to be connected;
                 first, second = info["first"], info["second"]
+
                 if self.action_is_index:
                     action_t = np.array([first, second])
                 else:

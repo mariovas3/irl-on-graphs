@@ -1,4 +1,3 @@
-from scipy.spatial import KDTree
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -136,6 +135,8 @@ def get_rand_edge_index(edge_index, num_edges):
     if num_edges == 0:
         return torch.tensor([[], []], dtype=torch.long)
     T = edge_index.shape[-1]
+    if num_edges == T // 2:
+        return edge_index
     num_edges = min(T // 2, num_edges)
     idxs = np.random.choice(
         range(0, T, 2), 
@@ -155,78 +156,72 @@ def get_unique_edges(edge_index):
     )
 
 
-def kdtree_similarity(
-    node_embeds: np.ndarray, 
-    a1: np.ndarray, 
-    a2: np.ndarray,
-    forbid_self_loops_repeats=False,
-    edge_set: set=None,
-):
-    tree = KDTree(node_embeds)
-    first = tree.query(a1, k=1)[-1]
-    if forbid_self_loops_repeats:
-        second = tree.query(a2, k=10)[-1]
-        for s in second:
-            temp1, temp2 = min(first, s), max(first, s)
-            if first == s or (temp1, temp2) in edge_set:
+def batch_argmax(scores):
+    firsts = scores[:, :, 0].argmax(-1)
+    seconds = scores[:, :, 1].argmax(-1)
+    return firsts.tolist(), seconds.tolist()
+
+
+def select_actions_from_scores(scores, positives_dict, edge_set):
+    which_action = None
+    recip_rank = None
+    first, second = 0, 0
+    if scores.ndim == 3:
+        recip_rank = 0
+        flag = True
+        firsts, seconds = batch_argmax(scores)
+        for i, (f, s) in enumerate(zip(firsts, seconds)):
+            e1, e2 = min(f, s), max(f, s)
+            if positives_dict is not None and recip_rank == 0:
+                if (e1, e2) in positives_dict:
+                    recip_rank = 1 / (i + 1)
+            # ignore repeats and self loops;
+            if (e1, e2) in edge_set or e1 == e2:
                 continue
-            return first, s
-        # signal that we're out of recommends by giving a self loop;
-        return first, first
-    second = tree.query(a2, k=1)[-1]
-    return first, second
+            if flag:
+                first, second = f, s
+                which_action = i
+                flag = False
+            if not flag and recip_rank > 0:
+                return first, second, which_action, recip_rank
+    else:
+        assert scores.ndim == 2    
+        first = scores[:, 0].argmax(-1).item()
+        second = scores[:, 1].argmax(-1).item()
+    return first, second, which_action, recip_rank
 
 
 def sigmoid_similarity(
     node_embeds: np.ndarray, 
     a1: np.ndarray, 
     a2: np.ndarray, 
-    forbid_self_loops_repeats=False, 
     edge_set: set=None,
+    positives_dict=None
 ):
     node_embeds = torch.from_numpy(node_embeds)
     a1, a2 = torch.from_numpy(a1), torch.from_numpy(a2)
-    actions = torch.cat((a1.view(-1, 1), a2.view(-1, 1)), -1)
+    actions = torch.cat((a1.unsqueeze(-1), a2.unsqueeze(-1)), -1)
     temp = node_embeds @ actions
     temp = torch.sigmoid(temp)
-    first = temp[:, 0].argmax().item()
-    if forbid_self_loops_repeats:
-        for s in torch.topk(temp[:, 1], k=10)[-1]:
-            temp1, temp2 = min(s.item(), first), max(s.item(), first)
-            if temp1 == temp2 or (temp1, temp2) in edge_set:
-                continue
-            return first, s.item()
-        # signal that we're out of recommends by giving a self loop;
-        return first, first
-    second = temp[:, 1].argmax().item()
-    return first, second
+    return select_actions_from_scores(temp, positives_dict, edge_set)
 
 
 def euc_dist_similariry(
     node_embeds: np.ndarray,
     a1: np.ndarray,
     a2: np.ndarray,
-    forbid_self_loops_repeats=False,
     edge_set: set=None,
+    positives_dict=None
 ):
     node_embeds = torch.from_numpy(node_embeds)
     a1, a2 = torch.from_numpy(a1), torch.from_numpy(a2)
-    actions = torch.cat((a1.view(-1, 1), a2.view(-1, 1)), -1)
-    criterion = (
+    actions = torch.cat((a1.unsqueeze(-1), a2.unsqueeze(-1)), -1)
+    # neg euc dist;
+    temp = - (
         (node_embeds * node_embeds).sum(-1, keepdims=True) 
-        - 2 * node_embeds @ actions
+        - 2 * node_embeds @ actions 
     )
-    first = criterion[:, 0].argmax().item()
-    if forbid_self_loops_repeats:
-        for s in torch.topk(criterion[:, 1], k=10)[-1]:
-            temp1, temp2 = min(s.item(), first), max(s.item(), first)
-            if temp1 == temp2 or (temp1, temp2) in edge_set:
-                continue
-            return first, s.item()
-        # return self loops if second not among first 10 options;
-        return first, first
-    second = criterion[:, 1].argmax().item()
-    return first, second
+    return select_actions_from_scores(temp, positives_dict, edge_set)
 
 
 class GraphEnv:
@@ -246,7 +241,6 @@ class GraphEnv:
         calculate_reward: bool=True,
         min_steps_to_do: int=3,
         similarity_func: Callable=None,
-        forbid_self_loops_repeats: bool=False,
     ):
         """
         Args:
@@ -269,15 +263,12 @@ class GraphEnv:
         self.x = x
         self.expert_edge_index = expert_edge_index
         self.num_edges_start_from = num_edges_start_from
-        self.similarity_func = similarity_func or kdtree_similarity
-        self.forbid_self_loops_repeats = forbid_self_loops_repeats
+        self.similarity_func = similarity_func or sigmoid_similarity
         self.spec.max_episode_steps = max_episode_steps
         self.num_expert_steps = num_expert_steps
         self.drop_repeats_or_self_loops = drop_repeats_or_self_loops
         self.max_repeats = max_repeats
         self.max_self_loops = max_self_loops
-        if self.forbid_self_loops_repeats:
-            assert self.max_repeats == 1 and self.max_self_loops == 1
         self.reward_fn_termination = reward_fn_termination
         self.min_steps_to_do = min_steps_to_do
         # reward fn should have its own GNN encoder;
@@ -376,7 +367,7 @@ class GraphEnv:
         info["repeats_done"] = self.repeats_done
         info["self_loops_done"] = self.self_loops_done
 
-    def step(self, action):
+    def step(self, action, positives_dict=None):
         """
         Returns (observation, terminated, truncated, info)
         
@@ -401,22 +392,27 @@ class GraphEnv:
             "self_loops_done": self.self_loops_done,
             "first": None,
             "second": None,
+            "which_action": None,
+            "recip_rank": None, 
         }
 
         # unpack action; a1 and a2 are numpy arrays;
         (a1, a2), node_embeds = action
 
-        # a1 and a2 should be flattened and have same len as node embeds;
-        assert len(a1.shape) == 1 == len(a2.shape)
-        action_dim = len(a1)
+        # a1 and a2 should either be 1d vectors
+        # unless k_proposals > 1, in which case they 
+        # should be 2d tensors;
+        # assert len(a1.shape) == 1 == len(a2.shape)
+        assert len(a1.shape) == len(a2.shape)
+        action_dim = a1.shape[-1]
         obs_dim = node_embeds.shape[-1]
         assert action_dim == obs_dim
 
         # get idx of proposed nodes to connect;
-        first, second = self.similarity_func(
+        first, second, which_action, recip_rank = self.similarity_func(
             node_embeds, a1, a2,
-            forbid_self_loops_repeats=self.forbid_self_loops_repeats,
             edge_set=self.unique_edges,
+            positives_dict=positives_dict,
         )
 
         # make data object;
@@ -427,6 +423,8 @@ class GraphEnv:
         # and the next is the suitable node;
         info["first"] = first
         info["second"] = second
+        info['which_action'] = which_action
+        info['recip_rank'] = recip_rank
 
         # calculate reward;
         idxs = torch.tensor([[first, second]], dtype=torch.long)
@@ -436,7 +434,7 @@ class GraphEnv:
                 'currently only state-action experience is stored in '
                 'buffer and reward is calculated at batch-sampling '
                 'time, given current config of reward. This is '
-                'so that buffer does not be cleared after reward grad '
+                'so that buffer does not get cleared after reward grad '
                 'step and is efficient since deep learning is good with '
                 'batch computation rather than per-instance computation.'
             )

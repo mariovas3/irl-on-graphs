@@ -11,6 +11,26 @@ from graph_irl.buffer_v2 import GraphBuffer
 from torch_geometric.utils import barabasi_albert_graph
 
 
+def split_edge_index(edge_index, test_prop):
+    T = edge_index.shape[-1] // 2
+    idxs = np.random.choice(range(0, edge_index.shape[-1], 2), 
+                     size=max(int(T * test_prop), 3),
+                     replace=False)
+    test_idxs = set(
+        sum([
+            (i, i+1) for i in idxs
+        ], ())
+    )
+    msk = np.array(
+        [i in test_idxs for i in range(edge_index.shape[-1])]
+    )
+    train_edge_index = edge_index[:, ~msk]
+    positives_dict = {
+        (min(edge_index[:, i]).item(), max(edge_index[:, i]).item()): 0
+        for i in idxs
+    }
+    return train_edge_index, positives_dict
+
 
 def trig_circle_init(*args):
     n_nodes = args[0]
@@ -34,6 +54,36 @@ def get_consec_edge_index(edge_index):
         new_index[1, j+1] = first
         j += 2
     return new_index
+
+
+params_func_config = dict(
+    num_iters=100,
+    batch_size=100,
+    graphs_per_batch=100,
+    num_grad_steps=1,
+    reward_scale=1.,
+    net_hiddens=[64],
+    encoder_hiddens=[64],
+    embed_dim=8,
+    bet_on_homophily=False,
+    net2_batch_norm=False,
+    with_batch_norm=False,
+    final_tanh=True,
+    action_is_index=True,
+    do_dfs_expert_paths=True,
+    UT_trick=False,
+    per_decision_imp_sample=True,
+    weight_scaling_type='abs_max',
+    n_cols_append=None,
+    n_extra_cols_append=None,
+    ortho_init=True,
+    seed=0,
+    transform_=None,
+    clip_grads=False,
+    fixed_temperature=None,
+    num_steps_to_sample=None,
+    unnorm_policy=False,
+)
 
 
 def get_params(
@@ -258,7 +308,6 @@ def get_params(
             calculate_reward=False,
             min_steps_to_do=3,
             similarity_func=sigmoid_similarity,
-            forbid_self_loops_repeats=False,
         )
     )
 

@@ -67,16 +67,19 @@ if __name__ == "__main__":
                                   SOURCE_TOPO_PATH,
                                   scaling)
     
-    # target graph;
-    graph_target = get_city_graph(TARGET_POSITIONS_PATH,
-                                 TARGET_TOPO_PATH,
-                                 scaling)
+    # Subsample the edge index and train IRL on it;
+    # the remaining subset is used for link prediction eval;
+    train_edge_index, positives_dict = split_edge_index(
+        graph_source.edge_index, .1
+    )
+    print("shape of train index and len of positives dict",
+            train_edge_index.shape, len(positives_dict))
 
     # add the graph parameters;
     params_func_config['n_nodes'] = graph_source.x.shape[0]
     params_func_config['node_dim'] = graph_source.x.shape[-1]
     params_func_config['nodes'] = graph_source.x
-    params_func_config['num_edges_expert'] = graph_source.edge_index.shape[-1] // 2
+    params_func_config['num_edges_expert'] = train_edge_index.shape[-1] // 2
 
     # IRL train config;
     get_params_train = partial(get_params, **params_func_config)
@@ -96,7 +99,7 @@ if __name__ == "__main__":
         reward_optim=torch.optim.Adam(reward_fn.parameters(), lr=1e-2),
         agent=agent,
         nodes=graph_source.x,
-        expert_edge_index=graph_source.edge_index,
+        expert_edge_index=train_edge_index,
         **irl_trainer_config,
     )
 
@@ -110,11 +113,6 @@ if __name__ == "__main__":
     save_stats_edge_index(
         agent.save_to, names_of_stats, graph_source, 'sourcegraph_'
     )
-    
-    # save edge_index of target graph, since its stats 
-    # are saved in the eval loop;
-    with open(agent.save_to / 'targetgraph_edgeidx.pkl', 'wb') as f:
-        pickle.dump(graph_target.edge_index.tolist(), f)
     
     # extra info to save in pkl after training is done;
     irl_trainer_config['irl_iters'] = 16
@@ -145,49 +143,8 @@ if __name__ == "__main__":
         with_pos=False,
         config=irl_trainer_config
     )
-    
-    # get learned reward;
-    reward_fn = irl_trainer.reward_fn
-    reward_fn.eval()
-    agent_kwargs['save_to'] = None
 
-    # set relevant target graphs params;
-    params_func_config['n_nodes']= graph_target.x.shape[0]
-    params_func_config['node_dim']= graph_target.x.shape[-1]
-    params_func_config['nodes'] = graph_target.x
-    params_func_config['num_edges_expert'] = graph_target.edge_index.shape[-1] // 2
-    get_params_eval = partial(get_params, **params_func_config)
-
-    # run test suite 3 - gen similar graphs to source graph;
-    run_on_train_nodes_k_times(
-        irl_trainer.agent, names_of_stats, k=3
-    )
-    
-    # Run experiment suite 1. from GraphOpt paper;
-    # this compares graph stats like degrees, triangle, clust coef;
-    # from graphs made by 
-    # (1) training new policy with learned reward_fn on target graph;
-    # (2) deploying learned policy from IRL task directly on source graph;
-    save_graph_stats_k_runs_GO1(
-        irl_trainer.agent,
-        reward_fn, 
-        SACAgentGraph, 
-        num_epochs_new_policy=7,
-        target_graph=graph_target,
-        run_k_times=3,
-        new_policy_param_getter_fn=get_params_eval,
-        sort_metrics=False,
-        euc_dist_idxs=None,#torch.tensor([[0, 1]], dtype=torch.long),
-        save_edge_index=True,
-        vis_graph=False,
-        with_pos=False,
-        **agent_kwargs
-    )
-    
-    # currently prints summary stats of graph and saves plot of stats;
-    save_analysis_graph_stats(
-        irl_trainer.agent.save_to / 'target_graph_stats',
-        'graph_stats_hist_kde_plots.png',
-        suptitle=None,
-        verbose=False
+    save_mrr_and_avg(
+        agent, train_edge_index, positives_dict, graph_source,
+        k_proposals=25,
     )
