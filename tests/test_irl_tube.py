@@ -69,6 +69,7 @@ params_func_config = dict(
     fixed_temperature=None,
     num_steps_to_sample=None,
     unnorm_policy=False,
+    forbid_self_loops_repeats=False,
 )
 
 
@@ -154,6 +155,8 @@ if __name__ == "__main__":
     irl_trainer_config['discount']=agent_kwargs['discount']
     irl_trainer_config['fixed_temperature'] = agent_kwargs['fixed_temperature']
     for k, v in params_func_config.items():
+        if k == 'nodes':
+            continue
         irl_trainer_config[k] = v
     
     # start IRL training;
@@ -180,6 +183,11 @@ if __name__ == "__main__":
     params_func_config['nodes'] = graph_target.x
     params_func_config['num_edges_expert'] = graph_target.edge_index.shape[-1] // 2
     get_params_eval = partial(get_params, **params_func_config)
+
+    # run test suite 3 - gen similar graphs to source graph;
+    run_on_train_nodes_k_times(
+        irl_trainer.agent, names_of_stats, k=3
+    )
     
     # Run experiment suite 1. from GraphOpt paper;
     # this compares graph stats like degrees, triangle, clust coef;

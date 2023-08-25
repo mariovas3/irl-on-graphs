@@ -148,6 +148,8 @@ if __name__ == "__main__":
     irl_trainer_config['discount']=agent_kwargs['discount']
     irl_trainer_config['fixed_temperature'] = agent_kwargs['fixed_temperature']
     for k, v in params_func_config.items():
+        if k == 'nodes':
+            continue
         irl_trainer_config[k] = v
     
     # start IRL training;
