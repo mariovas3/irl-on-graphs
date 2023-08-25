@@ -295,7 +295,7 @@ class SACAgentBase:
                     print(f"final eval with best policy")
                 # this is only for graph problems;
                 # mujoco should have vis_graph=False
-                r, _, code, ep_len, _, obs = self.buffer.get_single_ep_rewards_and_weights(
+                r, _, code, ep_len, _, obs, _ = self.buffer.get_single_ep_rewards_and_weights(
                     self.env,
                     self,
                 )
@@ -391,12 +391,12 @@ class SACAgentGraph(SACAgentBase):
             if not self.save_to.exists():
                 self.save_to.mkdir(parents=True)
 
-    def sample_action(self, obs, extra_graph_level_feats=None, get_graph_embeds=False):
+    def sample_action(self, obs, k_proposals: int=1, extra_graph_level_feats=None, get_graph_embeds=False):
         if get_graph_embeds:
             policy_dist, node_embeds, obs = self.policy(obs, extra_graph_level_feats, get_graph_embeds)
-            return policy_dist.sample(), node_embeds, obs
+            return policy_dist.sample(k_proposals), node_embeds, obs
         policy_dist, node_embeds = self.policy(obs, extra_graph_level_feats)
-        return policy_dist.sample(), node_embeds
+        return policy_dist.sample(k_proposals), node_embeds
 
     def sample_deterministic(self, obs, extra_graph_level_feats=None, get_graph_embeds=False):
         if get_graph_embeds:
@@ -590,7 +590,7 @@ class SACAgentGraph(SACAgentBase):
             )
 
             # sample paths with delta func policy;
-            r, _, code, ep_len, _, obs = self.buffer.get_single_ep_rewards_and_weights(
+            r, _, code, ep_len, _, obs, _ = self.buffer.get_single_ep_rewards_and_weights(
                 self.env,
                 self,
             )

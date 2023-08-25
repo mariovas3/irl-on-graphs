@@ -11,6 +11,26 @@ from graph_irl.buffer_v2 import GraphBuffer
 from torch_geometric.utils import barabasi_albert_graph
 
 
+def split_edge_index(edge_index, test_prop):
+    T = edge_index.shape[-1] // 2
+    idxs = np.random.choice(range(0, edge_index.shape[-1], 2), 
+                     size=max(int(T * test_prop), 3),
+                     replace=False)
+    test_idxs = set(
+        sum([
+            (i, i+1) for i in idxs
+        ], ())
+    )
+    msk = np.array(
+        [i in test_idxs for i in range(edge_index.shape[-1])]
+    )
+    train_edge_index = edge_index[:, ~msk]
+    positives_dict = {
+        (min(edge_index[:, i]).item(), max(edge_index[:, i]).item()): 0
+        for i in idxs
+    }
+    return train_edge_index, positives_dict
+
 
 def trig_circle_init(*args):
     n_nodes = args[0]
@@ -67,6 +87,7 @@ def get_params(
     fixed_temperature: Optional[int]=None,
     num_steps_to_sample=None,
     unnorm_policy=False,
+    forbid_self_loops_repeats=False,
 ):
     print(n_nodes, node_dim, nodes.shape, num_edges_expert)
     # some setup;
@@ -231,6 +252,7 @@ def get_params(
             state_reward=which_reward_fn == 'state_reward_fn',
             seed=seed,
             transform_=transform_,
+            forbid_self_loops_repeats=forbid_self_loops_repeats,
             drop_repeats_or_self_loops=True,
             graphs_per_batch=graphs_per_batch,
             action_is_index=action_is_index,
@@ -258,7 +280,7 @@ def get_params(
             calculate_reward=False,
             min_steps_to_do=3,
             similarity_func=sigmoid_similarity,
-            forbid_self_loops_repeats=False,
+            forbid_self_loops_repeats=forbid_self_loops_repeats,
         )
     )
 

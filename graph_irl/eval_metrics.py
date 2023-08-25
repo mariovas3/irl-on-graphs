@@ -79,7 +79,7 @@ def train_eval_new_policy(new_policy, num_epochs,
                               save_edge_index=save_edge_index,
                               vis_graph=vis_graph,
                               with_pos=with_pos)
-    _, _, code, _, _, obs = new_policy.buffer.get_single_ep_rewards_and_weights(
+    _, _, code, _, _, obs, _ = new_policy.buffer.get_single_ep_rewards_and_weights(
         new_policy.env,
         new_policy,
     )
@@ -90,7 +90,7 @@ def train_eval_new_policy(new_policy, num_epochs,
 def eval_irl_policy(irl_policy, env):
     old_env = irl_policy.env
     irl_policy.env = env
-    _, _, code, _, _, obs = irl_policy.buffer.get_single_ep_rewards_and_weights(
+    _, _, code, _, _, obs, _ = irl_policy.buffer.get_single_ep_rewards_and_weights(
         irl_policy.env,
         irl_policy,
     )
@@ -276,6 +276,7 @@ def plot_dists(file_name, groups, suptitle):
         sorted(groups.items(), key=lambda x: x[0])
     ):
         xlow, xhigh = min(metric) - .01, max(metric) + .01
+
         # get hist;
         plt.subplot(rows, cols, 2 * i + 1)
         ax = plt.gca()
@@ -331,3 +332,43 @@ def save_stats_edge_index(
     )
     with open(path / (prefix_name_of_stats + 'edgeidx.pkl'), 'wb') as f:
         pickle.dump(tgdata.edge_index.tolist(), f)
+
+
+def run_on_train_nodes_k_times(irl_agent, names_of_stats, k):
+    p = irl_agent.save_to
+    train_graph_gen_dir = p / 'train_graph_gen_dir'
+    if not train_graph_gen_dir.exists():
+        train_graph_gen_dir.mkdir(parents=True)
+    for i in range(k):
+        out_graph = eval_irl_policy(irl_agent, 
+                                        irl_agent.env)
+        # get graph stats;
+        stats = get_graph_stats(out_graph, sort=False)
+        save_graph_stats(
+            train_graph_gen_dir, names_of_stats, stats, 
+            prefix_name_of_stats=f"irlpolicy_{i}_"
+        )
+
+
+def get_mrr_and_avg(
+    irl_policy, env, positives_dict, num_runs=3, k_proposals=10
+):
+    rr_means = []
+    avg_found_rates = []
+    for j in range(num_runs):
+        positives_dict = {k: 0 for k in positives_dict.keys()}
+        _, _, code, steps_done, _, _, rrs = irl_policy.buffer.get_single_ep_rewards_and_weights(
+            env, 
+            irl_policy,
+            with_mrr=True,
+            with_auc=True,
+            positives_dict=positives_dict,
+            k_proposals=k_proposals,
+        )
+        rr_means.append(np.mean(rrs))
+        t = sum(positives_dict.values()) / len(positives_dict)
+        avg_found_rates.append(t)
+        print(f"from MRR EVAL, irl-policy did {steps_done} steps and code is {code}")
+    rr_stats = get_five_num_summary(rr_means)
+    found_rates_stats = get_five_num_summary(avg_found_rates)
+    return rr_stats, found_rates_stats

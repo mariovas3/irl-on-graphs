@@ -91,19 +91,21 @@ if __name__ == "__main__":
     np.random.seed(params_func_config['seed'])
     torch.manual_seed(params_func_config['seed'])
 
-    # init graphs now, not to mess up the seed if 
-    # experiments are with different NN architectures
-    # since diff layer sizes require different num of 
-    # random param inits;
-
     # init graph;
     nodes, expert_edge_index = create_circle_graph(n_nodes, node_dim, trig_circle_init)
     graph_source = Data(x=nodes, edge_index=expert_edge_index)
+
+    # Subsample the edge index and train IRL on it;
+    # the remaining subset is used for link prediction eval;
+    train_edge_index, positives_dict = split_edge_index(expert_edge_index, .1)
+    print("shape of train index and len of positives dict",
+            train_edge_index.shape, len(positives_dict))
+    
     # add the graph parameters;
     params_func_config['n_nodes'] = n_nodes
     params_func_config['node_dim'] = node_dim
     params_func_config['nodes'] = nodes
-    params_func_config['num_edges_expert'] = expert_edge_index.shape[-1] // 2
+    params_func_config['num_edges_expert'] = train_edge_index.shape[-1] // 2
     get_params_train = partial(get_params, **params_func_config)
     
     # get kwargs;
@@ -114,14 +116,14 @@ if __name__ == "__main__":
         **agent_kwargs,
         **config
     )
-
+    
     # init IRL trainer;
     irl_trainer = IRLGraphTrainer(
         reward_fn=reward_fn,
         reward_optim=torch.optim.Adam(reward_fn.parameters(), lr=1e-2),
         agent=agent,
         nodes=nodes,
-        expert_edge_index=expert_edge_index,
+        expert_edge_index=train_edge_index,
         **irl_trainer_config,
     )
 
@@ -163,41 +165,21 @@ if __name__ == "__main__":
         config=irl_trainer_config
     )
 
-    # get learned reward;
-    reward_fn = irl_trainer.reward_fn
-    reward_fn.eval()
-    agent_kwargs['save_to'] = None
+    # make env start from subsampled edge index and sample 
+    # remaining num of edges;
+    agent.env.expert_edge_index = train_edge_index
+    agent.env.num_edges_start_from = train_edge_index.shape[-1] // 2
+    num_expert_steps = expert_edge_index.shape[-1] // 2
+    agent.env.spec.max_episode_steps = num_expert_steps
+    agent.env.max_repeats = agent.env.max_self_loops = num_expert_steps
 
-    # run test suite 3 - gen similar graphs to source graph;
-    run_on_train_nodes_k_times(
-        irl_trainer.agent, names_of_stats, k=3
-    )
-    
-    # Run experiment suite 1. from GraphOpt paper;
-    # this compares graph stats like degrees, triangle, clust coef;
-    # from graphs made by 
-    # (1) training new policy with learned reward_fn on target graph;
-    # (2) deploying learned policy from IRL task directly on source graph;
-    save_graph_stats_k_runs_GO1(
-        irl_trainer.agent,
-        reward_fn, 
-        SACAgentGraph, 
-        num_epochs_new_policy=1,
-        target_graph=graph_source,
-        run_k_times=1,
-        new_policy_param_getter_fn=get_params_train,
-        sort_metrics=False,
-        euc_dist_idxs=torch.tensor([[0, 1]], dtype=torch.long),
-        save_edge_index=True,
-        vis_graph=False,
-        with_pos=True,
-        **agent_kwargs
-    )
-    
-    # currently prints summary stats of graph and saves plot of stats;
-    save_analysis_graph_stats(
-        irl_trainer.agent.save_to / 'target_graph_stats',
-        'graph_stats_hist_kde_plots.png',
-        suptitle=None,
-        verbose=False
-    )
+    mrr_stats, found_rate_stats = get_mrr_and_avg(agent, agent.env, positives_dict)
+    mrr_stats_dir = agent.save_to / 'mrr_stats'
+    if not mrr_stats_dir.exists():
+        mrr_stats_dir.mkdir()
+    with open(mrr_stats_dir / 'mrr_stats.pkl', 'wb') as f:
+        pickle.dump(mrr_stats, f)
+    with open(mrr_stats_dir / 'found_rates.pkl', 'wb') as f:
+        pickle.dump(found_rate_stats, f)
+    print("MRR stats:", mrr_stats, 
+          "found rates stats:", found_rate_stats, sep='\n')

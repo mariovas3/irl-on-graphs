@@ -16,7 +16,7 @@ class GaussInputDist:
     def log_prob(self, x):
         pass
 
-    def sample(self):
+    def sample(self, k_proposals: int=1):
         pass
 
     def rsample(self):
@@ -81,11 +81,11 @@ class GaussDist(GaussInputDist):
             return sigmas[:, :mid].squeeze(), sigmas[:, mid:].squeeze()
         return sigmas
 
-    def sample(self):
-        a = self.diag_gauss.sample()
+    def sample(self, k_proposals: int=1):
+        a = self.diag_gauss.sample((k_proposals, ))
         if self.two_action_vectors:
             mid = a.shape[-1] // 2
-            return a[:, :mid].squeeze(), a[:, mid:].squeeze()
+            return a[:, :, :mid].squeeze(), a[:, :, mid:].squeeze()
         return a
 
     def rsample(self):
@@ -120,8 +120,8 @@ class TwoStageGaussDist(GaussInputDist):
         diag_gauss2 = self._get_a2_dist(a1)
         return self.diag_gauss.log_prob(a1) + diag_gauss2.log_prob(a2)
 
-    def sample(self):
-        a1 = self.diag_gauss.sample()
+    def sample(self, k_proposals: int=1):
+        a1 = self.diag_gauss.sample((k_proposals, ))
         diag_gauss2 = self._get_a2_dist(a1)
         return a1.squeeze(), diag_gauss2.sample().squeeze()
 
@@ -131,7 +131,9 @@ class TwoStageGaussDist(GaussInputDist):
         return a1.squeeze(), diag_gauss2.rsample().squeeze()
 
     def _get_a2_dist(self, a1):
-        mus, sigmas = self.net(torch.cat((self.obs, a1), -1))
+        assert a1.ndim == self.obs.ndim + 1
+        obs = self.obs.expand(a1.shape[0], -1, -1)
+        mus, sigmas = self.net(torch.cat((obs, a1), -1))
         return dists.Normal(mus, sigmas)
 
     def _get_a2_dist_from_obs_a1(self, obs_a1):
@@ -202,18 +204,20 @@ class TanhGauss(GaussInputDist):
         tanh_term = (1.0 - torch.tanh(x) ** 2).log()
         return self.diag_gauss.log_prob(x) - tanh_term
 
-    def sample(self):
-        a = torch.tanh(self.diag_gauss.sample())
+    def sample(self, k_proposals: int=1):
+        a = torch.tanh(self.diag_gauss.sample((k_proposals, )))
         if self.two_action_vectors:
             mid = a.shape[-1] // 2
-            return a[:, :mid].squeeze(), a[:, mid:].squeeze()
+            return a[:, :, :mid].squeeze(), a[:, :, mid:].squeeze()
         return a
 
-    def rsample(self):
-        a = torch.tanh(self.diag_gauss.rsample())
+    def rsample(self, k_proposals: int=1):
+        # a is 3 dim tensor now;
+        a = torch.tanh(self.diag_gauss.rsample((k_proposals, )))
         if self.two_action_vectors:
             mid = a.shape[-1] // 2
-            return a[:, :mid].squeeze(), a[:, mid:].squeeze()
+            # in default case, should return 2 1d tensors; 
+            return a[:, :, :mid].squeeze(), a[:, :, mid:].squeeze()
         return a
 
     def get_UT_trick_input(self):
