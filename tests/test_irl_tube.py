@@ -143,7 +143,7 @@ if __name__ == "__main__":
         pickle.dump(graph_target.edge_index.tolist(), f)
     
     # extra info to save in pkl after training is done;
-    irl_trainer_config['irl_iters'] = 8
+    irl_trainer_config['irl_iters'] = 16
     irl_trainer_config['policy_epochs'] = 1
     irl_trainer_config['vis_graph'] = False
     irl_trainer_config['save_edge_index'] = True
@@ -198,7 +198,7 @@ if __name__ == "__main__":
         irl_trainer.agent,
         reward_fn, 
         SACAgentGraph, 
-        num_epochs_new_policy=5,
+        num_epochs_new_policy=7,
         target_graph=graph_target,
         run_k_times=3,
         new_policy_param_getter_fn=get_params_eval,
