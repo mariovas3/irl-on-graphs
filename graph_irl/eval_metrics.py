@@ -372,3 +372,30 @@ def get_mrr_and_avg(
     rr_stats = get_five_num_summary(rr_means)
     found_rates_stats = get_five_num_summary(avg_found_rates)
     return rr_stats, found_rates_stats
+
+
+def save_mrr_and_avg(
+    agent, train_edge_index, positives_dict, graph_source,
+    k_proposals=10,
+):
+    # make env start from subsampled edge index and sample 
+    # remaining num of edges;
+    agent.env.expert_edge_index = train_edge_index
+    agent.env.num_edges_start_from = train_edge_index.shape[-1] // 2
+    num_expert_steps = graph_source.edge_index.shape[-1] // 2
+    agent.env.spec.max_episode_steps = num_expert_steps
+    agent.env.num_expert_steps = num_expert_steps
+    agent.env.max_repeats = agent.env.max_self_loops = num_expert_steps
+
+    mrr_stats, found_rate_stats = get_mrr_and_avg(
+        agent, agent.env, positives_dict, k_proposals=k_proposals
+    )
+    mrr_stats_dir = agent.save_to / 'mrr_stats'
+    if not mrr_stats_dir.exists():
+        mrr_stats_dir.mkdir()
+    with open(mrr_stats_dir / 'mrr_stats.pkl', 'wb') as f:
+        pickle.dump(mrr_stats, f)
+    with open(mrr_stats_dir / 'found_rates.pkl', 'wb') as f:
+        pickle.dump(found_rate_stats, f)
+    print("MRR stats:", mrr_stats, 
+          "found rates stats:", found_rate_stats, sep='\n')

@@ -141,22 +141,7 @@ if __name__ == "__main__":
         config=irl_trainer_config
     )
 
-    # make env start from subsampled edge index and sample 
-    # remaining num of edges;
-    agent.env.expert_edge_index = train_edge_index
-    agent.env.num_edges_start_from = train_edge_index.shape[-1] // 2
-    num_expert_steps = expert_edge_index.shape[-1] // 2
-    agent.env.num_expert_steps = num_expert_steps
-    agent.env.spec.max_episode_steps = num_expert_steps
-    agent.env.max_repeats = agent.env.max_self_loops = num_expert_steps
-
-    mrr_stats, found_rate_stats = get_mrr_and_avg(agent, agent.env, positives_dict)
-    mrr_stats_dir = agent.save_to / 'mrr_stats'
-    if not mrr_stats_dir.exists():
-        mrr_stats_dir.mkdir()
-    with open(mrr_stats_dir / 'mrr_stats.pkl', 'wb') as f:
-        pickle.dump(mrr_stats, f)
-    with open(mrr_stats_dir / 'found_rates.pkl', 'wb') as f:
-        pickle.dump(found_rate_stats, f)
-    print("MRR stats:", mrr_stats, 
-          "found rates stats:", found_rate_stats, sep='\n')
+    save_mrr_and_avg(
+        agent, train_edge_index, positives_dict, graph_source,
+        k_proposals=25,
+    )
