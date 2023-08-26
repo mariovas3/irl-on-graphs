@@ -24,7 +24,7 @@ import torch
 
 
 # circular graph with 7 nodes;
-n_nodes, node_dim = 20, 2
+n_nodes, node_dim = 15, 2
 num_edges_expert = n_nodes
 
 # graph transform setup;
@@ -53,6 +53,7 @@ transform_ = InplaceBatchNodeFeatTransform(
 params_func_config['n_cols_append'] = n_cols_append
 params_func_config['n_extra_cols_append'] = n_extra_cols_append
 params_func_config['transform_'] = transform_
+params_func_config['multitask_coef'] = 1e-1
 
 
 if __name__ == "__main__":
@@ -92,7 +93,7 @@ if __name__ == "__main__":
     # init IRL trainer;
     irl_trainer = IRLGraphTrainer(
         reward_fn=reward_fn,
-        reward_optim=torch.optim.Adam(reward_fn.parameters(), lr=1e-3),
+        reward_optim=torch.optim.Adam(reward_fn.parameters(), lr=1e-2),
         agent=agent,
         nodes=nodes,
         expert_edge_index=expert_edge_index,
@@ -111,7 +112,7 @@ if __name__ == "__main__":
     )
     
     irl_trainer_config['multitask_gnn'] = agent_kwargs['multitask_net'] is not None
-    irl_trainer_config['irl_iters'] = 10
+    irl_trainer_config['irl_iters'] = 20
     irl_trainer_config['policy_epochs'] = 1
     irl_trainer_config['vis_graph'] = False
     irl_trainer_config['save_edge_index'] = True
@@ -140,41 +141,41 @@ if __name__ == "__main__":
         config=irl_trainer_config
     )
 
-    # get learned reward;
-    reward_fn = irl_trainer.reward_fn
-    reward_fn.eval()
-    agent_kwargs['save_to'] = None
+    # # get learned reward;
+    # reward_fn = irl_trainer.reward_fn
+    # reward_fn.eval()
+    # agent_kwargs['save_to'] = None
 
-    # run test suite 3 - gen similar graphs to source graph;
-    run_on_train_nodes_k_times(
-        irl_trainer.agent, names_of_stats, k=3
-    )
-    
-    # Run experiment suite 1. from GraphOpt paper;
-    # this compares graph stats like degrees, triangle, clust coef;
-    # from graphs made by 
-    # (1) training new policy with learned reward_fn on target graph;
-    # (2) deploying learned policy from IRL task directly on source graph;
-    save_graph_stats_k_runs_GO1(
-        irl_trainer.agent,
-        reward_fn, 
-        SACAgentGraph, 
-        num_epochs_new_policy=3,
-        target_graph=graph_source,
-        run_k_times=3,
-        new_policy_param_getter_fn=get_params_train,
-        sort_metrics=False,
-        euc_dist_idxs=torch.tensor([[0, 1]], dtype=torch.long),
-        save_edge_index=True,
-        vis_graph=False,
-        with_pos=True,
-        **agent_kwargs
-    )
-    
-    # currently prints summary stats of graph and saves plot of stats;
-    save_analysis_graph_stats(
-        irl_trainer.agent.save_to / 'target_graph_stats',
-        'graph_stats_hist_kde_plots.png',
-        suptitle=None,
-        verbose=False
-    )
+    # # run test suite 3 - gen similar graphs to source graph;
+    # run_on_train_nodes_k_times(
+    #     irl_trainer.agent, names_of_stats, k=3
+    # )
+    # 
+    # # Run experiment suite 1. from GraphOpt paper;
+    # # this compares graph stats like degrees, triangle, clust coef;
+    # # from graphs made by 
+    # # (1) training new policy with learned reward_fn on target graph;
+    # # (2) deploying learned policy from IRL task directly on source graph;
+    # save_graph_stats_k_runs_GO1(
+    #     irl_trainer.agent,
+    #     reward_fn, 
+    #     SACAgentGraph, 
+    #     num_epochs_new_policy=3,
+    #     target_graph=graph_source,
+    #     run_k_times=3,
+    #     new_policy_param_getter_fn=get_params_train,
+    #     sort_metrics=False,
+    #     euc_dist_idxs=torch.tensor([[0, 1]], dtype=torch.long),
+    #     save_edge_index=True,
+    #     vis_graph=False,
+    #     with_pos=True,
+    #     **agent_kwargs
+    # )
+    # 
+    # # currently prints summary stats of graph and saves plot of stats;
+    # save_analysis_graph_stats(
+    #     irl_trainer.agent.save_to / 'target_graph_stats',
+    #     'graph_stats_hist_kde_plots.png',
+    #     suptitle=None,
+    #     verbose=False
+    # )

@@ -84,6 +84,8 @@ params_func_config = dict(
     num_steps_to_sample=None,
     unnorm_policy=False,
     with_multitask_gnn_loss=False,
+    multitask_coef=1.,
+    max_size=10_000,
 )
 
 
@@ -119,6 +121,8 @@ def get_params(
     num_steps_to_sample=None,
     unnorm_policy=False,
     with_multitask_gnn_loss=False,
+    multitask_coef=1.,
+    max_size=10_000,
 ):
     # if we do multitask loss for gnn, make sure nothing gets
     # appended to the graph level embedding for now;
@@ -141,7 +145,13 @@ def get_params(
 
     multitask_net = None
     if with_multitask_gnn_loss:
-        multitask_net = nn.Linear(embed_dim, 1)
+        multitask_net = nn.Sequential(
+                nn.Linear(embed_dim, embed_dim),
+                nn.ReLU(),
+                nn.Linear(embed_dim, embed_dim),
+                nn.ReLU(),
+                nn.Linear(embed_dim, 1)
+                )
 
     encoder_dict = dict(
         encoder = GCN(node_dim + n_cols_append, encoder_hiddens, 
@@ -270,6 +280,7 @@ def get_params(
         UT_trick=UT_trick,
         with_entropy=False,
         multitask_net=multitask_net,
+        multitask_coef=multitask_coef,
     )
 
     config = dict(
@@ -288,7 +299,7 @@ def get_params(
         Q2t_kwargs=Q2t_kwargs,
         policy_kwargs=policy_kwargs[which_policy_kwargs],
         buffer_kwargs=dict(
-            max_size=100_000,
+            max_size=max_size,
             nodes=nodes,
             state_reward=which_reward_fn == 'state_reward_fn',
             seed=seed,

@@ -166,6 +166,7 @@ class IRLGraphTrainer:
         if self.agent.multitask_net is not None:
             self.agent.optim_multitask_net.zero_grad()
             mtt_loss = tot_mse1 * (tot_len1 / (tot_len1 + tot_len2)) + tot_mse2 * (tot_len2 / (tot_len1 + tot_len2))
+            mtt_loss = self.agent.multitask_coef * mtt_loss
             print(f"multitask gnn loss: {mtt_loss.item()}")
             mtt_loss.backward()
 
@@ -194,9 +195,9 @@ class IRLGraphTrainer:
         # do grad step;
         self.reward_optim.step()
 
-        # see if multitask gnn training is on;
-        if self.agent.multitask_net is not None:
-            self.agent.optim_multitask_net.step()
+        # # see if multitask gnn training is on;
+        #if self.agent.multitask_net is not None:
+        #    self.agent.optim_multitask_net.step()
 
         # see if lr scheduler present;
         if self.reward_optim_lr_scheduler is not None:
@@ -394,11 +395,12 @@ class IRLGraphTrainer:
             N += 1
 
             # update stuff for multitask;
-            tot_mse = (
-                tot_mse * (tot_len / (tot_len + temp_len))
-                + temp_mse * (temp_len / (tot_len + temp_len))
-            )
-            tot_len += temp_len
+            if self.agent.multitask_net is not None:
+                tot_mse = (
+                    tot_mse * (tot_len / (tot_len + temp_len))
+                    + temp_mse * (temp_len / (tot_len + temp_len))
+                )
+                tot_len += temp_len
 
             # update returns;
             avg = avg + (R - avg) / N

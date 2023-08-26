@@ -253,8 +253,11 @@ class GraphBuffer(BufferBase):
             else:
                 extra_graph_level_feats = None
             # return (rewards, [graph_embeds]), targets
-            return reward_fn(batch, extra_graph_level_feats, 
-                             get_graph_embeds=get_graph_embeds), tgnn.global_add_pool(batch.x[:, -1], batch.batch)
+            temp =  reward_fn(batch, extra_graph_level_feats, 
+                             get_graph_embeds=get_graph_embeds)
+            if get_graph_embeds:
+                return temp, tgnn.global_add_pool(batch.x[:, -1], batch.batch)
+            return temp
         batch = Batch.from_data_list(batch_list)
         if extra_graph_level_feats_list:
                 extra_graph_level_feats = torch.cat(extra_graph_level_feats_list, 0)
@@ -262,12 +265,15 @@ class GraphBuffer(BufferBase):
             extra_graph_level_feats = None
         assert len(batch_list) == len(actions)
         # return (rewards, [graph_embeds]), targets
-        return reward_fn(
+        temp = reward_fn(
             (batch, actions), 
             extra_graph_level_feats,
             action_is_index=self.action_is_index,
             get_graph_embeds=get_graph_embeds
-        ), tgnn.global_add_pool(batch.x[:, -1], batch.batch)
+        )
+        if get_graph_embeds:
+            return temp, tgnn.global_add_pool(batch.x[:, -1], batch.batch)
+        return temp
     
     def get_log_probs_and_dists(
             self, batch_list, actions, agent, 

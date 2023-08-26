@@ -116,7 +116,13 @@ def save_metric_plots(metric_names, metrics, path, seed, suptitle=None):
         plt.subplot(rows, cols, i + 1)
         ax = plt.gca()
         ax.plot(metric)
-        ylow, yhigh = np.min(metric), np.max(metric)
+        try:
+            ylow, yhigh = np.min(metric), np.max(metric)
+        except:
+            print(f"problem with {metric_name}\n",
+                    metric)
+            if "gnn" not in metric_name:
+                raise
         yoffset = max((yhigh - ylow) / 10, .1)
         xlow, xhigh = 0, len(metric) + 5
         ax.set_ylim(ylow, yhigh)

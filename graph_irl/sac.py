@@ -360,6 +360,7 @@ class SACAgentGraph(SACAgentBase):
         UT_trick=False,
         with_entropy=False,
         multitask_net=None,
+        multitask_coef=1.,
         **kwargs,
     ):
         super(SACAgentGraph, self).__init__(
@@ -384,6 +385,7 @@ class SACAgentGraph(SACAgentBase):
         self.UT_trick = UT_trick
         self.with_entropy = with_entropy
         self.multitask_net = multitask_net
+        self.multitask_coef = multitask_coef
 
         if multitask_net is not None:
             self.optim_multitask_net = torch.optim.Adam(
@@ -464,17 +466,17 @@ class SACAgentGraph(SACAgentBase):
     def get_multitask_loss_from_graph_lvl(
             self, graph_lvl_embeds, targets
     ):
-        self.gnn_policy_loss = nn.MSELoss()(
+        self.gnn_policy_loss = self.multitask_coef * nn.MSELoss()(
             self.multitask_net(graph_lvl_embeds[0]).view(-1), 
             targets.view(-1)
         )
         self.gnn_policy_losses.append(self.gnn_policy_loss.item())
-        self.gnn_q1_loss = nn.MSELoss()(
+        self.gnn_q1_loss = self.multitask_coef * nn.MSELoss()(
             self.multitask_net(graph_lvl_embeds[1]).view(-1), 
             targets.view(-1)
         )
         self.gnn_q1_losses.append(self.gnn_q1_loss.item())
-        self.gnn_q2_loss = nn.MSELoss()(
+        self.gnn_q2_loss = self.multitask_coef * nn.MSELoss()(
             self.multitask_net(graph_lvl_embeds[2]).view(-1), 
             targets.view(-1)
         )
