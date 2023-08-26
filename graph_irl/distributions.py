@@ -190,6 +190,9 @@ class TanhGauss(GaussInputDist):
     def get_unnorm_log_prob(self, *tanh_domain_x):
         if self.two_action_vectors:
             tanh_domain_x = torch.cat(tanh_domain_x, -1)
+        tanh_domain_x = torch.clamp(
+            tanh_domain_x, -.99999, .99999
+        )
         gauss_domain_x = self._tanh_var_to_gauss_var(tanh_domain_x)
         tanh_term = (1. - torch.tanh(gauss_domain_x) ** 2).log()
         unnormed_gausses = GaussInputDist.unnorm_log_prob(

@@ -83,6 +83,7 @@ params_func_config = dict(
     fixed_temperature=None,
     num_steps_to_sample=None,
     unnorm_policy=False,
+    with_multitask_gnn_loss=False,
 )
 
 
@@ -117,7 +118,13 @@ def get_params(
     fixed_temperature: Optional[int]=None,
     num_steps_to_sample=None,
     unnorm_policy=False,
+    with_multitask_gnn_loss=False,
 ):
+    # if we do multitask loss for gnn, make sure nothing gets
+    # appended to the graph level embedding for now;
+    if with_multitask_gnn_loss:
+        assert n_extra_cols_append == 0 or n_extra_cols_append is None
+        assert n_cols_append > 0
     print(n_nodes, node_dim, nodes.shape, num_edges_expert)
     # some setup;
     if num_steps_to_sample is None:
@@ -131,6 +138,10 @@ def get_params(
     which_reward_fn = 'state_reward_fn'
     which_policy_kwargs = 'tanh_gauss_policy_kwargs'
     action_dim = embed_dim * 2
+
+    multitask_net = None
+    if with_multitask_gnn_loss:
+        multitask_net = nn.Linear(embed_dim, 1)
 
     encoder_dict = dict(
         encoder = GCN(node_dim + n_cols_append, encoder_hiddens, 
@@ -258,6 +269,7 @@ def get_params(
         fixed_temperature=fixed_temperature,
         UT_trick=UT_trick,
         with_entropy=False,
+        multitask_net=multitask_net,
     )
 
     config = dict(
@@ -325,7 +337,7 @@ def get_params(
         unnorm_policy=config['buffer_kwargs']['unnorm_policy'],
         add_expert_to_generated=False,
         lcr_regularisation_coef=num_edges_expert - config['env_kwargs']['num_edges_start_from'],
-        mono_regularisation_on_demo_coef=num_edges_expert - config['env_kwargs']['num_edges_start_from'],
+        mono_regularisation_on_demo_coef=0,#num_edges_expert - config['env_kwargs']['num_edges_start_from'],
         verbose=True,
         do_dfs_expert_paths=do_dfs_expert_paths,
         num_reward_grad_steps=1,

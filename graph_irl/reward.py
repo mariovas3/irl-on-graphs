@@ -49,7 +49,8 @@ class GraphReward(nn.Module):
             self, 
             obs_action, 
             extra_graph_level_feats=None, 
-            action_is_index=False
+            action_is_index=False,
+            get_graph_embeds=False,
     ):
         batch, actions = obs_action
         obs, node_embeds = self.encoder(batch, extra_graph_level_feats)
@@ -66,6 +67,8 @@ class GraphReward(nn.Module):
         #     actions = torch.cat(actions, -1)
         obs_action = torch.cat((obs, actions), -1)
         # return the negative of the cost -> reward;
+        if get_graph_embeds:
+            return -self.net(obs_action), obs
         return -self.net(obs_action)
 
 
@@ -111,7 +114,10 @@ class StateGraphReward(nn.Module):
     def verbose(self):
         pass
     
-    def forward(self, graph_batch, extra_graph_level_feats=None):
+    def forward(self, graph_batch, extra_graph_level_feats=None,
+                get_graph_embeds=False):
         obs, _ = self.encoder(graph_batch, extra_graph_level_feats)
         # return the negative of the cost -> reward;
+        if get_graph_embeds:
+            return -self.net(obs), obs
         return - self.net(obs)

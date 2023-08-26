@@ -306,7 +306,8 @@ class Qfunc(nn.Module):
             self, 
             obs_action, 
             extra_graph_level_feats=None, 
-            action_is_index=False
+            action_is_index=False,
+            return_graph_lvl=False,
     ):
         """
         If self.encoder is not None, then obs_action is (batch, actions).
@@ -331,6 +332,8 @@ class Qfunc(nn.Module):
             # else:
                 # actions = torch.cat(actions, -1)
             obs_action = torch.cat((obs, actions), -1)
+        if return_graph_lvl:
+            return self.net(obs_action), obs
         return self.net(obs_action)
 
 

@@ -92,7 +92,7 @@ if __name__ == "__main__":
     # init IRL trainer;
     irl_trainer = IRLGraphTrainer(
         reward_fn=reward_fn,
-        reward_optim=torch.optim.Adam(reward_fn.parameters(), lr=1e-2),
+        reward_optim=torch.optim.Adam(reward_fn.parameters(), lr=1e-3),
         agent=agent,
         nodes=nodes,
         expert_edge_index=expert_edge_index,
@@ -110,7 +110,8 @@ if __name__ == "__main__":
         agent.save_to, names_of_stats, graph_source, 'sourcegraph_'
     )
     
-    irl_trainer_config['irl_iters'] = 1
+    irl_trainer_config['multitask_gnn'] = agent_kwargs['multitask_net'] is not None
+    irl_trainer_config['irl_iters'] = 10
     irl_trainer_config['policy_epochs'] = 1
     irl_trainer_config['vis_graph'] = False
     irl_trainer_config['save_edge_index'] = True
@@ -122,7 +123,7 @@ if __name__ == "__main__":
     irl_trainer_config['discount']=agent_kwargs['discount']
     irl_trainer_config['fixed_temperature'] = agent_kwargs['fixed_temperature']
     for k, v in params_func_config.items():
-        if k == 'nodes':
+        if k in ('nodes', 'transform_'):
             continue
         irl_trainer_config[k] = v
     
@@ -158,9 +159,9 @@ if __name__ == "__main__":
         irl_trainer.agent,
         reward_fn, 
         SACAgentGraph, 
-        num_epochs_new_policy=1,
+        num_epochs_new_policy=3,
         target_graph=graph_source,
-        run_k_times=1,
+        run_k_times=3,
         new_policy_param_getter_fn=get_params_train,
         sort_metrics=False,
         euc_dist_idxs=torch.tensor([[0, 1]], dtype=torch.long),

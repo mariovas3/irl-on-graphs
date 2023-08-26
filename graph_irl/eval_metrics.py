@@ -79,7 +79,7 @@ def train_eval_new_policy(new_policy, num_epochs,
                               save_edge_index=save_edge_index,
                               vis_graph=vis_graph,
                               with_pos=with_pos)
-    _, _, code, _, _, obs, _, rewards = new_policy.buffer.get_single_ep_rewards_and_weights(
+    _, _, code, _, _, obs, _, rewards, _ = new_policy.buffer.get_single_ep_rewards_and_weights(
         new_policy.env,
         new_policy,
     )
@@ -90,7 +90,7 @@ def train_eval_new_policy(new_policy, num_epochs,
 def eval_irl_policy(irl_policy, env):
     old_env = irl_policy.env
     irl_policy.env = env
-    _, _, code, _, _, obs, _, rewards = irl_policy.buffer.get_single_ep_rewards_and_weights(
+    _, _, code, _, _, obs, _, rewards, _ = irl_policy.buffer.get_single_ep_rewards_and_weights(
         irl_policy.env,
         irl_policy,
     )
@@ -368,7 +368,7 @@ def get_mrr_and_avg(
     avg_found_rates = []
     for j in range(num_runs):
         positives_dict = {k: 0 for k in positives_dict.keys()}
-        _, _, code, steps_done, _, _, rrs, _ = irl_policy.buffer.get_single_ep_rewards_and_weights(
+        _, _, code, steps_done, _, _, rrs, _, _ = irl_policy.buffer.get_single_ep_rewards_and_weights(
             env, 
             irl_policy,
             with_mrr=True,

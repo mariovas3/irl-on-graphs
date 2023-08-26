@@ -3,6 +3,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from torch_geometric.data import Data, Batch
+import torch_geometric.nn as tgnn
 
 import matplotlib.pyplot as plt
 from networkx import Graph, draw_networkx
@@ -10,6 +11,7 @@ from networkx import Graph, draw_networkx
 from graph_irl.graph_rl_utils import *
 
 from typing import Tuple
+from itertools import chain
 import warnings
 from tqdm import tqdm
 
@@ -120,7 +122,7 @@ class IRLGraphTrainer:
         mono_loss, lcr_loss1 = 0.0, 0.0
 
         # get avg(expert_returns)
-        expert_avg_returns, expert_rewards = self.get_avg_expert_returns()
+        expert_avg_returns, expert_rewards, tot_mse1, tot_len1  = self.get_avg_expert_returns()
         assert expert_rewards.requires_grad
         
         # get rewards for half trajectories;
@@ -147,7 +149,7 @@ class IRLGraphTrainer:
             lcr_loss1 = self._get_lcr_loss(expert_rewards)
 
         # get imp_sampled generated returns with stop grad on the weights;
-        imp_sampled_gen_rewards, lcr_loss2 = self.get_avg_generated_returns()
+        imp_sampled_gen_rewards, lcr_loss2, tot_mse2, tot_len2 = self.get_avg_generated_returns()
 
         # get loss;
         loss = (
@@ -158,7 +160,14 @@ class IRLGraphTrainer:
         )
 
         # get grads;
-        loss.backward()
+        loss.backward(retain_graph=self.agent.multitask_net is not None)
+
+        # multitask loss;
+        if self.agent.multitask_net is not None:
+            self.agent.optim_multitask_net.zero_grad()
+            mtt_loss = tot_mse1 * (tot_len1 / (tot_len1 + tot_len2)) + tot_mse2 * (tot_len2 / (tot_len1 + tot_len2))
+            print(f"multitask gnn loss: {mtt_loss.item()}")
+            mtt_loss.backward()
 
         print(f"expert avg rewards: {expert_avg_returns.item()}")
         print(f"imp sampled rewards: {imp_sampled_gen_rewards.item()}")
@@ -184,6 +193,10 @@ class IRLGraphTrainer:
 
         # do grad step;
         self.reward_optim.step()
+
+        # see if multitask gnn training is on;
+        if self.agent.multitask_net is not None:
+            self.agent.optim_multitask_net.step()
 
         # see if lr scheduler present;
         if self.reward_optim_lr_scheduler is not None:
@@ -214,6 +227,12 @@ class IRLGraphTrainer:
         
         # avg lcr reularisation over episodes;
         avg_lcr_reg_term, n_episodes = 0.0, 0
+        flag = True
+        curr_buffer_verbose = self.agent.buffer.verbose
+        curr_irl_verbose = self.verbose
+
+        # this is for gnn multitask;
+        tot_mse, tot_len = 0., 0
 
         while n_steps_done < n_steps_to_sample:
             (
@@ -224,18 +243,26 @@ class IRLGraphTrainer:
                 lcr_reg_term,
                 obs,
                 _,
-                _
+                _,
+                temp_mse
             ) = self.agent.buffer.get_single_ep_rewards_and_weights(
                 self.agent.env,
                 self.agent,
             )
+            assert steps == len(r)
+            tot_mse = (
+                tot_mse * (tot_len / (tot_len + steps))
+                + temp_mse * (steps / (tot_len + steps))
+            )
+            tot_len += steps
+            
             assert len(log_w) == len(r)
             assert len(log_w) >= self.agent.env.min_steps_to_do
             assert r.requires_grad and not log_w.requires_grad
             if self.verbose:
-                print(f"per dec sampled return: {r.detach().sum()}")
-                print(f"cumsum log weights range: {log_w.min().item()}, "
-                      f"{log_w.max().item()}")
+                print(f"single ep per dec sampled return: {r.detach().sum()}")
+                print(f"single ep cumsum log weights range: {log_w.min().item()}, "
+                      f"{log_w.max().item()}\n")
 
             # update avg lcr_reg_term;
             n_episodes += 1
@@ -249,19 +276,26 @@ class IRLGraphTrainer:
             # increment steps;
             n_steps_done += steps
 
+            if flag:
+                # stop printing after first sampled path;
+                self.agent.buffer.verbose = False
+                self.verbose = False
+                flag = False
         # stack rewards and get weights;
         rewards = torch.stack(rewards)
         weights, longest = self.weight_processor.get_weights()
 
         if self.lcr_regularisation_coef is not None:
             avg_lcr_reg_term = self._get_lcr_loss(rewards[:, :longest])
-        
+
+        self.verbose = curr_irl_verbose
         if self.verbose:
-            print("actual weights per dec", weights[:, :longest], sep='\n')
-            print("sampled rewards shape ", rewards.shape)
-            # print(f"effective steps: {longest * len(log_weights)}")
-        
-        return (weights[:, :longest] * rewards[:, :longest]).sum(), avg_lcr_reg_term
+            # print("actual weights per dec", weights[:, :longest], sep='\n')
+            print("sampled rewards shape ", rewards.shape, end='\n\n')
+
+        # set back to old value of verbose
+        self.agent.buffer.verbose = curr_buffer_verbose
+        return (weights[:, :longest] * rewards[:, :longest]).sum(), avg_lcr_reg_term, tot_mse, tot_len
 
     def _get_vanilla_imp_sampled_returns(self):
         assert not self.per_decision_imp_sample
@@ -270,6 +304,11 @@ class IRLGraphTrainer:
         n_steps_done = 0
         returns = []
         avg_lcr_reg_term, n_episodes = 0.0, 0
+        flag = True
+        curr_buffer_verbose = self.agent.buffer.verbose
+        curr_irl_verbose = self.verbose
+
+        tot_mse, tot_len = 0., 0
 
         # sample steps;
         while n_steps_done < n_steps_to_sample:
@@ -281,14 +320,23 @@ class IRLGraphTrainer:
                 lcr_reg_term,
                 obs,
                 _,
-                _
+                _,
+                temp_mse
             ) = self.agent.buffer.get_single_ep_rewards_and_weights(
                 self.agent.env,
                 self.agent,
             )
+
+            # this is for multitask training;
+            tot_mse = (
+                tot_mse * (tot_len / (tot_len + steps))
+                + temp_mse * (steps / (tot_len + steps))
+            )
+            tot_len += steps
+
             assert r.requires_grad and not log_w.requires_grad
             if self.verbose:
-                print(f"sampled undiscounted return: {r.item()}")
+                print(f"single ep sampled undiscounted return: {r.item()}\n")
             
             # update avg_lcr_reg_term;
             n_episodes += 1
@@ -304,12 +352,18 @@ class IRLGraphTrainer:
             # house keeping;
             n_steps_done += steps
         
+            if flag:
+                self.agent.buffer.verbose = False
+                self.verbose = False
+                flag = False
         # stack returns and get weights;
         returns = torch.stack(returns)
         weights = self.weight_processor.get_weights()
-        if self.verbose:
-            print("actual weights vanilla", weights, sep='\n')
-        return returns @ weights, avg_lcr_reg_term
+        self.agent.buffer.verbose = curr_buffer_verbose
+        self.verbose = curr_irl_verbose
+        # if self.verbose:
+            # print("actual weights vanilla", weights, sep='\n')
+        return returns @ weights, avg_lcr_reg_term, tot_mse, tot_len
 
     def get_avg_expert_returns(self) -> Tuple[float, torch.Tensor]:
         """
@@ -323,18 +377,34 @@ class IRLGraphTrainer:
         avg = 0.0
         N = 0
         cached_expert_rewards = []
+        flag = True
+        curr_irl_verbose = self.verbose
+        tot_mse, tot_len = 0., 0
         for _ in range(self.num_expert_traj):
             if self.do_dfs_expert_paths:
                 source = np.random.randint(0, len(self.nodes))
-                R, rewards = self._get_single_ep_dfs_return(source)
+                R, rewards, temp_mse, temp_len = self._get_single_ep_dfs_return(source)
             else:
-                R, rewards = self._get_single_ep_expert_return()
+                R, rewards, temp_mse, temp_len = self._get_single_ep_expert_return()
             if self.verbose:
-                print(f"expert return: {R}")
+                print(f"single ep expert return: {R}")
+            if flag:
+                self.verbose = False
+                flag = False
             N += 1
+
+            # update stuff for multitask;
+            tot_mse = (
+                tot_mse * (tot_len / (tot_len + temp_len))
+                + temp_mse * (temp_len / (tot_len + temp_len))
+            )
+            tot_len += temp_len
+
+            # update returns;
             avg = avg + (R - avg) / N
             cached_expert_rewards.append(rewards)
-        return avg, torch.stack(cached_expert_rewards)
+        self.verbose = curr_irl_verbose
+        return avg, torch.stack(cached_expert_rewards), tot_mse, tot_len
 
     def _get_single_ep_expert_return(self) -> Tuple[float, torch.Tensor]:
         """
@@ -365,6 +435,10 @@ class IRLGraphTrainer:
         pointer = 0
         return_val = 0.0
         cached_rewards = []
+
+        # see if should do multitask gnn training;
+        mtt = self.agent.multitask_net is not None
+        temp_mse, temp_len = 0., 0
         # the * 2 multiplier is because undirected graph is assumed
         # and effectively each edge is duplicated in edge_index;
         while (
@@ -415,13 +489,28 @@ class IRLGraphTrainer:
             if self.agent.buffer.state_reward:
                 curr_rewards = self.reward_fn(
                     batch, extra_graph_level_feats,
-                ).view(-1) * self.reward_scale
+                    get_graph_embeds=mtt,
+                )
             else:
                 curr_rewards = self.reward_fn(
                     (batch, torch.tensor(action_idxs)), 
                     extra_graph_level_feats,
                     action_is_index=True
-                ).view(-1) * self.reward_scale
+                )
+            # see if should do multitask;
+            if mtt:
+                targets = tgnn.global_add_pool(batch.x[:, -1], batch.batch)
+                curr_rewards, graph_embeds = curr_rewards
+                outs = self.agent.multitask_net(graph_embeds)
+                curr_length = len(curr_rewards.view(-1))
+                temp_mse = (
+                    temp_mse * (temp_len / (temp_len + curr_length))
+                    + nn.MSELoss()(
+                        outs.view(-1), targets.view(-1)
+                    ) * (curr_length / (temp_len + curr_length))
+                )
+                temp_len += curr_length
+            curr_rewards = curr_rewards.view(-1) * self.reward_scale
             return_val += curr_rewards.sum()
             cached_rewards.append(curr_rewards)
         
@@ -434,7 +523,7 @@ class IRLGraphTrainer:
             plt.savefig('expert_example.png')
             plt.close()
             DO_PLOT = False
-        return return_val, torch.cat(cached_rewards)
+        return return_val, torch.cat(cached_rewards), temp_mse, temp_len
 
     def train_irl(self, num_iters, policy_epochs, **kwargs):
         buffer_verbose = self.agent.buffer.verbose

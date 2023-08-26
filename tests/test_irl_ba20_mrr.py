@@ -104,6 +104,7 @@ if __name__ == "__main__":
     )
     
     # extra info to save in pkl after training is done;
+    irl_trainer_config['multitask_gnn'] = agent_kwargs['multitask_net'] is not None
     irl_trainer_config['irl_iters'] = 1
     irl_trainer_config['policy_epochs'] = 1
     irl_trainer_config['vis_graph'] = False
@@ -116,7 +117,7 @@ if __name__ == "__main__":
     irl_trainer_config['discount']=agent_kwargs['discount']
     irl_trainer_config['fixed_temperature'] = agent_kwargs['fixed_temperature']
     for k, v in params_func_config.items():
-        if k == 'nodes':
+        if k in ('nodes', 'transform_'):
             continue
         irl_trainer_config[k] = v
     

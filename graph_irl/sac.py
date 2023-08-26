@@ -19,6 +19,7 @@ from graph_irl.vis_utils import *
 from graph_irl.graph_rl_utils import OI_init
 
 from typing import Optional
+from itertools import chain
 from copy import deepcopy
 from pathlib import Path
 import time
@@ -153,6 +154,9 @@ class SACAgentBase:
         if self.fixed_temperature is None:
             self.temperatures = [math.exp(self.log_temperature.item())]
         self.eval_path_returns, self.eval_path_lens = [], []
+        self.gnn_policy_losses = []
+        self.gnn_q1_losses = []
+        self.gnn_q2_losses = []
     
     def OI_init_nets(self):
         OI_init(self.Q1)
@@ -252,6 +256,9 @@ class SACAgentBase:
                 "policy-loss",
                 "qfunc1-loss",
                 "qfunc2-loss",
+                "gnnpolicy-loss",
+                "gnnq1-loss",
+                "gnnq2-loss",
                 # "avg-reward",
                 # "avg-reward-ma-30",
                 # "path-lens",
@@ -267,6 +274,9 @@ class SACAgentBase:
                 self.policy_losses,
                 self.Q1_losses,
                 self.Q2_losses,
+                self.gnn_policy_losses,
+                self.gnn_q1_losses,
+                self.gnn_q2_losses,
                 # self.buffer.avg_rewards_per_episode,
                 # get_moving_avgs(self.buffer.avg_rewards_per_episode, 30),
                 # self.buffer.path_lens,
@@ -295,7 +305,7 @@ class SACAgentBase:
                     print(f"final eval with best policy")
                 # this is only for graph problems;
                 # mujoco should have vis_graph=False
-                r, _, code, ep_len, _, obs, _, _ = self.buffer.get_single_ep_rewards_and_weights(
+                r, _, code, ep_len, _, obs, _, _, _ = self.buffer.get_single_ep_rewards_and_weights(
                     self.env,
                     self,
                 )
@@ -349,6 +359,7 @@ class SACAgentGraph(SACAgentBase):
         fixed_temperature=None,
         UT_trick=False,
         with_entropy=False,
+        multitask_net=None,
         **kwargs,
     ):
         super(SACAgentGraph, self).__init__(
@@ -372,6 +383,19 @@ class SACAgentGraph(SACAgentBase):
         )
         self.UT_trick = UT_trick
         self.with_entropy = with_entropy
+        self.multitask_net = multitask_net
+
+        if multitask_net is not None:
+            self.optim_multitask_net = torch.optim.Adam(
+                self.multitask_net.parameters()
+                , lr=1e-3
+            )
+            self.gnn_policy_loss = None
+            self.gnn_policy_losses = []
+            self.gnn_q1_loss = None
+            self.gnn_q1_losses = []
+            self.gnn_q2_loss = None
+            self.gnn_q2_losses = []
 
         # update name;
         self.name = (
@@ -390,6 +414,71 @@ class SACAgentGraph(SACAgentBase):
             self.save_to = self.save_to / self.name
             if not self.save_to.exists():
                 self.save_to.mkdir(parents=True)
+    
+    def update_parameters(self):
+        flag = self.multitask_net is not None
+        if flag:
+            self.optim_multitask_net.zero_grad()
+        # update policy params;
+        self.policy_optim.zero_grad()
+        self.policy_loss.backward()
+        # extra grads flow to policy's encoder
+        # and multitas net;
+        if flag:
+            self.gnn_policy_loss.backward()
+        if self.clip_grads:
+            nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=1.0, error_if_nonfinite=True)
+        self.policy_optim.step()
+
+        # update temperature;
+        if self.fixed_temperature is None:
+            self.temperature_optim.zero_grad()
+            self.temperature_loss.backward()
+            self.temperature_optim.step()
+
+            # add new temperature to list;
+            self.temperatures.append(math.exp(self.log_temperature.item()))
+
+        # update qfunc1
+        self.Q1_optim.zero_grad()
+        self.Q1_loss.backward(retain_graph=flag)
+        if flag:
+            self.gnn_q1_loss.backward()
+        if self.clip_grads:
+            nn.utils.clip_grad_norm_(self.Q1.parameters(), max_norm=1.0, error_if_nonfinite=True)
+        self.Q1_optim.step()
+
+        # update qfunc2
+        self.Q2_optim.zero_grad()
+        self.Q2_loss.backward(retain_graph=flag)
+        if flag:
+            self.gnn_q2_loss.backward()
+        if self.clip_grads:
+            nn.utils.clip_grad_norm_(self.Q2.parameters(), max_norm=1.0, error_if_nonfinite=True)
+        self.Q2_optim.step()
+
+        # do grad step for multitask net;
+        if flag:
+            self.optim_multitask_net.step()
+    
+    def get_multitask_loss_from_graph_lvl(
+            self, graph_lvl_embeds, targets
+    ):
+        self.gnn_policy_loss = nn.MSELoss()(
+            self.multitask_net(graph_lvl_embeds[0]).view(-1), 
+            targets.view(-1)
+        )
+        self.gnn_policy_losses.append(self.gnn_policy_loss.item())
+        self.gnn_q1_loss = nn.MSELoss()(
+            self.multitask_net(graph_lvl_embeds[1]).view(-1), 
+            targets.view(-1)
+        )
+        self.gnn_q1_losses.append(self.gnn_q1_loss.item())
+        self.gnn_q2_loss = nn.MSELoss()(
+            self.multitask_net(graph_lvl_embeds[2]).view(-1), 
+            targets.view(-1)
+        )
+        self.gnn_q2_losses.append(self.gnn_q2_loss.item())
 
     def sample_action(self, obs, k_proposals: int=1, extra_graph_level_feats=None, get_graph_embeds=False):
         if get_graph_embeds:
@@ -502,21 +591,51 @@ class SACAgentGraph(SACAgentBase):
         self.Q2.train()
         self.policy.eval()
 
+        # this is for the multitask gnn training;
+        graph_lvl_embeds = []
+        return_graph_lvl = False
+        targets = None
+
+        # this is for the multitask gnn training;
+        if self.multitask_net is not None:
+            targets = tgnn.global_add_pool(
+                obs_t.x[:, -1].view(-1, 1), obs_t.batch
+            )
+            return_graph_lvl = True
+
         # get predictions from q functions;
         obs_action_t = (obs_t, action_t)
         policy_density, node_embeds, graph_embeds = self.policy(
             obs_tp1, extra_graph_feats_tp1, get_graph_embeds=True
         )
         node_embeds = node_embeds.detach()  # use embeds only as inputs;
+        
+        # this is for the multitask gnn training;
+        if self.multitask_net is not None:
+            graph_lvl_embeds.append(graph_embeds)
 
         # the action_is_index boolean will only be considered
         # if self.encoder is not None;
         q1_est = self.Q1(obs_action_t, extra_graph_feats_t,
-                         action_is_index=self.buffer.action_is_index
-                         ).view(-1)
+                         action_is_index=self.buffer.action_is_index,
+                         return_graph_lvl=return_graph_lvl,
+                         )
         q2_est = self.Q2(obs_action_t, extra_graph_feats_t,
-                         action_is_index=self.buffer.action_is_index
-                         ).view(-1)
+                         action_is_index=self.buffer.action_is_index,
+                         return_graph_lvl=return_graph_lvl,
+                         )
+        
+        # in this case return_graph_lvl will be True and
+        # Qfunc returns (value, graph_lvl_embed)
+        if self.multitask_net is not None:
+            q1_est, ge1 = q1_est
+            q2_est, ge2 = q2_est
+            graph_lvl_embeds.append(ge1)
+            graph_lvl_embeds.append(ge2)
+            self.get_multitask_loss_from_graph_lvl(graph_lvl_embeds, targets)
+        
+        q1_est = q1_est.view(-1)
+        q2_est = q2_est.view(-1)
 
         if self.UT_trick:
             # get (B, 2 * action_dim + 1, action_dim) samples;
@@ -590,7 +709,7 @@ class SACAgentGraph(SACAgentBase):
             )
 
             # sample paths with delta func policy;
-            r, _, code, ep_len, _, obs, _, _ = self.buffer.get_single_ep_rewards_and_weights(
+            r, _, code, ep_len, _, obs, _, _, _ = self.buffer.get_single_ep_rewards_and_weights(
                 self.env,
                 self,
             )

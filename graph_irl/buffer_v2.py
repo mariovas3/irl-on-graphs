@@ -8,6 +8,7 @@
 import numpy as np
 import torch
 from torch_geometric.data import Data, Batch
+import torch_geometric.nn as tgnn
 
 from graph_irl.graph_rl_utils import get_action_vector_from_idx, inc_lcr_reg
 from graph_irl.distributions import GaussDist, TanhGauss
@@ -242,7 +243,8 @@ class GraphBuffer(BufferBase):
         )
     
     def get_reward(self, batch_list, actions, reward_fn, 
-                   extra_graph_level_feats_list=None):
+                   extra_graph_level_feats_list=None, 
+                   get_graph_embeds=False):
         if self.state_reward:
             assert len(batch_list) == len(actions) + 1
             batch = Batch.from_data_list(batch_list[1:])
@@ -250,18 +252,22 @@ class GraphBuffer(BufferBase):
                 extra_graph_level_feats = torch.cat(extra_graph_level_feats_list[1:], 0)
             else:
                 extra_graph_level_feats = None
-            return reward_fn(batch, extra_graph_level_feats)
+            # return (rewards, [graph_embeds]), targets
+            return reward_fn(batch, extra_graph_level_feats, 
+                             get_graph_embeds=get_graph_embeds), tgnn.global_add_pool(batch.x[:, -1], batch.batch)
         batch = Batch.from_data_list(batch_list)
         if extra_graph_level_feats_list:
                 extra_graph_level_feats = torch.cat(extra_graph_level_feats_list, 0)
         else:
             extra_graph_level_feats = None
         assert len(batch_list) == len(actions)
+        # return (rewards, [graph_embeds]), targets
         return reward_fn(
             (batch, actions), 
             extra_graph_level_feats,
-            action_is_index=self.action_is_index
-        )
+            action_is_index=self.action_is_index,
+            get_graph_embeds=get_graph_embeds
+        ), tgnn.global_add_pool(batch.x[:, -1], batch.batch)
     
     def get_log_probs_and_dists(
             self, batch_list, actions, agent, 
@@ -317,6 +323,8 @@ class GraphBuffer(BufferBase):
             positives_dict=None,
             k_proposals: int=1,
     ):
+        temp_mse, temp_len = 0., 0
+        flag = agent.multitask_net is not None
         rrs_this_episode = []  # reciprocal ranks;
         reward_on_path = []
         if with_mrr or with_auc:
@@ -464,8 +472,22 @@ class GraphBuffer(BufferBase):
                 # calculate rewards on batch;
                 curr_rewards = self.get_reward(
                     batch_list, action_idxs, env.reward_fn,
-                    extra_graph_level_feats_list
-                ).view(-1) * self.reward_scale
+                    extra_graph_level_feats_list, get_graph_embeds=flag
+                )
+
+                # this is for multitask gnn training;
+                if flag:
+                    (curr_rewards, graph_embeds), targets = curr_rewards
+                    outs = agent.multitask_net(graph_embeds)
+                    curr_length = len(curr_rewards.view(-1))
+                    temp_mse = (
+                        temp_mse * (temp_len / (temp_len + curr_length)) 
+                        + torch.nn.MSELoss()(
+                            outs.view(-1), targets.view(-1)
+                        ) * (curr_length / (temp_len + curr_length))
+                    )
+                    temp_len += curr_length
+                curr_rewards = curr_rewards.view(-1) * self.reward_scale
                 
                 # track rewards on path;
                 reward_on_path.extend(curr_rewards.detach().tolist())
@@ -535,8 +557,8 @@ class GraphBuffer(BufferBase):
                 if self.verbose:
                     print(f"steps done: {steps}, code: {code}")
                 if self.per_decision_imp_sample:
-                    return self._process_rewards_log_weights(rewards, log_weights, code) + (lcr_reg_term, obs, rrs_this_episode, reward_on_path)
-                return return_val, log_imp_weight, code, env.steps_done, lcr_reg_term, obs, rrs_this_episode, reward_on_path
+                    return self._process_rewards_log_weights(rewards, log_weights, code) + (lcr_reg_term, obs, rrs_this_episode, reward_on_path, temp_mse)
+                return return_val, log_imp_weight, code, env.steps_done, lcr_reg_term, obs, rrs_this_episode, reward_on_path, temp_mse
 
         assert steps == env.steps_done - env.num_edges_start_from
         if self.verbose:
@@ -544,8 +566,8 @@ class GraphBuffer(BufferBase):
         if self.per_decision_imp_sample:
             # in the per dicision case, need to cumsum the log_weights
             # until the current time point;
-            return self._process_rewards_log_weights(rewards, log_weights, 2) + (lcr_reg_term, obs, rrs_this_episode, reward_on_path)
-        return return_val, log_imp_weight, 2, env.steps_done, lcr_reg_term, obs, rrs_this_episode, reward_on_path
+            return self._process_rewards_log_weights(rewards, log_weights, 2) + (lcr_reg_term, obs, rrs_this_episode, reward_on_path, temp_mse)
+        return return_val, log_imp_weight, 2, env.steps_done, lcr_reg_term, obs, rrs_this_episode, reward_on_path, temp_mse
 
     def collect_path(
         self,
