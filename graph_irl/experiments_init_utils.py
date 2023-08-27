@@ -86,7 +86,7 @@ params_func_config = dict(
     with_multitask_gnn_loss=False,
     multitask_coef=1.,
     max_size=10_000,
-    with_mlp_layer_norm=True,
+    with_mlp_batch_norm=True,
     heads=1,
 )
 
@@ -125,7 +125,7 @@ def get_params(
     with_multitask_gnn_loss=False,
     multitask_coef=1.,
     max_size=10_000,
-    with_mlp_layer_norm=True,
+    with_mlp_batch_norm=True,
     heads=1,
 ):
     # if we do multitask loss for gnn, make sure nothing gets
@@ -191,15 +191,13 @@ def get_params(
             encoder_dict['encoder_reward'], 
             embed_dim=embed_dim + n_extra_cols_append, 
             hiddens=reward_fn_hiddens, 
-            with_layer_norm=with_mlp_layer_norm,
-            with_batch_norm=False,
+            with_batch_norm=with_mlp_batch_norm,
         ),
         state_reward_fn=StateGraphReward(
             encoder_dict['encoder_reward'], 
             embed_dim=embed_dim + n_extra_cols_append, 
             hiddens=reward_fn_hiddens, 
-            with_layer_norm=with_mlp_layer_norm,
-            with_batch_norm=False,
+            with_batch_norm=with_mlp_batch_norm,
         )
     )
 
@@ -216,7 +214,7 @@ def get_params(
             obs_dim=embed_dim + n_extra_cols_append,
             action_dim=embed_dim,
             hiddens=gauss_policy_hiddens,
-            with_layer_norm=with_mlp_layer_norm,
+            with_batch_norm=with_mlp_batch_norm,
             encoder=encoder_dict['encoder'],
             two_action_vectors=True,
         ),
@@ -224,7 +222,7 @@ def get_params(
             obs_dim=embed_dim + n_extra_cols_append,
             action_dim=embed_dim,
             hiddens=gauss_policy_hiddens,
-            with_layer_norm=with_mlp_layer_norm,
+            with_batch_norm=with_mlp_batch_norm,
             encoder=encoder_dict['encoder'],
             two_action_vectors=True,
         ),
@@ -234,15 +232,14 @@ def get_params(
             hiddens1=tsg_policy_hiddens1,
             hiddens2=tsg_policy_hiddens2,
             encoder=encoder_dict['encoder'],
-            with_layer_norm=with_mlp_layer_norm,
+            with_batch_norm=with_mlp_batch_norm,
         )
     )
 
     qfunc_kwargs = dict(
         obs_action_dim=embed_dim * 3 + n_extra_cols_append,
         hiddens=qfunc_hiddens, 
-        with_layer_norm=with_mlp_layer_norm, 
-        with_batch_norm=False,
+        with_batch_norm=with_mlp_batch_norm, 
         encoder=None
     )
 

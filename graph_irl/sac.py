@@ -306,6 +306,7 @@ class SACAgentBase:
                     print(f"final eval with best policy")
                 # this is only for graph problems;
                 # mujoco should have vis_graph=False
+                self.policy.eval()
                 r, _, code, ep_len, _, obs, _, _, _ = self.buffer.get_single_ep_rewards_and_weights(
                     self.env,
                     self,

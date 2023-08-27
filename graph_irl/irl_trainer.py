@@ -151,7 +151,7 @@ class IRLGraphTrainer:
             mono_loss = (
                 (
                     torch.relu(
-                        expert_rewards[:, :-1] - expert_rewards[:, 1:] + 1.
+                        expert_rewards[:, :-1] - expert_rewards[:, 1:]
                     ) ** 2
                 ).sum(-1).mean()
             ) * self.mono_regularisation_on_demo_coef
@@ -558,8 +558,9 @@ class IRLGraphTrainer:
             # for the reward update step;
             self.agent.buffer.verbose = buffer_verbose
             self.reward_fn.requires_grad_(True)
-            self.reward_fn.train()
+            self.reward_fn.eval()
             self.agent.policy.requires_grad_(False)
+            self.agent.policy.eval()
             for _ in range(self.num_reward_grad_steps):
                 self.do_reward_grad_step()
 

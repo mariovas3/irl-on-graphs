@@ -79,6 +79,7 @@ def train_eval_new_policy(new_policy, num_epochs,
                               save_edge_index=save_edge_index,
                               vis_graph=vis_graph,
                               with_pos=with_pos)
+    new_policy.policy.eval()
     _, _, code, _, _, obs, _, rewards, _ = new_policy.buffer.get_single_ep_rewards_and_weights(
         new_policy.env,
         new_policy,

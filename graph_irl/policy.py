@@ -51,15 +51,15 @@ class GCN(nn.Module):
                                          heads=heads), 
                           f"x, edge_index -> x"))
             if i < len(temp) - 2:
-                tgnet.append(nn.ReLU())
                 if self.with_batch_norm:
                     tgnet.append(nn.BatchNorm1d(temp[i + 1], affine=True))
+                tgnet.append(nn.ReLU())
             if bet_on_homophily:
                 self.net2.append(nn.Linear(temp[i], temp[i + 1]))
                 if i < len(temp) - 2:
-                    self.net2.append(nn.ReLU())
                     if net2_batch_norm:
                         self.net2.append(nn.BatchNorm1d(temp[i + 1], affine=True))
+                    self.net2.append(nn.ReLU())
         
         # get graph net in Sequential container;
         self.net = tgnn.Sequential('x, edge_index', tgnet)
@@ -84,7 +84,7 @@ class GCN(nn.Module):
 
 
 class AmortisedGaussNet(nn.Module):
-    def __init__(self, obs_dim, action_dim, hiddens, with_layer_norm=True):
+    def __init__(self, obs_dim, action_dim, hiddens, with_batch_norm=True):
         super(AmortisedGaussNet, self).__init__()
 
         # init net;
@@ -97,10 +97,10 @@ class AmortisedGaussNet(nn.Module):
             else:
                 self.net.append(nn.Linear(hiddens[i - 1], hiddens[i]))
 
+            if with_batch_norm:
+                self.net.append(nn.BatchNorm1d(hiddens[i]))
             # ReLU activation;
             self.net.append(nn.ReLU())
-            if with_layer_norm:
-                self.net.append(nn.LayerNorm(hiddens[i]))
 
         # add mean and Cholesky of diag covariance net;
         self.mu_net = nn.Linear(hiddens[-1], action_dim)
@@ -110,6 +110,7 @@ class AmortisedGaussNet(nn.Module):
         )
 
     def forward(self, obs):
+        assert not torch.any(obs.isnan())
         emb = self.net(obs)  # shared embedding for mean and std;
         return self.mu_net(emb), self.std_net(emb)
 
@@ -120,7 +121,7 @@ class GaussPolicy(nn.Module):
         obs_dim,
         action_dim,
         hiddens,
-        with_layer_norm=False,
+        with_batch_norm=False,
         encoder=None,
         two_action_vectors=False,
     ):
@@ -131,7 +132,7 @@ class GaussPolicy(nn.Module):
             action_dim (int): The dimension of the action.
             hiddens (List[int]): Sizes of hidden layers for
                 amortised Gaussian net.
-            with_layer_norm (bool): Whether to put layer norm
+            with_batch_norm (bool): Whether to put batch norm
                 transforms in the Amortised net.
             encoder (nn.Module): Intended to be GNN instance.
             two_action_vectors (bool): If True, output a single
@@ -155,7 +156,7 @@ class GaussPolicy(nn.Module):
 
         # init net;
         self.net = AmortisedGaussNet(
-            obs_dim, out_dim, hiddens, with_layer_norm
+            obs_dim, out_dim, hiddens, with_batch_norm
         )
 
     def forward(
@@ -188,17 +189,17 @@ class TwoStageGaussPolicy(nn.Module):
         hiddens1,
         hiddens2,
         encoder,
-        with_layer_norm=False,
+        with_batch_norm=False,
     ):
         super(TwoStageGaussPolicy, self).__init__()
         self.encoder = encoder
         self.name = "TwoStageGaussPolicy"
 
         self.net1 = AmortisedGaussNet(
-            obs_dim, action_dim, hiddens1, with_layer_norm
+            obs_dim, action_dim, hiddens1, with_batch_norm
         )
         self.net2 = AmortisedGaussNet(
-            obs_dim + action_dim, action_dim, hiddens2, with_layer_norm
+            obs_dim + action_dim, action_dim, hiddens2, with_batch_norm
         )
 
     def forward(
@@ -224,7 +225,7 @@ class TanhGaussPolicy(nn.Module):
         obs_dim,
         action_dim,
         hiddens,
-        with_layer_norm=False,
+        with_batch_norm=False,
         encoder=None,
         two_action_vectors=False,
     ):
@@ -244,7 +245,7 @@ class TanhGaussPolicy(nn.Module):
             out_dim = action_dim
         
         self.net = AmortisedGaussNet(
-            obs_dim, out_dim, hiddens, with_layer_norm
+            obs_dim, out_dim, hiddens, with_batch_norm
         )
 
     def forward(
@@ -271,15 +272,13 @@ class TanhGaussPolicy(nn.Module):
 
 class Qfunc(nn.Module):
     def __init__(
-        self, obs_action_dim, hiddens, with_layer_norm=False, 
+        self, obs_action_dim, hiddens, 
         with_batch_norm=False, encoder=None,
     ):
         super(Qfunc, self).__init__()
 
         # set encoder;
         self.encoder = encoder
-
-        assert not (with_batch_norm and with_layer_norm)
 
         # init net;
         self.net = nn.Sequential()
@@ -291,12 +290,10 @@ class Qfunc(nn.Module):
             else:
                 self.net.append(nn.Linear(hiddens[i - 1], hiddens[i]))
 
-            # add ReLU non-linearity;
-            self.net.append(nn.ReLU())
-            if with_layer_norm:
-                self.net.append(nn.LayerNorm(hiddens[i]))
             if with_batch_norm:
                 self.net.append(nn.BatchNorm1d(hiddens[i]))
+            # add ReLU non-linearity;
+            self.net.append(nn.ReLU())
 
         # Q-func maps to scalar;
         self.net.append(nn.Linear(hiddens[-1], 1))
@@ -338,7 +335,7 @@ class Qfunc(nn.Module):
 
 class Vfunc(nn.Module):
     def __init__(
-        self, embed_dim, encoder, hiddens, with_layer_norm=False,
+        self, embed_dim, encoder, hiddens, with_batch_norm=False,
     ):
         super(Vfunc, self).__init__()
 
@@ -355,10 +352,10 @@ class Vfunc(nn.Module):
             else:
                 self.net.append(nn.Linear(hiddens[i - 1], hiddens[i]))
 
+            if with_batch_norm:
+                self.net.append(nn.BatchNorm1d(hiddens[i]))
             # add ReLU non-linearity;
             self.net.append(nn.ReLU())
-            if with_layer_norm:
-                self.net.append(nn.LayerNorm(hiddens[i]))
 
         # V-func maps to scalar;
         self.net.append(nn.Linear(hiddens[-1], 1))
