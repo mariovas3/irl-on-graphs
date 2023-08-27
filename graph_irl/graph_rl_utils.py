@@ -206,7 +206,7 @@ def sigmoid_similarity(
     return select_actions_from_scores(temp, positives_dict, edge_set)
 
 
-def euc_dist_similariry(
+def euc_dist_similarity(
     node_embeds: np.ndarray,
     a1: np.ndarray,
     a2: np.ndarray,

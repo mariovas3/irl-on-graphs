@@ -191,14 +191,14 @@ def get_params(
             encoder_dict['encoder_reward'], 
             embed_dim=embed_dim + n_extra_cols_append, 
             hiddens=reward_fn_hiddens, 
-            with_layer_norm=True,
+            with_layer_norm=False,
             with_batch_norm=False,
         ),
         state_reward_fn=StateGraphReward(
             encoder_dict['encoder_reward'], 
             embed_dim=embed_dim + n_extra_cols_append, 
             hiddens=reward_fn_hiddens, 
-            with_layer_norm=True,
+            with_layer_norm=False,
             with_batch_norm=False,
         )
     )
@@ -216,7 +216,7 @@ def get_params(
             obs_dim=embed_dim + n_extra_cols_append,
             action_dim=embed_dim,
             hiddens=gauss_policy_hiddens,
-            with_layer_norm=True,
+            with_layer_norm=False,
             encoder=encoder_dict['encoder'],
             two_action_vectors=True,
         ),
@@ -224,7 +224,7 @@ def get_params(
             obs_dim=embed_dim + n_extra_cols_append,
             action_dim=embed_dim,
             hiddens=gauss_policy_hiddens,
-            with_layer_norm=True,
+            with_layer_norm=False,
             encoder=encoder_dict['encoder'],
             two_action_vectors=True,
         ),
@@ -234,14 +234,14 @@ def get_params(
             hiddens1=tsg_policy_hiddens1,
             hiddens2=tsg_policy_hiddens2,
             encoder=encoder_dict['encoder'],
-            with_layer_norm=True,
+            with_layer_norm=False,
         )
     )
 
     qfunc_kwargs = dict(
         obs_action_dim=embed_dim * 3 + n_extra_cols_append,
         hiddens=qfunc_hiddens, 
-        with_layer_norm=True, 
+        with_layer_norm=False, 
         with_batch_norm=False,
         encoder=None
     )

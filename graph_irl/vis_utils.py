@@ -121,8 +121,6 @@ def save_metric_plots(metric_names, metrics, path, seed, suptitle=None):
         except:
             print(f"problem with {metric_name}\n",
                     metric)
-            if "gnn" not in metric_name:
-                raise
         yoffset = max((yhigh - ylow) / 10, .1)
         xlow, xhigh = 0, len(metric) + 5
         ax.set_ylim(ylow, yhigh)
@@ -163,6 +161,9 @@ def get_moving_avgs(returns_over_episodes, num_steps):
     averages over num_steps steps.
     """
     if num_steps > len(returns_over_episodes):
+        print("issue in moving avg generation; "
+              f"not enough data for {num_steps} step ma;\n")
+        return []
         raise ValueError(
             "num_steps should be less than"
             " or equal to length of returns_over_episodes"

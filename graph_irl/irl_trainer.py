@@ -9,10 +9,12 @@ import matplotlib.pyplot as plt
 from networkx import Graph, draw_networkx
 
 from graph_irl.graph_rl_utils import *
+from graph_irl.sac import save_metric_plots
 
 from typing import Tuple
 from itertools import chain
 import warnings
+import pickle
 from tqdm import tqdm
 
 DO_PLOT = True
@@ -55,6 +57,7 @@ class IRLGraphTrainer:
 
         # set agent;
         self.agent = agent
+        self.seed = self.agent.buffer.seed
 
         if self.agent.buffer.lcr_reg:
             assert lcr_regularisation_coef is not None
@@ -98,6 +101,15 @@ class IRLGraphTrainer:
         self.ortho_init = ortho_init
         if ortho_init:
             self.OI_init_nets()
+        
+        # saving stuff;
+        self.expert_avg_returns = []
+        self.imp_sampled_returns = []
+        self.mono_losses = []
+        self.lcr_expert_losses = []
+        self.lcr_sampled_losses = []
+        self.gradients = []
+        self.mtt_losses = []
 
     def train_policy_k_epochs(self, k, **kwargs):
         self.agent.train_k_epochs(k, **kwargs)
@@ -167,8 +179,15 @@ class IRLGraphTrainer:
             self.agent.optim_multitask_net.zero_grad()
             mtt_loss = tot_mse1 * (tot_len1 / (tot_len1 + tot_len2)) + tot_mse2 * (tot_len2 / (tot_len1 + tot_len2))
             mtt_loss = self.agent.multitask_coef * mtt_loss
-            print(f"multitask gnn loss: {mtt_loss.item()}")
+            self.mtt_losses.append(mtt_loss.item())
+            print(f"multitask gnn loss: {self.mtt_losses[-1]}")
             mtt_loss.backward()
+        
+        self.expert_avg_returns.append(expert_avg_returns.item())
+        self.imp_sampled_returns.append(imp_sampled_gen_rewards.item())
+        self.mono_losses.append(mono_loss.item())
+        self.lcr_expert_losses.append(lcr_loss1.item())
+        self.lcr_sampled_losses.append(lcr_loss2.item())
 
         print(f"expert avg rewards: {expert_avg_returns.item()}")
         print(f"imp sampled rewards: {imp_sampled_gen_rewards.item()}")
@@ -177,11 +196,15 @@ class IRLGraphTrainer:
         print(f"lcr_sampled_loss: {lcr_loss2.item()}")
         print(f"overall reward loss: {loss.item()}")
         if self.verbose:
+            curr_grads = []
             for p in self.reward_fn.parameters():
+                this_grad = torch.norm(p.grad.detach().view(-1), 2).item()
+                curr_grads.append(this_grad)
                 print(
                     f"len module param: {p.shape}",
                     f"l2 norm of grad of params: "
-                    f"{torch.norm(p.grad.detach().view(-1), 2).item()}")
+                    f"{this_grad}")
+            self.gradients.append(curr_grads)
             print('\n')
         
         # see if reward grads need clipping;
@@ -548,7 +571,49 @@ class IRLGraphTrainer:
             self.agent.policy.requires_grad_(True)
             self.agent.policy.eval()
             self.train_policy_k_epochs(policy_epochs, **kwargs)
+        irl_dir = self.agent.save_to / 'irl_training_metrics'
+        if not irl_dir.exists():
+            irl_dir.mkdir(parents=True)
+        
+        metric_names=[
+                'expert_avg_returns',
+                'imp_sampled_returns',
+                'mono_losses',
+                'lcr_expert_losses',
+                'lcr_sampled_losses',
+                'l2_norm_gradients',
+                'mtt_losses',
+            ]
+        metrics=[
+            self.expert_avg_returns,
+            self.imp_sampled_returns,
+            self.mono_losses,
+            self.lcr_expert_losses,
+            self.lcr_sampled_losses,
+            self.gradients,
+            self.mtt_losses,
+        ]
+        save_named_metrics(
+            irl_dir,
+            metric_names=metric_names,
+            metrics=metrics,
+        )
+        metric_names[-2] = 'avg_l2norm_gradients'
+        metrics[-2] = np.array(metrics[-2]).mean(-1)
+        save_metric_plots(metric_names, metrics, 
+                          irl_dir, 
+                          seed=self.seed,
+                          suptitle=f"irl training for {num_iters} iters")
+
     
     def OI_init_nets(self):
         OI_init(self.reward_fn)
         self.agent.OI_init_nets()
+
+
+def save_named_metrics(path, metric_names, metrics):
+    assert path.exists()
+    assert len(metric_names) == len(metrics)
+    for n, m in zip(metric_names, metrics):
+        with open(path / (n + '.pkl'), 'wb') as f:
+            pickle.dump(m, f)
