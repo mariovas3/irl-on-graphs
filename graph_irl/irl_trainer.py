@@ -599,7 +599,10 @@ class IRLGraphTrainer:
             metrics=metrics,
         )
         metric_names[-2] = 'avg_l2norm_gradients'
-        metrics[-2] = np.array(metrics[-2]).mean(-1)
+        grads = np.array(metrics[-2])
+        metrics[-2] = grads.mean(-1)
+        metric_names.append('max_l2norm_grads')
+        metrics.append(grads.max(-1))
         save_metric_plots(metric_names, metrics, 
                           irl_dir, 
                           seed=self.seed,

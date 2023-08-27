@@ -88,7 +88,7 @@ class AmortisedGaussNet(nn.Module):
         super(AmortisedGaussNet, self).__init__()
 
         # init net;
-        self.net = nn.Sequential(nn.LayerNorm(obs_dim))
+        self.net = nn.Sequential()
 
         # add modules/Layers to net;
         for i in range(len(hiddens)):
@@ -97,11 +97,10 @@ class AmortisedGaussNet(nn.Module):
             else:
                 self.net.append(nn.Linear(hiddens[i - 1], hiddens[i]))
 
-            if with_layer_norm:
-                self.net.append(nn.LayerNorm(hiddens[i]))
-
             # ReLU activation;
             self.net.append(nn.ReLU())
+            if with_layer_norm:
+                self.net.append(nn.LayerNorm(hiddens[i]))
 
         # add mean and Cholesky of diag covariance net;
         self.mu_net = nn.Linear(hiddens[-1], action_dim)

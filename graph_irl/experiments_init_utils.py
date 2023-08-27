@@ -86,6 +86,8 @@ params_func_config = dict(
     with_multitask_gnn_loss=False,
     multitask_coef=1.,
     max_size=10_000,
+    with_mlp_layer_norm=True,
+    heads=1,
 )
 
 
@@ -123,6 +125,8 @@ def get_params(
     with_multitask_gnn_loss=False,
     multitask_coef=1.,
     max_size=10_000,
+    with_mlp_layer_norm=True,
+    heads=1,
 ):
     # if we do multitask loss for gnn, make sure nothing gets
     # appended to the graph level embedding for now;
@@ -143,43 +147,39 @@ def get_params(
     which_policy_kwargs = 'tanh_gauss_policy_kwargs'
     action_dim = embed_dim * 2
 
-    multitask_net = None
-    if with_multitask_gnn_loss:
-        multitask_net = nn.Sequential(
-                nn.Linear(embed_dim, embed_dim),
-                nn.ReLU(),
-                nn.Linear(embed_dim, embed_dim),
-                nn.ReLU(),
-                nn.Linear(embed_dim, 1)
-                )
-
     encoder_dict = dict(
         encoder = GCN(node_dim + n_cols_append, encoder_hiddens, 
+                      heads=heads,
                       with_batch_norm=with_batch_norm, 
                       final_tanh=final_tanh,
                       bet_on_homophily=bet_on_homophily, 
                       net2_batch_norm=net2_batch_norm),
         encoderq1 = GCN(node_dim + n_cols_append, encoder_hiddens, 
+                      heads=heads,
                       with_batch_norm=with_batch_norm, 
                       final_tanh=final_tanh,
                       bet_on_homophily=bet_on_homophily, 
                       net2_batch_norm=net2_batch_norm), 
         encoderq2 = GCN(node_dim + n_cols_append, encoder_hiddens, 
+                      heads=heads,
                       with_batch_norm=with_batch_norm, 
                       final_tanh=final_tanh,
                       bet_on_homophily=bet_on_homophily, 
                       net2_batch_norm=net2_batch_norm),
         encoderq1t = GCN(node_dim + n_cols_append, encoder_hiddens, 
+                      heads=heads,
                       with_batch_norm=with_batch_norm, 
                       final_tanh=final_tanh,
                       bet_on_homophily=bet_on_homophily, 
                       net2_batch_norm=net2_batch_norm),
         encoderq2t = GCN(node_dim + n_cols_append, encoder_hiddens, 
+                      heads=heads,
                       with_batch_norm=with_batch_norm, 
                       final_tanh=final_tanh,
                       bet_on_homophily=bet_on_homophily, 
                       net2_batch_norm=net2_batch_norm),
         encoder_reward = GCN(node_dim + n_cols_append, encoder_hiddens, 
+                      heads=heads,
                       with_batch_norm=with_batch_norm, 
                       final_tanh=final_tanh,
                       bet_on_homophily=bet_on_homophily, 
@@ -191,14 +191,14 @@ def get_params(
             encoder_dict['encoder_reward'], 
             embed_dim=embed_dim + n_extra_cols_append, 
             hiddens=reward_fn_hiddens, 
-            with_layer_norm=False,
+            with_layer_norm=with_mlp_layer_norm,
             with_batch_norm=False,
         ),
         state_reward_fn=StateGraphReward(
             encoder_dict['encoder_reward'], 
             embed_dim=embed_dim + n_extra_cols_append, 
             hiddens=reward_fn_hiddens, 
-            with_layer_norm=False,
+            with_layer_norm=with_mlp_layer_norm,
             with_batch_norm=False,
         )
     )
@@ -216,7 +216,7 @@ def get_params(
             obs_dim=embed_dim + n_extra_cols_append,
             action_dim=embed_dim,
             hiddens=gauss_policy_hiddens,
-            with_layer_norm=False,
+            with_layer_norm=with_mlp_layer_norm,
             encoder=encoder_dict['encoder'],
             two_action_vectors=True,
         ),
@@ -224,7 +224,7 @@ def get_params(
             obs_dim=embed_dim + n_extra_cols_append,
             action_dim=embed_dim,
             hiddens=gauss_policy_hiddens,
-            with_layer_norm=False,
+            with_layer_norm=with_mlp_layer_norm,
             encoder=encoder_dict['encoder'],
             two_action_vectors=True,
         ),
@@ -234,14 +234,14 @@ def get_params(
             hiddens1=tsg_policy_hiddens1,
             hiddens2=tsg_policy_hiddens2,
             encoder=encoder_dict['encoder'],
-            with_layer_norm=False,
+            with_layer_norm=with_mlp_layer_norm,
         )
     )
 
     qfunc_kwargs = dict(
         obs_action_dim=embed_dim * 3 + n_extra_cols_append,
         hiddens=qfunc_hiddens, 
-        with_layer_norm=False, 
+        with_layer_norm=with_mlp_layer_norm, 
         with_batch_norm=False,
         encoder=None
     )
@@ -279,7 +279,7 @@ def get_params(
         fixed_temperature=fixed_temperature,
         UT_trick=UT_trick,
         with_entropy=False,
-        multitask_net=multitask_net,
+        with_multitask_gnn_loss=with_multitask_gnn_loss,
         multitask_coef=multitask_coef,
     )
 
@@ -348,7 +348,7 @@ def get_params(
         unnorm_policy=config['buffer_kwargs']['unnorm_policy'],
         add_expert_to_generated=False,
         lcr_regularisation_coef=num_edges_expert - config['env_kwargs']['num_edges_start_from'],
-        mono_regularisation_on_demo_coef=0,#num_edges_expert - config['env_kwargs']['num_edges_start_from'],
+        mono_regularisation_on_demo_coef=num_edges_expert - config['env_kwargs']['num_edges_start_from'],
         verbose=True,
         do_dfs_expert_paths=do_dfs_expert_paths,
         num_reward_grad_steps=1,

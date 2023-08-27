@@ -231,6 +231,7 @@ class SACAgentBase:
 
     def check_presample(self):
         if self.min_steps_to_presample:
+            self.policy.eval()
             self.buffer.collect_path(
                 self.env, self, self.min_steps_to_presample
             )
@@ -359,7 +360,7 @@ class SACAgentGraph(SACAgentBase):
         fixed_temperature=None,
         UT_trick=False,
         with_entropy=False,
-        multitask_net=None,
+        with_multitask_gnn_loss=False,
         multitask_coef=1.,
         **kwargs,
     ):
@@ -384,10 +385,17 @@ class SACAgentGraph(SACAgentBase):
         )
         self.UT_trick = UT_trick
         self.with_entropy = with_entropy
-        self.multitask_net = multitask_net
+        self.multitask_net = None
+        if with_multitask_gnn_loss:
+            embed_dim = kwargs['policy_kwargs']['action_dim']
+            self.multitask_net = nn.Sequential(
+                nn.Linear(embed_dim, embed_dim),
+                nn.ReLU(),
+                nn.Linear(embed_dim, 1)
+            )
         self.multitask_coef = multitask_coef
 
-        if multitask_net is not None:
+        if self.multitask_net is not None:
             self.optim_multitask_net = torch.optim.Adam(
                 self.multitask_net.parameters()
                 , lr=1e-3
@@ -704,6 +712,7 @@ class SACAgentGraph(SACAgentBase):
 
         for _ in tqdm(range(self.num_iters)):
             # sample paths;
+            self.policy.eval()
             self.buffer.collect_path(
                 self.env,
                 self,
