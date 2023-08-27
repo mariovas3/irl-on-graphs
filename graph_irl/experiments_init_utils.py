@@ -375,6 +375,8 @@ def arg_parser(settable_params, argv):
                     v = [int(temp) for temp in nums]
                 elif re.match(int_regex, v):
                     v = int(v)
+                elif '_coef' in n:
+                    v = float(v)
                 settable_params[n] = v
                 print(f"{n}={v}", type(v), v)
             else:
