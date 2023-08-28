@@ -107,6 +107,12 @@ class SACAgentGO(SACAgentGraph):
                 * (log_prob + self.entropy_lb).detach()
             ).mean()
     
+    # housekeeping;
+        self.policy_losses.append(self.policy_loss.item())
+        if self.fixed_temperature is None:
+            self.temperature_losses.append(self.temperature_loss.item())
+        self.policy.eval()
+    
     def update_parameters(self):
         flag = self.multitask_net is not None
         if flag:

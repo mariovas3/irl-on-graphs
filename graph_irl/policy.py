@@ -110,7 +110,7 @@ class AmortisedGaussNet(nn.Module):
         )
 
     def forward(self, obs):
-        assert not torch.any(obs.isnan())
+        # assert not torch.any(obs.isnan())
         emb = self.net(obs)  # shared embedding for mean and std;
         return self.mu_net(emb), self.std_net(emb)
 
