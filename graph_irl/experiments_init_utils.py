@@ -88,6 +88,8 @@ params_func_config = dict(
     max_size=10_000,
     with_mlp_batch_norm=True,
     heads=1,
+    do_graphopt=False,
+    no_q_encoder=False,
 )
 
 
@@ -127,6 +129,8 @@ def get_params(
     max_size=10_000,
     with_mlp_batch_norm=True,
     heads=1,
+    do_graphopt=False,
+    no_q_encoder=False,
 ):
     # if we do multitask loss for gnn, make sure nothing gets
     # appended to the graph level embedding for now;
@@ -194,7 +198,7 @@ def get_params(
             with_batch_norm=with_mlp_batch_norm,
         ),
         state_reward_fn=StateGraphReward(
-            encoder_dict['encoder_reward'], 
+            None if do_graphopt else encoder_dict['encoder_reward'], 
             embed_dim=embed_dim + n_extra_cols_append, 
             hiddens=reward_fn_hiddens, 
             with_batch_norm=with_mlp_batch_norm,
@@ -244,16 +248,18 @@ def get_params(
     )
 
     Q1_kwargs = qfunc_kwargs.copy()
-    Q1_kwargs['encoder'] = encoder_dict['encoderq1']
     Q2_kwargs = qfunc_kwargs.copy()
-    Q2_kwargs['encoder'] = encoder_dict['encoderq2']
     Q1t_kwargs = qfunc_kwargs.copy()
-    Q1t_kwargs['encoder'] = encoder_dict['encoderq1t']
     Q2t_kwargs = qfunc_kwargs.copy()
-    Q2t_kwargs['encoder'] = encoder_dict['encoderq2t']
+    if not no_q_encoder:
+        assert not do_graphopt
+        Q1_kwargs['encoder'] = encoder_dict['encoderq1']
+        Q2_kwargs['encoder'] = encoder_dict['encoderq2']
+        Q1t_kwargs['encoder'] = encoder_dict['encoderq1t']
+        Q2t_kwargs['encoder'] = encoder_dict['encoderq2t']
 
     agent_kwargs=dict(
-        name='SACAgentGraph',
+        name='SACAgentGO' if do_graphopt else 'SACAgentGraph',
         policy_constructor=policy_constructors[which_policy_kwargs],
         qfunc_constructor=Qfunc,
         env_constructor=GraphEnv,
@@ -278,6 +284,7 @@ def get_params(
         with_entropy=False,
         with_multitask_gnn_loss=with_multitask_gnn_loss,
         multitask_coef=multitask_coef,
+        no_q_encoder=no_q_encoder,
     )
 
     config = dict(
@@ -350,6 +357,7 @@ def get_params(
         do_dfs_expert_paths=do_dfs_expert_paths,
         num_reward_grad_steps=1,
         ortho_init=ortho_init,
+        do_graphopt=do_graphopt,
     )
     return agent_kwargs, config, reward_fn, irl_trainer_config
 

@@ -329,6 +329,7 @@ class Qfunc(nn.Module):
                 # actions = torch.cat(actions, -1)
             obs_action = torch.cat((obs, actions), -1)
         if return_graph_lvl:
+            assert self.encoder is not None
             return self.net(obs_action), obs
         return self.net(obs_action)
 

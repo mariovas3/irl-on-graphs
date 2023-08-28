@@ -74,7 +74,8 @@ def save_graph_stats(
 
 def train_eval_new_policy(new_policy, num_epochs, 
                           save_edge_index=False,
-                          vis_graph=False, with_pos=False):
+                          vis_graph=False, with_pos=False,
+                          do_graphopt=False):
     new_policy.train_k_epochs(num_epochs, 
                               save_edge_index=save_edge_index,
                               vis_graph=vis_graph,
@@ -83,17 +84,19 @@ def train_eval_new_policy(new_policy, num_epochs,
     _, _, code, _, _, obs, _, rewards, _ = new_policy.buffer.get_single_ep_rewards_and_weights(
         new_policy.env,
         new_policy,
+        reward_encoder=new_policy.old_encoder if do_graphopt else None
     )
     print(f"new_policy eval code after {num_epochs} epochs: {code}")
     return obs, rewards
 
 
-def eval_irl_policy(irl_policy, env):
+def eval_irl_policy(irl_policy, env, do_graphopt=False):
     old_env = irl_policy.env
     irl_policy.env = env
     _, _, code, _, _, obs, _, rewards, _ = irl_policy.buffer.get_single_ep_rewards_and_weights(
         irl_policy.env,
         irl_policy,
+        reward_encoder=irl_policy.old_encoder if do_graphopt else None
     )
     irl_policy.env = old_env
     print(f"irl_policy eval code on target_graph: {code}")
@@ -123,6 +126,7 @@ def save_graph_stats_k_runs_GO1(
         save_edge_index=False,
         vis_graph=False,
         with_pos=False,
+        do_graphopt=False,
 ):
     """
     Save graph statistics of target_graph, as well as run_k_times
@@ -185,6 +189,7 @@ def save_graph_stats_k_runs_GO1(
             save_edge_index=save_edge_index,
             vis_graph=vis_graph,
             with_pos=with_pos,
+            do_graphopt=do_graphopt,
         )
         # save rewards on construction path;
         save_graph_stats(irl_policy.save_to, ['rewards'],
@@ -207,7 +212,8 @@ def save_graph_stats_k_runs_GO1(
         
         # eval policy from irl training directly on target graph;
         out_graph, rewards = eval_irl_policy(irl_policy, 
-                                    new_policy.env)
+                                    new_policy.env,
+                                    do_graphopt=do_graphopt)
 
         # save rewards along reconstruction path;
         save_graph_stats(irl_policy.save_to, ['rewards'],
@@ -343,14 +349,16 @@ def save_stats_edge_index(
         pickle.dump(tgdata.edge_index.tolist(), f)
 
 
-def run_on_train_nodes_k_times(irl_agent, names_of_stats, k):
+def run_on_train_nodes_k_times(irl_agent, names_of_stats, k,
+                               do_graphopt=False):
     p = irl_agent.save_to
     train_graph_gen_dir = p / 'train_graph_gen_dir'
     if not train_graph_gen_dir.exists():
         train_graph_gen_dir.mkdir(parents=True)
     for i in range(k):
         out_graph, rewards = eval_irl_policy(irl_agent, 
-                                        irl_agent.env)
+                                        irl_agent.env,
+                                        do_graphopt=do_graphopt)
         # get graph stats;
         stats = get_graph_stats(out_graph, sort=False)
         save_graph_stats(
@@ -363,7 +371,8 @@ def run_on_train_nodes_k_times(irl_agent, names_of_stats, k):
 
 
 def get_mrr_and_avg(
-    irl_policy, env, positives_dict, num_runs=3, k_proposals=10
+    irl_policy, env, positives_dict, num_runs=3, k_proposals=10,
+    do_graphopt=False,
 ):
     rr_means = []
     avg_found_rates = []
@@ -376,6 +385,7 @@ def get_mrr_and_avg(
             with_auc=True,
             positives_dict=positives_dict,
             k_proposals=k_proposals,
+            reward_encoder=irl_policy.old_encoder if do_graphopt else None
         )
         rr_means.append(np.mean(rrs))
         t = sum(positives_dict.values()) / len(positives_dict)
@@ -388,7 +398,7 @@ def get_mrr_and_avg(
 
 def save_mrr_and_avg(
     agent, train_edge_index, positives_dict, graph_source,
-    k_proposals=10,
+    k_proposals=10, do_graphopt=False,
 ):
     # make env start from subsampled edge index and sample 
     # remaining num of edges;
@@ -400,7 +410,8 @@ def save_mrr_and_avg(
     agent.env.max_repeats = agent.env.max_self_loops = num_expert_steps
 
     mrr_stats, found_rate_stats = get_mrr_and_avg(
-        agent, agent.env, positives_dict, k_proposals=k_proposals
+        agent, agent.env, positives_dict, k_proposals=k_proposals,
+        do_graphopt=do_graphopt,
     )
     mrr_stats_dir = agent.save_to / 'mrr_stats'
     if not mrr_stats_dir.exists():

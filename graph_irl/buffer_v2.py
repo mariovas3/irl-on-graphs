@@ -244,7 +244,7 @@ class GraphBuffer(BufferBase):
     
     def get_reward(self, batch_list, actions, reward_fn, 
                    extra_graph_level_feats_list=None, 
-                   get_graph_embeds=False):
+                   get_graph_embeds=False, reward_encoder=None):
         if self.state_reward:
             assert len(batch_list) == len(actions) + 1
             batch = Batch.from_data_list(batch_list[1:])
@@ -253,8 +253,12 @@ class GraphBuffer(BufferBase):
             else:
                 extra_graph_level_feats = None
             # return (rewards, [graph_embeds]), targets
-            temp =  reward_fn(batch, extra_graph_level_feats, 
-                             get_graph_embeds=get_graph_embeds)
+            if reward_encoder is not None:
+                out = reward_encoder(batch, extra_graph_level_feats)[0]
+                return reward_fn(out)
+            temp = reward_fn(batch,
+                            extra_graph_level_feats=extra_graph_level_feats, 
+                            get_graph_embeds=get_graph_embeds)
             if get_graph_embeds:
                 return temp, tgnn.global_add_pool(batch.x[:, -1], batch.batch)
             return temp
@@ -328,6 +332,7 @@ class GraphBuffer(BufferBase):
             with_auc=False,
             positives_dict=None,
             k_proposals: int=1,
+            reward_encoder=None,
     ):
         temp_mse, temp_len = 0., 0
         flag = agent.multitask_net is not None
@@ -478,11 +483,12 @@ class GraphBuffer(BufferBase):
                 # calculate rewards on batch;
                 curr_rewards = self.get_reward(
                     batch_list, action_idxs, env.reward_fn,
-                    extra_graph_level_feats_list, get_graph_embeds=flag
+                    extra_graph_level_feats_list, get_graph_embeds=flag,
+                    reward_encoder=reward_encoder
                 )
 
                 # this is for multitask gnn training;
-                if flag:
+                if flag and reward_encoder is None:
                     (curr_rewards, graph_embeds), targets = curr_rewards
                     outs = agent.multitask_net(graph_embeds)
                     curr_length = len(curr_rewards.view(-1))

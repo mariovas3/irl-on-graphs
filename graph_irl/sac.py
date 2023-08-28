@@ -66,6 +66,7 @@ class SACAgentBase:
         fixed_temperature=None,
         **kwargs,
     ):
+        self.old_encoder = None
         self.device = None
         self.name = name
         self.save_to = save_to
@@ -310,6 +311,7 @@ class SACAgentBase:
                 r, _, code, ep_len, _, obs, _, _, _ = self.buffer.get_single_ep_rewards_and_weights(
                     self.env,
                     self,
+                    reward_encoder=self.old_encoder
                 )
                 if self.buffer.per_decision_imp_sample:
                     r = r.sum().item()
@@ -363,6 +365,7 @@ class SACAgentGraph(SACAgentBase):
         with_entropy=False,
         with_multitask_gnn_loss=False,
         multitask_coef=1.,
+        no_q_encoder=False,
         **kwargs,
     ):
         super(SACAgentGraph, self).__init__(
@@ -384,6 +387,7 @@ class SACAgentGraph(SACAgentBase):
             fixed_temperature,
             **kwargs,
         )
+        self.no_q_necoder = no_q_encoder
         self.UT_trick = UT_trick
         self.with_entropy = with_entropy
         self.multitask_net = None
@@ -453,7 +457,7 @@ class SACAgentGraph(SACAgentBase):
         # update qfunc1
         self.Q1_optim.zero_grad()
         self.Q1_loss.backward(retain_graph=flag)
-        if flag:
+        if flag and not self.no_q_necoder:
             self.gnn_q1_loss.backward()
         if self.clip_grads:
             nn.utils.clip_grad_norm_(self.Q1.parameters(), max_norm=1.0, error_if_nonfinite=True)
@@ -462,7 +466,7 @@ class SACAgentGraph(SACAgentBase):
         # update qfunc2
         self.Q2_optim.zero_grad()
         self.Q2_loss.backward(retain_graph=flag)
-        if flag:
+        if flag and not self.no_q_necoder:
             self.gnn_q2_loss.backward()
         if self.clip_grads:
             nn.utils.clip_grad_norm_(self.Q2.parameters(), max_norm=1.0, error_if_nonfinite=True)
@@ -473,23 +477,26 @@ class SACAgentGraph(SACAgentBase):
             self.optim_multitask_net.step()
     
     def get_multitask_loss_from_graph_lvl(
-            self, graph_lvl_embeds, targets
+            self, graph_lvl_embeds: list, targets: torch.Tensor
     ):
         self.gnn_policy_loss = self.multitask_coef * nn.MSELoss()(
             self.multitask_net(graph_lvl_embeds[0]).view(-1), 
             targets.view(-1)
         )
+        
         self.gnn_policy_losses.append(self.gnn_policy_loss.item())
-        self.gnn_q1_loss = self.multitask_coef * nn.MSELoss()(
-            self.multitask_net(graph_lvl_embeds[1]).view(-1), 
-            targets.view(-1)
-        )
-        self.gnn_q1_losses.append(self.gnn_q1_loss.item())
-        self.gnn_q2_loss = self.multitask_coef * nn.MSELoss()(
-            self.multitask_net(graph_lvl_embeds[2]).view(-1), 
-            targets.view(-1)
-        )
-        self.gnn_q2_losses.append(self.gnn_q2_loss.item())
+        
+        if not self.no_q_necoder:    
+            self.gnn_q1_loss = self.multitask_coef * nn.MSELoss()(
+                self.multitask_net(graph_lvl_embeds[1]).view(-1), 
+                targets.view(-1)
+            )
+            self.gnn_q1_losses.append(self.gnn_q1_loss.item())
+            self.gnn_q2_loss = self.multitask_coef * nn.MSELoss()(
+                self.multitask_net(graph_lvl_embeds[2]).view(-1), 
+                targets.view(-1)
+            )
+            self.gnn_q2_losses.append(self.gnn_q2_loss.item())
 
     def sample_action(self, obs, k_proposals: int=1, extra_graph_level_feats=None, get_graph_embeds=False):
         if get_graph_embeds:
@@ -530,12 +537,21 @@ class SACAgentGraph(SACAgentBase):
             UT_trick_samples = policy_density.get_UT_trick_input()
             
             # encoder(obs_t)[0] gives one vector per graph in batch;
-            q1_integral = batch_UT_trick_from_samples(
-                self.Q1.net, self.Q1.encoder(obs_t, extra_graph_level_feats)[0], UT_trick_samples
-            )
-            q2_integral = batch_UT_trick_from_samples(
-                self.Q2.net, self.Q2.encoder(obs_t, extra_graph_level_feats)[0], UT_trick_samples
-            )
+            if self.no_q_necoder:
+                temp_embeds = graph_embeds.detach()
+                q1_integral = batch_UT_trick_from_samples(
+                    self.Q1.net, temp_embeds, UT_trick_samples
+                )
+                q2_integral = batch_UT_trick_from_samples(
+                    self.Q2.net, temp_embeds, UT_trick_samples
+                )
+            else:
+                q1_integral = batch_UT_trick_from_samples(
+                    self.Q1.net, self.Q1.encoder(obs_t, extra_graph_level_feats)[0], UT_trick_samples
+                )
+                q2_integral = batch_UT_trick_from_samples(
+                    self.Q2.net, self.Q2.encoder(obs_t, extra_graph_level_feats)[0], UT_trick_samples
+                )
             q_integral = torch.min(q1_integral, q2_integral).view(-1)
 
             # get policy_loss;
@@ -615,7 +631,6 @@ class SACAgentGraph(SACAgentBase):
             return_graph_lvl = True
 
         # get predictions from q functions;
-        obs_action_t = (obs_t, action_t)
         policy_density, node_embeds, graph_embeds = self.policy(
             obs_tp1, extra_graph_feats_tp1, get_graph_embeds=True
         )
@@ -627,22 +642,37 @@ class SACAgentGraph(SACAgentBase):
 
         # the action_is_index boolean will only be considered
         # if self.encoder is not None;
-        q1_est = self.Q1(obs_action_t, extra_graph_feats_t,
-                         action_is_index=self.buffer.action_is_index,
-                         return_graph_lvl=return_graph_lvl,
-                         )
-        q2_est = self.Q2(obs_action_t, extra_graph_feats_t,
-                         action_is_index=self.buffer.action_is_index,
-                         return_graph_lvl=return_graph_lvl,
-                         )
+        if self.no_q_necoder:
+            if self.buffer.action_is_index:
+                action_t = get_action_vector_from_idx(
+                    node_embeds, action_t, graph_embeds.shape[0]
+                )
+            obs_action_t = torch.cat(
+                (
+                    graph_embeds.detach(), action_t
+                ), -1
+            )
+            q1_est = self.Q1.net(obs_action_t)
+            q2_est = self.Q2.net(obs_action_t)
+        else:
+            obs_action_t = (obs_t, action_t)
+            q1_est = self.Q1(obs_action_t, extra_graph_feats_t,
+                            action_is_index=self.buffer.action_is_index,
+                            return_graph_lvl=return_graph_lvl,
+                            )
+            q2_est = self.Q2(obs_action_t, extra_graph_feats_t,
+                            action_is_index=self.buffer.action_is_index,
+                            return_graph_lvl=return_graph_lvl,
+                            )
         
         # in this case return_graph_lvl will be True and
         # Qfunc returns (value, graph_lvl_embed)
         if self.multitask_net is not None:
-            q1_est, ge1 = q1_est
-            q2_est, ge2 = q2_est
-            graph_lvl_embeds.append(ge1)
-            graph_lvl_embeds.append(ge2)
+            if not self.no_q_necoder:
+                q1_est, ge1 = q1_est
+                q2_est, ge2 = q2_est
+                graph_lvl_embeds.append(ge1)
+                graph_lvl_embeds.append(ge2)
             self.get_multitask_loss_from_graph_lvl(graph_lvl_embeds, targets)
         
         q1_est = q1_est.view(-1)
@@ -651,16 +681,23 @@ class SACAgentGraph(SACAgentBase):
         if self.UT_trick:
             # get (B, 2 * action_dim + 1, action_dim) samples;
             UT_trick_samples = policy_density.get_UT_trick_input()
-
-            # eval expectation of q-target functions by averaging over the
-            # 2 * action_dim + 1 samples and get (B, 1) output;
-            qt1_est = batch_UT_trick_from_samples(
-                self.Q1t.net, self.Q1t.encoder(obs_tp1, extra_graph_feats_tp1)[0], UT_trick_samples
-            )
-            qt2_est = batch_UT_trick_from_samples(
-                self.Q2t.net, self.Q2t.encoder(obs_tp1, extra_graph_feats_tp1)[0], UT_trick_samples
-            )
-
+            if self.no_q_necoder:
+                temp_embeds = graph_embeds.detach()
+                qt1_est = batch_UT_trick_from_samples(
+                    self.Q1t.net, temp_embeds, UT_trick_samples
+                )
+                qt2_est = batch_UT_trick_from_samples(
+                    self.Q2t.net, temp_embeds, UT_trick_samples
+                )
+            else:
+                # eval expectation of q-target functions by averaging over the
+                # 2 * action_dim + 1 samples and get (B, 1) output;
+                qt1_est = batch_UT_trick_from_samples(
+                    self.Q1t.net, self.Q1t.encoder(obs_tp1, extra_graph_feats_tp1)[0], UT_trick_samples
+                )
+                qt2_est = batch_UT_trick_from_samples(
+                    self.Q2t.net, self.Q2t.encoder(obs_tp1, extra_graph_feats_tp1)[0], UT_trick_samples
+                )
             # get negative entropy by using the UT trick;
             if self.with_entropy:
                 log_probs = -policy_density.entropy().sum(-1)

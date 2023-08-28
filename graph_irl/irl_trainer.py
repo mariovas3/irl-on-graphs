@@ -12,7 +12,6 @@ from graph_irl.graph_rl_utils import *
 from graph_irl.sac import save_metric_plots
 
 from typing import Tuple
-from itertools import chain
 import warnings
 import pickle
 from tqdm import tqdm
@@ -45,7 +44,9 @@ class IRLGraphTrainer:
         do_dfs_expert_paths=True,
         num_reward_grad_steps=1,
         ortho_init=True,
+        do_graphopt=False,
     ):
+        self.do_graphopt = do_graphopt
         self.verbose = verbose
         # reward-related params;
         self.reward_fn = reward_fn
@@ -175,7 +176,7 @@ class IRLGraphTrainer:
         loss.backward(retain_graph=self.agent.multitask_net is not None)
 
         # multitask loss;
-        if self.agent.multitask_net is not None:
+        if self.agent.multitask_net is not None and not self.do_graphopt:
             self.agent.optim_multitask_net.zero_grad()
             mtt_loss = tot_mse1 * (tot_len1 / (tot_len1 + tot_len2)) + tot_mse2 * (tot_len2 / (tot_len1 + tot_len2))
             mtt_loss = self.agent.multitask_coef * mtt_loss
@@ -272,6 +273,7 @@ class IRLGraphTrainer:
             ) = self.agent.buffer.get_single_ep_rewards_and_weights(
                 self.agent.env,
                 self.agent,
+                reward_encoder=self.agent.old_encoder if self.do_graphopt else None
             )
             assert steps == len(r)
             tot_mse = (
@@ -349,6 +351,7 @@ class IRLGraphTrainer:
             ) = self.agent.buffer.get_single_ep_rewards_and_weights(
                 self.agent.env,
                 self.agent,
+                reward_encoder=self.agent.old_encoder if self.do_graphopt else None
             )
 
             # this is for multitask training;
@@ -418,7 +421,7 @@ class IRLGraphTrainer:
             N += 1
 
             # update stuff for multitask;
-            if self.agent.multitask_net is not None:
+            if self.agent.multitask_net is not None and not self.do_graphopt:
                 tot_mse = (
                     tot_mse * (tot_len / (tot_len + temp_len))
                     + temp_mse * (temp_len / (tot_len + temp_len))
@@ -512,18 +515,26 @@ class IRLGraphTrainer:
 
             pointer += 1
             if self.agent.buffer.state_reward:
-                curr_rewards = self.reward_fn(
-                    batch, extra_graph_level_feats,
-                    get_graph_embeds=mtt,
-                )
+                if self.do_graphopt:
+                    out = self.agent.old_encoder(batch, extra_graph_level_feats)[0]
+                    curr_rewards = self.reward_fn(out)
+                else:
+                    curr_rewards = self.reward_fn(
+                        batch, extra_graph_level_feats,
+                        get_graph_embeds=mtt,
+                    )
             else:
+                if self.do_graphopt:
+                    raise NotImplementedError(
+                        'graphopt only has state reward func!'
+                    )
                 curr_rewards = self.reward_fn(
                     (batch, torch.tensor(action_idxs)), 
                     extra_graph_level_feats,
                     action_is_index=True
                 )
             # see if should do multitask;
-            if mtt:
+            if mtt and not self.do_graphopt:
                 targets = tgnn.global_add_pool(batch.x[:, -1], batch.batch)
                 curr_rewards, graph_embeds = curr_rewards
                 outs = self.agent.multitask_net(graph_embeds)

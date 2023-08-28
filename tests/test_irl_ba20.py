@@ -8,6 +8,7 @@ print(str(p))
 from graph_irl.graph_rl_utils import *
 from graph_irl.transforms import *
 from graph_irl.sac import SACAgentGraph, TEST_OUTPUTS_PATH
+from graph_irl.sac_GO import SACAgentGO
 from graph_irl.irl_trainer import IRLGraphTrainer
 from graph_irl.eval_metrics import *
 from graph_irl.experiments_init_utils import *
@@ -52,12 +53,12 @@ if __name__ == "__main__":
     # random param inits;
 
     # source graph;
-    n_nodes_source = 20
+    n_nodes_source = 40
     n_edges_source = 3
     graph_source = get_ba_graph(n_nodes_source, n_edges_source)
     
     # target graph;
-    n_nodes_target = 50
+    n_nodes_target = 80
     n_edges_target = n_edges_source
     graph_target = get_ba_graph(n_nodes_target, n_edges_target)
     
@@ -69,12 +70,17 @@ if __name__ == "__main__":
 
     # IRL train config;
     get_params_train = partial(get_params, **params_func_config)
+
+    if params_func_config['do_graphopt']:
+        agent_constructor = SACAgentGO
+    else:
+        agent_constructor = SACAgentGraph
     
     # get kwargs;
     agent_kwargs, config, reward_fn, irl_trainer_config = get_params_train()
     
     # init agent for the IRL training;
-    agent = SACAgentGraph(
+    agent = agent_constructor(
         **agent_kwargs,
         **config
     )
@@ -82,7 +88,7 @@ if __name__ == "__main__":
     # init IRL trainer;
     irl_trainer = IRLGraphTrainer(
         reward_fn=reward_fn,
-        reward_optim=torch.optim.Adam(reward_fn.parameters(), lr=1e-2),
+        reward_optim=torch.optim.Adam(reward_fn.parameters(), lr=1e-3),
         agent=agent,
         nodes=graph_source.x,
         expert_edge_index=graph_source.edge_index,
@@ -106,8 +112,8 @@ if __name__ == "__main__":
         pickle.dump(graph_target.edge_index.tolist(), f)
     
     # extra info to save in pkl after training is done;
-    irl_trainer_config['multitask_gnn'] = agent_kwargs['multitask_net'] is not None
-    irl_trainer_config['irl_iters'] = 1
+    irl_trainer_config['multitask_gnn'] = agent_kwargs['with_multitask_gnn_loss']
+    irl_trainer_config['irl_iters'] = 2
     irl_trainer_config['policy_epochs'] = 1
     irl_trainer_config['vis_graph'] = False
     irl_trainer_config['save_edge_index'] = True
@@ -139,7 +145,7 @@ if __name__ == "__main__":
     # get learned reward;
     reward_fn = irl_trainer.reward_fn
     reward_fn.eval()
-    agent_kwargs['save_to'] = None
+    reward_fn.requires_grad_(False)
 
     # set relevant target graphs params;
     params_func_config['n_nodes']= n_nodes_target
@@ -150,7 +156,8 @@ if __name__ == "__main__":
 
     # run test suite 3 - gen similar graphs to source graph;
     run_on_train_nodes_k_times(
-        irl_trainer.agent, names_of_stats, k=3
+        irl_trainer.agent, names_of_stats, k=3,
+        do_graphopt=params_func_config['do_graphopt']
     )
     
     # Run experiment suite 1. from GraphOpt paper;
@@ -161,17 +168,17 @@ if __name__ == "__main__":
     save_graph_stats_k_runs_GO1(
         irl_trainer.agent,
         reward_fn, 
-        SACAgentGraph, 
+        agent_constructor,  # VERY IMPORTANT TO GIVE THE CORRECT CONSTRUCTOR!!!
         num_epochs_new_policy=1,
         target_graph=graph_target,
-        run_k_times=1,
+        run_k_times=2,
         new_policy_param_getter_fn=get_params_eval,
         sort_metrics=False,
         euc_dist_idxs=None,#torch.tensor([[0, 1]], dtype=torch.long),
         save_edge_index=True,
         vis_graph=False,
         with_pos=False,
-        **agent_kwargs
+        do_graphopt=params_func_config['do_graphopt']
     )
     
     # currently prints summary stats of graph and saves plot of stats;

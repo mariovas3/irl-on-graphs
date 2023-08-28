@@ -102,6 +102,9 @@ class StateGraphReward(nn.Module):
     
     def forward(self, graph_batch, extra_graph_level_feats=None,
                 get_graph_embeds=False):
+        if self.encoder is None:
+            assert not get_graph_embeds
+            return - self.net(graph_batch)
         obs, _ = self.encoder(graph_batch, extra_graph_level_feats)
         # return the negative of the cost -> reward;
         if get_graph_embeds:

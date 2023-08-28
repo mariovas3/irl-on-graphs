@@ -9,6 +9,7 @@ from graph_irl.experiments_init_utils import *
 from graph_irl.graph_rl_utils import *
 from graph_irl.transforms import *
 from graph_irl.sac import SACAgentGraph, TEST_OUTPUTS_PATH
+from graph_irl.sac_GO import SACAgentGO
 from graph_irl.examples.circle_graph import create_circle_graph
 from graph_irl.irl_trainer import IRLGraphTrainer
 from graph_irl.eval_metrics import *
@@ -79,12 +80,17 @@ if __name__ == "__main__":
     params_func_config['nodes'] = nodes
     params_func_config['num_edges_expert'] = expert_edge_index.shape[-1] // 2
     get_params_train = partial(get_params, **params_func_config)
+
+    if params_func_config['do_graphopt']:
+        agent_constructor = SACAgentGO
+    else:
+        agent_constructor = SACAgentGraph
     
     # get kwargs;
     agent_kwargs, config, reward_fn, irl_trainer_config = get_params_train()
     
     # init agent for the IRL training;
-    agent = SACAgentGraph(
+    agent = agent_constructor(
         **agent_kwargs,
         **config
     )
@@ -111,7 +117,7 @@ if __name__ == "__main__":
     )
     
     irl_trainer_config['multitask_gnn'] = agent_kwargs['with_multitask_gnn_loss']
-    irl_trainer_config['irl_iters'] = 3
+    irl_trainer_config['irl_iters'] = 2
     irl_trainer_config['policy_epochs'] = 1
     irl_trainer_config['vis_graph'] = False
     irl_trainer_config['save_edge_index'] = True
@@ -147,7 +153,8 @@ if __name__ == "__main__":
 
     # run test suite 3 - gen similar graphs to source graph;
     run_on_train_nodes_k_times(
-        irl_trainer.agent, names_of_stats, k=3
+        irl_trainer.agent, names_of_stats, k=3, 
+        do_graphopt=params_func_config['do_graphopt']
     )
     
     # Run experiment suite 1. from GraphOpt paper;
@@ -158,16 +165,17 @@ if __name__ == "__main__":
     save_graph_stats_k_runs_GO1(
         irl_trainer.agent,
         reward_fn, 
-        SACAgentGraph, 
-        num_epochs_new_policy=3,
+        agent_constructor, 
+        num_epochs_new_policy=1,
         target_graph=graph_source,
-        run_k_times=3,
+        run_k_times=2,
         new_policy_param_getter_fn=get_params_train,
         sort_metrics=False,
         euc_dist_idxs=torch.tensor([[0, 1]], dtype=torch.long),
         save_edge_index=True,
         vis_graph=False,
         with_pos=True,
+        do_graphopt=params_func_config['do_graphopt']
     )
     
     # currently prints summary stats of graph and saves plot of stats;
