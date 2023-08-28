@@ -141,6 +141,10 @@ def get_params(
     # some setup;
     if num_steps_to_sample is None:
         num_steps_to_sample = max(num_edges_expert, 100)
+    if isinstance(encoder_hiddens, int):
+        encoder_hiddens = [encoder_hiddens]
+    if isinstance(net_hiddens, int):
+        net_hiddens = [net_hiddens]
     encoder_hiddens = encoder_hiddens + [embed_dim]
     reward_fn_hiddens = net_hiddens
     gauss_policy_hiddens = net_hiddens
