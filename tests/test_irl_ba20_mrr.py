@@ -111,7 +111,7 @@ if __name__ == "__main__":
     
     # extra info to save in pkl after training is done;
     irl_trainer_config['multitask_gnn'] = agent_kwargs['with_multitask_gnn_loss']
-    irl_trainer_config['irl_iters'] = 2
+    irl_trainer_config['irl_iters'] = 12
     irl_trainer_config['policy_epochs'] = 1
     irl_trainer_config['vis_graph'] = False
     irl_trainer_config['save_edge_index'] = True
