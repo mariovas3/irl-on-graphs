@@ -9,12 +9,14 @@ class GraphReward(nn.Module):
         encoder: nn.Module, 
         embed_dim: int, 
         hiddens: list, 
+        with_layer_norm: bool=False,
         with_batch_norm: bool=False,
     ):
         super(GraphReward, self).__init__()
         # set given attributes;
         self.encoder = encoder
         self.hiddens = hiddens
+        assert not (with_batch_norm and with_layer_norm)
 
         # create net assuming input will be
         # concat(graph_embed, node_embed1, node_embed2)
@@ -26,6 +28,8 @@ class GraphReward(nn.Module):
             self.net.append(nn.Linear(temp[i], temp[i+1]))
             if with_batch_norm:
                 self.net.append(nn.BatchNorm1d(temp[i+1]))
+            if with_layer_norm:
+                self.net.append(nn.LayerNorm(temp[i+1]))
             self.net.append(nn.ReLU())
         
         # up to here this corresponds to getting the cost function;
@@ -71,12 +75,14 @@ class StateGraphReward(nn.Module):
         encoder: nn.Module, 
         embed_dim: int, 
         hiddens: list, 
+        with_layer_norm: bool=False,
         with_batch_norm: bool=False,
     ):
         super(StateGraphReward, self).__init__()
         # set given attributes;
         self.encoder = encoder
         self.hiddens = hiddens
+        assert not (with_batch_norm and with_layer_norm)
 
         # create net assuming input will be
         # graph_embed;
@@ -88,6 +94,8 @@ class StateGraphReward(nn.Module):
             self.net.append(nn.Linear(temp[i], temp[i+1]))
             if with_batch_norm:
                 self.net.append(nn.BatchNorm1d(temp[i+1]))
+            if with_layer_norm:
+                self.net.append(nn.LayerNorm(temp[i+1]))
             self.net.append(nn.ReLU())
         
         # up to here this corresponds to getting the cost function;

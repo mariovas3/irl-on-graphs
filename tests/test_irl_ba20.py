@@ -88,7 +88,10 @@ if __name__ == "__main__":
     # init IRL trainer;
     irl_trainer = IRLGraphTrainer(
         reward_fn=reward_fn,
-        reward_optim=torch.optim.Adam(reward_fn.parameters(), lr=1e-3),
+        reward_optim=torch.optim.Adam(
+            reward_fn.parameters(), 
+            lr=params_func_config['reward_lr']
+        ),
         agent=agent,
         nodes=graph_source.x,
         expert_edge_index=graph_source.edge_index,

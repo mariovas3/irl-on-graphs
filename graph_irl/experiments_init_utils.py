@@ -9,6 +9,7 @@ from graph_irl.reward import *
 from graph_irl.buffer_v2 import GraphBuffer
 
 from torch_geometric.utils import barabasi_albert_graph
+import warnings
 
 
 def split_edge_index(edge_index, test_prop):
@@ -87,9 +88,16 @@ params_func_config = dict(
     multitask_coef=1.,
     max_size=10_000,
     with_mlp_batch_norm=True,
+    with_mlp_layer_norm=False,
     heads=1,
     do_graphopt=False,
     no_q_encoder=False,
+    policy_lr=1e-3,
+    temperature_lr=1e-3,
+    qfunc_lr=1e-3,
+    reward_lr=1e-2,
+    log_sigma_min=None,#-20,
+    log_sigma_max=None,#2,
 )
 
 
@@ -128,9 +136,16 @@ def get_params(
     multitask_coef=1.,
     max_size=10_000,
     with_mlp_batch_norm=True,
+    with_mlp_layer_norm=False,
     heads=1,
     do_graphopt=False,
     no_q_encoder=False,
+    policy_lr=1e-3,
+    temperature_lr=1e-3,
+    qfunc_lr=1e-3,
+    reward_lr=1e-2,
+    log_sigma_min=None,#-20,
+    log_sigma_max=None,#2,
 ):
     # if we do multitask loss for gnn, make sure nothing gets
     # appended to the graph level embedding for now;
@@ -200,12 +215,14 @@ def get_params(
             embed_dim=embed_dim + n_extra_cols_append, 
             hiddens=reward_fn_hiddens, 
             with_batch_norm=with_mlp_batch_norm,
+            with_layer_norm=with_mlp_layer_norm,
         ),
         state_reward_fn=StateGraphReward(
             None if do_graphopt else encoder_dict['encoder_reward'], 
             embed_dim=embed_dim + n_extra_cols_append, 
             hiddens=reward_fn_hiddens, 
             with_batch_norm=with_mlp_batch_norm,
+            with_layer_norm=with_mlp_layer_norm,
         )
     )
 
@@ -223,16 +240,22 @@ def get_params(
             action_dim=embed_dim,
             hiddens=gauss_policy_hiddens,
             with_batch_norm=with_mlp_batch_norm,
+            with_layer_norm=with_mlp_layer_norm,
             encoder=encoder_dict['encoder'],
             two_action_vectors=True,
+            log_sigma_min=log_sigma_min,
+            log_sigma_max=log_sigma_max,
         ),
         tanh_gauss_policy_kwargs = dict(
             obs_dim=embed_dim + n_extra_cols_append,
             action_dim=embed_dim,
             hiddens=gauss_policy_hiddens,
             with_batch_norm=with_mlp_batch_norm,
+            with_layer_norm=with_mlp_layer_norm,
             encoder=encoder_dict['encoder'],
             two_action_vectors=True,
+            log_sigma_min=log_sigma_min,
+            log_sigma_max=log_sigma_max,
         ),
         tsg_policy_kwargs = dict(
             obs_dim=embed_dim + n_extra_cols_append,
@@ -241,13 +264,26 @@ def get_params(
             hiddens2=tsg_policy_hiddens2,
             encoder=encoder_dict['encoder'],
             with_batch_norm=with_mlp_batch_norm,
+            with_layer_norm=with_mlp_layer_norm,
+            log_sigma_min=log_sigma_min,
+            log_sigma_max=log_sigma_max,
         )
     )
-
+    if UT_trick and with_mlp_batch_norm:
+        warnings.warn('Qfunc cannot implement UT trick with batch norm on. '
+                    'This is because of the extra dimension created for '
+                    'the sigma points. BN will start treating this as the '
+                    'channel dimension which may be different (and usually is) '
+                    'from the intended dim of the BN layers in the MLP.')
     qfunc_kwargs = dict(
         obs_action_dim=embed_dim * 3 + n_extra_cols_append,
         hiddens=qfunc_hiddens, 
-        with_batch_norm=with_mlp_batch_norm, 
+        with_layer_norm=with_mlp_layer_norm,
+        # cant do UT trick with batch norm since batch_norm will 
+        # need to be applied to 2d + 1 nums, but it is init to handle
+        # the output of the previous affine layer - so an error for 
+        # the dim will be raised;
+        with_batch_norm=False if UT_trick else with_mlp_batch_norm, 
         encoder=None
     )
 
@@ -275,9 +311,9 @@ def get_params(
             Q2_optim=torch.optim.Adam,
         ),
         entropy_lb=embed_dim,
-        policy_lr=1e-3,
-        temperature_lr=1e-3,
-        qfunc_lr=1e-3,
+        policy_lr=policy_lr,
+        temperature_lr=temperature_lr,
+        qfunc_lr=qfunc_lr,
         tau=0.005,
         discount=1.,
         save_to=TEST_OUTPUTS_PATH,
@@ -374,7 +410,7 @@ def arg_parser(settable_params, argv):
           settable_params.keys(), 
           end="\n\n")
     int_list_regex = re.compile('^([0-9]+,)+[0-9]+$')
-    int_regex = re.compile('^[0-9]+[0-9]*$')
+    int_regex = re.compile('^(-?)[0-9]+[0-9]*$')
     if len(argv) > 1:
         for a in argv[1:]:
             n, v = a.split('=')
@@ -384,7 +420,7 @@ def arg_parser(settable_params, argv):
                     v = [int(temp) for temp in nums]
                 elif re.match(int_regex, v):
                     v = int(v)
-                elif '_coef' in n:
+                elif '_coef' in n or '_lr' in n:
                     v = float(v)
                 settable_params[n] = v
                 print(f"{n}={v}", type(v), v)

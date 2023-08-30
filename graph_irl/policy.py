@@ -12,6 +12,7 @@ from pathlib import Path
 from graph_irl.distributions import *
 from graph_irl.graph_rl_utils import get_action_vector_from_idx
 import torch_geometric.nn as tgnn
+from math import exp
 
 
 TEST_OUTPUTS_PATH = Path(__file__).absolute().parent.parent / "test_output"
@@ -84,8 +85,17 @@ class GCN(nn.Module):
 
 
 class AmortisedGaussNet(nn.Module):
-    def __init__(self, obs_dim, action_dim, hiddens, with_batch_norm=True):
+    def __init__(
+        self, obs_dim, action_dim, hiddens, 
+        with_layer_norm=False,
+        with_batch_norm=False,
+        log_sigma_min=None,
+        log_sigma_max=None,
+    ):
         super(AmortisedGaussNet, self).__init__()
+        assert not (with_layer_norm and with_batch_norm)
+        self.log_sigma_min=log_sigma_min
+        self.log_sigma_max=log_sigma_max
 
         # init net;
         self.net = nn.Sequential()
@@ -99,6 +109,8 @@ class AmortisedGaussNet(nn.Module):
 
             if with_batch_norm:
                 self.net.append(nn.BatchNorm1d(hiddens[i]))
+            if with_layer_norm:
+                self.net.append(nn.LayerNorm(hiddens[i]))
             # ReLU activation;
             self.net.append(nn.ReLU())
 
@@ -112,6 +124,15 @@ class AmortisedGaussNet(nn.Module):
     def forward(self, obs):
         # assert not torch.any(obs.isnan())
         emb = self.net(obs)  # shared embedding for mean and std;
+        if self.log_sigma_max is not None and self.log_sigma_min is not None:
+            return (
+                self.mu_net(emb),
+                torch.clamp(
+                    self.std_net(emb), 
+                    exp(self.log_sigma_min),
+                    exp(self.log_sigma_max)
+                )
+            )
         return self.mu_net(emb), self.std_net(emb)
 
 
@@ -121,9 +142,12 @@ class GaussPolicy(nn.Module):
         obs_dim,
         action_dim,
         hiddens,
+        with_layer_norm=False,
         with_batch_norm=False,
         encoder=None,
         two_action_vectors=False,
+        log_sigma_min=None,
+        log_sigma_max=None,
     ):
         """
         Args:
@@ -156,7 +180,11 @@ class GaussPolicy(nn.Module):
 
         # init net;
         self.net = AmortisedGaussNet(
-            obs_dim, out_dim, hiddens, with_batch_norm
+            obs_dim, out_dim, hiddens, 
+            with_layer_norm=with_layer_norm,
+            with_batch_norm=with_batch_norm,
+            log_sigma_min=log_sigma_min,
+            log_sigma_max=log_sigma_max,
         )
 
     def forward(
@@ -189,17 +217,28 @@ class TwoStageGaussPolicy(nn.Module):
         hiddens1,
         hiddens2,
         encoder,
+        with_layer_norm=False,
         with_batch_norm=False,
+        log_sigma_min=None,
+        log_sigma_max=None,
     ):
         super(TwoStageGaussPolicy, self).__init__()
         self.encoder = encoder
         self.name = "TwoStageGaussPolicy"
 
         self.net1 = AmortisedGaussNet(
-            obs_dim, action_dim, hiddens1, with_batch_norm
+            obs_dim, action_dim, hiddens1, 
+            with_layer_norm=with_layer_norm, 
+            with_batch_norm=with_batch_norm,
+            log_sigma_min=log_sigma_min,
+            log_sigma_max=log_sigma_max,
         )
         self.net2 = AmortisedGaussNet(
-            obs_dim + action_dim, action_dim, hiddens2, with_batch_norm
+            obs_dim + action_dim, action_dim, hiddens2, 
+            with_layer_norm=with_layer_norm,
+            with_batch_norm=with_batch_norm,
+            log_sigma_min=log_sigma_min,
+            log_sigma_max=log_sigma_max,
         )
 
     def forward(
@@ -225,9 +264,12 @@ class TanhGaussPolicy(nn.Module):
         obs_dim,
         action_dim,
         hiddens,
+        with_layer_norm=False,
         with_batch_norm=False,
         encoder=None,
         two_action_vectors=False,
+        log_sigma_min=None,
+        log_sigma_max=None,
     ):
         super(TanhGaussPolicy, self).__init__()
         self.two_action_vectors = two_action_vectors
@@ -245,7 +287,11 @@ class TanhGaussPolicy(nn.Module):
             out_dim = action_dim
         
         self.net = AmortisedGaussNet(
-            obs_dim, out_dim, hiddens, with_batch_norm
+            obs_dim, out_dim, hiddens,
+            with_layer_norm=with_layer_norm,
+            with_batch_norm=with_batch_norm,
+            log_sigma_min=log_sigma_min,
+            log_sigma_max=log_sigma_max,
         )
 
     def forward(
@@ -273,12 +319,16 @@ class TanhGaussPolicy(nn.Module):
 class Qfunc(nn.Module):
     def __init__(
         self, obs_action_dim, hiddens, 
+        with_layer_norm=False,
         with_batch_norm=False, encoder=None,
     ):
         super(Qfunc, self).__init__()
 
         # set encoder;
         self.encoder = encoder
+        self.with_batch_norm = with_batch_norm
+        self.with_layer_norm = with_layer_norm
+        assert not (with_batch_norm and with_layer_norm)
 
         # init net;
         self.net = nn.Sequential()
@@ -292,6 +342,8 @@ class Qfunc(nn.Module):
 
             if with_batch_norm:
                 self.net.append(nn.BatchNorm1d(hiddens[i]))
+            if with_layer_norm:
+                self.net.append(nn.LayerNorm(hiddens[i]))
             # add ReLU non-linearity;
             self.net.append(nn.ReLU())
 
