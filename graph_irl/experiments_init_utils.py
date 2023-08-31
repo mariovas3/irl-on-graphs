@@ -300,8 +300,12 @@ def get_params(
         Q1t_kwargs['encoder'] = encoder_dict['encoderq1t']
         Q2t_kwargs['encoder'] = encoder_dict['encoderq2t']
 
+    agent_name = 'SACAgentGO' if do_graphopt else 'SACAgentGraph'
+    agent_name = agent_name + (f"-nh-{len(net_hiddens)}x{net_hiddens[0]}"
+                               f"-eh-{len(encoder_hiddens)}x{encoder_hiddens[0]}"
+                               f"-embdim-{embed_dim}")
     agent_kwargs=dict(
-        name='SACAgentGO' if do_graphopt else 'SACAgentGraph',
+        name=agent_name,
         policy_constructor=policy_constructors[which_policy_kwargs],
         qfunc_constructor=Qfunc,
         env_constructor=GraphEnv,
