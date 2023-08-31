@@ -98,6 +98,7 @@ params_func_config = dict(
     reward_lr=1e-2,
     log_sigma_min=None,#-20,
     log_sigma_max=None,#2,
+    use_valid_samples=False,
 )
 
 
@@ -146,6 +147,7 @@ def get_params(
     reward_lr=1e-2,
     log_sigma_min=None,#-20,
     log_sigma_max=None,#2,
+    use_valid_samples=False,
 ):
     # if we do multitask loss for gnn, make sure nothing gets
     # appended to the graph level embedding for now;
@@ -325,6 +327,7 @@ def get_params(
         with_multitask_gnn_loss=with_multitask_gnn_loss,
         multitask_coef=multitask_coef,
         no_q_encoder=no_q_encoder,
+        use_valid_samples=use_valid_samples,
     )
 
     config = dict(

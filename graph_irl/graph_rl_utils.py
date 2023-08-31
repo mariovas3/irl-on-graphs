@@ -224,6 +224,89 @@ def euc_dist_similarity(
     return select_actions_from_scores(temp, positives_dict, edge_set)
 
 
+def get_valid_action_vectors(firsts, seconds, batch, proposals):
+    """
+    Returns a valid selection of proposal actions from proposals.
+    Validity is based on actions not resulting in self loops or 
+    repeated edges.
+
+    Args:
+        firsts (torch.Tensor): is of shape (batch, num_proposals);
+        seconds (torch.Tensor): is of shape (batch, num_proposals);
+        batch (tg Batch or tg Data object): batch of graphs or single graph;
+        proposals (torch.Tensor): is of shape (batch, num_proposals, embed_dim, 2);
+    """
+    # idxs to choose the correct proposal action for each batch;
+    # at end len(idxs) must be equal to batch_size;
+    idxs = []
+    n_graphs = batch.num_graphs if hasattr(batch, 'num_graphs') else 1
+    assert len(batch.x) % n_graphs == 0
+    
+    def small_sort(x, y):
+        return min(x, y), max(x, y)
+    
+    # this is nucessary, since the batch is just a giant graph
+    # with multiple components, each of which is an individual graph
+    # (state) from the replay buffer; Some graphs can have more edges 
+    # than other so it's not trivial to directly work with the 
+    # edge index of the batch itself;
+    given_eis = [obs.edge_index for obs in batch.to_data_list()]
+    
+    for b, (f, s, aeis) in enumerate(zip(firsts, seconds, given_eis)):
+        # get the edge set;
+        eset = set([small_sort(x[0], x[1]) 
+                    for x in zip(*aeis.tolist())])
+        idx = 0
+        for i, (x, y) in enumerate(zip(f, s)):
+            # skip if is self loop or is an existing edge;
+            x, y = x.item(), y.item()
+            if x == y or small_sort(x, y) in eset:
+                continue
+            # choose the action if the edge is not 
+            # in the edge set and not self loop;
+            idx = i
+            break
+        idxs.append((b, idx))
+    idxs = torch.tensor(idxs, dtype=torch.long)
+    actions = proposals[idxs[:, 0], idxs[:, 1]]
+    assert actions.shape == (len(proposals), proposals.shape[-2], 2)
+    return actions[:, :, 0], actions[:, :, 1]
+
+
+def get_valid_proposal(node_embeds_detached, batch, a1s, a2s):
+    """
+    Return action vectors that don't lead to self loop 
+    or repeated edge.
+
+    Args:
+        node_embeds_detached (torch.Tensor): shape is (B * N, embed_dim)
+        batch (tg Batch or Data instance): batch of graphs (actual states)
+        a1s (torch.Tensor): shape is (k_proposals, batch_size, node_embed_dim)
+        a2s (torch.Tensor): shape is (k_proposals, batch_size, node_embed_dim)
+    Return:
+        Returns (valid1, valid2) where the each element is of shape 
+            (batch_size, node_embed_dim).
+    Note:
+        If no valid action is found among the samples, returns the 
+            first action among the proposals.
+    """
+    # a1s and a2s are of shape 
+    # (k_proposals, batch_size, node_embed_dim)
+    
+    # proposals is of shape (batch_size, k_proposals, node_embed_dim, 2)
+    proposals = torch.cat((a1s.unsqueeze(-1), a2s.unsqueeze(-1)), -1).permute(1, 0, 2, 3)
+    # get number of graphs and number of nodes per graph;
+    n_graphs = batch.num_graphs if hasattr(batch, 'num_graphs') else 1
+    assert len(node_embeds_detached) % n_graphs == 0
+    n_nodes = len(node_embeds_detached) // n_graphs
+    # scores is of shape (batch_size, k_proposals, n_nodes, 2)
+    scores = node_embeds_detached.view(n_graphs, n_nodes, -1).unsqueeze(1) @ proposals
+    # argmax scores on n_nodes dim;
+    firsts = scores[:, :, :, 0].argmax(-1)
+    seconds = scores[:, :, :, 1].argmax(-1)
+    return get_valid_action_vectors(firsts, seconds, batch, proposals)
+
+
 class GraphEnv:
     def __init__(
         self,

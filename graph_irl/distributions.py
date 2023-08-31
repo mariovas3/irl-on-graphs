@@ -88,11 +88,11 @@ class GaussDist(GaussInputDist):
             return a[:, :, :mid].squeeze(), a[:, :, mid:].squeeze()
         return a
 
-    def rsample(self):
-        a = self.diag_gauss.rsample()
+    def rsample(self, k_proposals: int=1):
+        a = self.diag_gauss.rsample((k_proposals, ))
         if self.two_action_vectors:
             mid = a.shape[-1] // 2
-            return a[:, :mid].squeeze(), a[:, mid:].squeeze()
+            return a[:, :, :mid].squeeze(), a[:, :, mid:].squeeze()
         return a
 
     def log_prob_UT_trick(self):
@@ -125,8 +125,8 @@ class TwoStageGaussDist(GaussInputDist):
         diag_gauss2 = self._get_a2_dist(a1)
         return a1.squeeze(), diag_gauss2.sample().squeeze()
 
-    def rsample(self):
-        a1 = self.diag_gauss.rsample()
+    def rsample(self, k_proposals: int=1):
+        a1 = self.diag_gauss.rsample((k_proposals, ))
         diag_gauss2 = self._get_a2_dist(a1)
         return a1.squeeze(), diag_gauss2.rsample().squeeze()
 

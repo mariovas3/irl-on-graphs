@@ -34,7 +34,7 @@ class GraphReward(nn.Module):
         
         # up to here this corresponds to getting the cost function;
         self.net.append(nn.Linear(hiddens[-1], 1))
-        self.net.append(nn.Softplus())
+        # self.net.append(nn.Softplus())
     
     def reset(self):
         pass
@@ -65,8 +65,8 @@ class GraphReward(nn.Module):
         obs_action = torch.cat((obs, actions), -1)
         # return the negative of the cost -> reward;
         if get_graph_embeds:
-            return -self.net(obs_action), obs
-        return -self.net(obs_action)
+            return self.net(obs_action), obs
+        return self.net(obs_action)
 
 
 class StateGraphReward(nn.Module):
@@ -100,7 +100,7 @@ class StateGraphReward(nn.Module):
         
         # up to here this corresponds to getting the cost function;
         self.net.append(nn.Linear(hiddens[-1], 1))
-        self.net.append(nn.Softplus())
+        # self.net.append(nn.Softplus())
     
     def reset(self):
         pass
@@ -116,5 +116,5 @@ class StateGraphReward(nn.Module):
         obs, _ = self.encoder(graph_batch, extra_graph_level_feats)
         # return the negative of the cost -> reward;
         if get_graph_embeds:
-            return -self.net(obs), obs
-        return - self.net(obs)
+            return self.net(obs), obs
+        return self.net(obs)

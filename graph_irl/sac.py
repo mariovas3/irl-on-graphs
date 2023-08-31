@@ -10,16 +10,13 @@ import numpy as np
 import torch
 from torch import nn
 
-from torch_geometric.nn import global_mean_pool
 
-from graph_irl.policy import *
 from graph_irl.distributions import batch_UT_trick_from_samples
-from graph_irl.buffer_v2 import *
+# from graph_irl.buffer_v2 import *
 from graph_irl.vis_utils import *
-from graph_irl.graph_rl_utils import OI_init
+from graph_irl.graph_rl_utils import OI_init, get_action_vector_from_idx, get_valid_proposal
 
 from typing import Optional
-from itertools import chain
 from copy import deepcopy
 from pathlib import Path
 import time
@@ -366,6 +363,7 @@ class SACAgentGraph(SACAgentBase):
         with_multitask_gnn_loss=False,
         multitask_coef=1.,
         no_q_encoder=False,
+        use_valid_samples=False,
         **kwargs,
     ):
         super(SACAgentGraph, self).__init__(
@@ -387,6 +385,7 @@ class SACAgentGraph(SACAgentBase):
             fixed_temperature,
             **kwargs,
         )
+        self.use_valid_samples = use_valid_samples
         self.no_q_necoder = no_q_encoder
         self.UT_trick = UT_trick
         self.with_entropy = with_entropy
@@ -568,7 +567,12 @@ class SACAgentGraph(SACAgentBase):
                 ).mean()
         else:
             # do reparam trick;
-            repr_trick1, repr_trick2 = policy_density.rsample()
+            if self.use_valid_samples:
+                repr_trick1, repr_trick2 = policy_density.rsample(k_proposals=10)
+                repr_trick1, repr_trick2 = get_valid_proposal(node_embeds.detach(), obs_t, repr_trick1, repr_trick2)
+            else:
+                repr_trick1, repr_trick2 = policy_density.rsample()
+            assert repr_trick1.requires_grad and repr_trick2.requires_grad
 
             # get log prob for policy optimisation;
             if self.with_entropy:
@@ -704,8 +708,12 @@ class SACAgentGraph(SACAgentBase):
             else:
                 log_probs = policy_density.log_prob_UT_trick().sum(-1)
         else:
-            # sample future action;
-            action_tp1 = policy_density.sample()
+            if self.use_valid_samples:
+                a1s, a2s = policy_density.sample(k_proposals=10)
+                action_tp1 = get_valid_proposal(node_embeds.detach(), obs_tp1, a1s, a2s)
+            else:
+                # sample future action;
+                action_tp1 = policy_density.sample()
 
             # get log probs;
             if self.with_entropy:
