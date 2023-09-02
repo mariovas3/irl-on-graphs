@@ -45,7 +45,9 @@ class IRLGraphTrainer:
         num_reward_grad_steps=1,
         ortho_init=True,
         do_graphopt=False,
+        zero_interm_rew=False,
     ):
+        self.zero_interm_rew = zero_interm_rew
         self.do_graphopt = do_graphopt
         self.verbose = verbose
         # reward-related params;
@@ -129,26 +131,49 @@ class IRLGraphTrainer:
             return lcr_loss
         warnings.warn("expert trajectories less than 3 steps long")
         return 0.
+    
+    def get_source_graph_reward(self):
+        source_graph = Data(x=self.nodes, 
+                            edge_index=self.expert_edge_index)
+        extra_graph_level_feats = None
+        if self.agent.buffer.transform_ is not None:
+            self.agent.buffer.transform_(source_graph)
+            if self.agent.buffer.transform_.get_graph_level_feats_fn is not None:
+                extra_graph_level_feats = self.agent.buffer.transform_.get_graph_level_feats_fn(source_graph)
+
+        if self.do_graphopt:
+            out = self.agent.old_encoder(source_graph, extra_graph_level_feats)[0]
+            curr_rewards = self.reward_fn(out)
+        else:
+            curr_rewards = self.reward_fn(
+                source_graph, extra_graph_level_feats,
+                get_graph_embeds=False,
+            )
+        curr_rewards = curr_rewards.view(-1) * self.reward_scale
+        return curr_rewards, None, None, None
 
     def do_reward_grad_step(self):
         self.reward_optim.zero_grad()
         mono_loss, lcr_loss1 = 0.0, 0.0
 
-        # get avg(expert_returns)
-        expert_avg_returns, expert_rewards, tot_mse1, tot_len1  = self.get_avg_expert_returns()
-        assert expert_rewards.requires_grad
+        if self.zero_interm_rew:
+            expert_avg_returns, expert_rewards, tot_mse1, tot_len1 = self.get_source_graph_reward()
+        else:
+            # get avg(expert_returns)
+            expert_avg_returns, expert_rewards, tot_mse1, tot_len1  = self.get_avg_expert_returns()
+            assert expert_rewards.requires_grad
         
-        # get rewards for half trajectories;
-        if self.num_edges_start_from > 0:
+        # get rewards for truncated trajectories;
+        if not self.zero_interm_rew and self.num_edges_start_from > 0:
             expert_rewards = expert_rewards[:, self.num_edges_start_from:]
             expert_avg_returns = expert_rewards.sum(-1).mean()
         
-        if self.verbose:
+        if not self.zero_interm_rew and self.verbose:
             print("expert_rewards shape: ", expert_rewards.shape)
 
         # see if should penalise to encourage later steps in the expert traj
         # to receive more reward;
-        if self.mono_regularisation_on_demo_coef is not None:
+        if not self.zero_interm_rew and self.mono_regularisation_on_demo_coef is not None:
             mono_loss = (
                 (
                     torch.relu(
@@ -158,7 +183,7 @@ class IRLGraphTrainer:
             ) * self.mono_regularisation_on_demo_coef
 
         # lcr loss for the expert examples;
-        if self.lcr_regularisation_coef is not None:
+        if not self.zero_interm_rew and self.lcr_regularisation_coef is not None:
             lcr_loss1 = self._get_lcr_loss(expert_rewards)
 
         # get imp_sampled generated returns with stop grad on the weights;
@@ -176,7 +201,7 @@ class IRLGraphTrainer:
         loss.backward(retain_graph=self.agent.multitask_net is not None)
 
         # multitask loss;
-        if self.agent.multitask_net is not None and not self.do_graphopt:
+        if self.agent.multitask_net is not None  and not self.zero_interm_rew and not self.do_graphopt:
             self.agent.optim_multitask_net.zero_grad()
             mtt_loss = tot_mse1 * (tot_len1 / (tot_len1 + tot_len2)) + tot_mse2 * (tot_len2 / (tot_len1 + tot_len2))
             mtt_loss = self.agent.multitask_coef * mtt_loss
@@ -186,15 +211,19 @@ class IRLGraphTrainer:
         
         self.expert_avg_returns.append(expert_avg_returns.item())
         self.imp_sampled_returns.append(imp_sampled_gen_rewards.item())
-        self.mono_losses.append(mono_loss.item())
-        self.lcr_expert_losses.append(lcr_loss1.item())
-        self.lcr_sampled_losses.append(lcr_loss2.item())
+        if self.mono_regularisation_on_demo_coef is not None:
+            self.mono_losses.append(mono_loss.item())
+        if self.lcr_regularisation_coef is not None:
+            self.lcr_expert_losses.append(lcr_loss1.item())
+            self.lcr_sampled_losses.append(lcr_loss2.item())
 
         print(f"expert avg rewards: {expert_avg_returns.item()}")
         print(f"imp sampled rewards: {imp_sampled_gen_rewards.item()}")
-        print(f"mono loss: {mono_loss.item()}")
-        print(f"lcr_expert_loss: {lcr_loss1.item()}")
-        print(f"lcr_sampled_loss: {lcr_loss2.item()}")
+        if self.mono_regularisation_on_demo_coef is not None:
+            print(f"mono loss: {mono_loss.item()}")
+        if self.lcr_regularisation_coef is not None:
+            print(f"lcr_expert_loss: {lcr_loss1.item()}")
+            print(f"lcr_sampled_loss: {lcr_loss2.item()}")
         print(f"overall reward loss: {loss.item()}")
         if self.verbose:
             curr_grads = []
@@ -218,10 +247,6 @@ class IRLGraphTrainer:
 
         # do grad step;
         self.reward_optim.step()
-
-        # # see if multitask gnn training is on;
-        #if self.agent.multitask_net is not None:
-        #    self.agent.optim_multitask_net.step()
 
         # see if lr scheduler present;
         if self.reward_optim_lr_scheduler is not None:
@@ -534,6 +559,10 @@ class IRLGraphTrainer:
                     action_is_index=True
                 )
             # see if should do multitask;
+            # graphopt doesn't have an encoder that belongs only 
+            # to reward_fn, so can't compute multitask loss;
+            # if do graphopt is True and mtt is True, the mtt
+            # loss will be only computed on the encoder of the policy;
             if mtt and not self.do_graphopt:
                 targets = tgnn.global_add_pool(batch.x[:, -1], batch.batch)
                 curr_rewards, graph_embeds = curr_rewards

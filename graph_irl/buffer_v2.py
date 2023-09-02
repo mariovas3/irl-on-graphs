@@ -87,6 +87,7 @@ class GraphBuffer(BufferBase):
         verbose=False,
         unnorm_policy=False,
         be_deterministic=False,
+        zero_interm_rew=False,
     ):
         super(GraphBuffer, self).__init__(
             max_size, state_reward, seed, transform_,
@@ -94,6 +95,7 @@ class GraphBuffer(BufferBase):
         # I will only keep state action trajectories and eval the reward 
         # as I sample a batch in the sac training loop - for more efficiency;
 
+        self.zero_interm_rew = zero_interm_rew
         self.lcr_reg = lcr_reg
         self.verbose = verbose
         self.unnorm_policy = unnorm_policy
@@ -500,6 +502,11 @@ class GraphBuffer(BufferBase):
                     )
                     temp_len += curr_length
                 curr_rewards = curr_rewards.view(-1) * self.reward_scale
+                if self.zero_interm_rew:
+                    last_rew = curr_rewards[-1]
+                    curr_rewards = torch.zeros_like(curr_rewards)
+                    if terminated or truncated:
+                        curr_rewards[-1] = last_rew
                 
                 # track rewards on path;
                 reward_on_path.extend(curr_rewards.detach().tolist())
