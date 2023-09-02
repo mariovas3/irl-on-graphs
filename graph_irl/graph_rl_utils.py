@@ -106,8 +106,13 @@ def get_dfs_edge_order(adj_list, source):
 
 def edge_index_to_adj_list(edge_index, n_nodes):
     """
-    edge_index should be edge_index[:, ::2] i.e., no 
-    duplicate edges;
+    Returns adjacency list built from edge index.
+
+    Note: If there is an edge (i, j) in an undirected graph,
+        we have (i, j) and (j, i) in the typical edge_index.
+        In this case, before passing edge_index to this function,
+        make sure you clean it by passing edge_index[:, ::2] instead.
+        This will leave only one entry per edge.
     """
     adj_list = [[] for _ in range(n_nodes)]
     for i in range(edge_index.shape[-1]):
@@ -131,7 +136,26 @@ def inc_lcr_reg(r1, r2, curr_rewards):
     return r1, r2, inc
 
 
+def get_batch_knn_index(batch, knn_edge_index):
+    num_graphs = batch.num_graphs if hasattr(batch, 'num_graphs') else 1
+    assert len(batch.x) % num_graphs == 0
+    n_nodes = len(batch.x) // num_graphs
+    return torch.cat(
+        [
+            knn_edge_index + i * n_nodes
+            for i in range(num_graphs)
+        ], -1
+    )
+
+
 def get_rand_edge_index(edge_index, num_edges):
+    """
+    Return a subset of edge_index with num_edges randomly sampled edges.
+    
+    Note: Assumes undirected graph edge index format. That is,
+        each edge has two entries in edge_index as
+        (from, to), (to, from) and these are contiguous in edge_index.
+    """
     if num_edges == 0:
         return torch.tensor([[], []], dtype=torch.long)
     T = edge_index.shape[-1]

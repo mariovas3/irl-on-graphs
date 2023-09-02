@@ -8,7 +8,8 @@ from graph_irl.graph_rl_utils import *
 from graph_irl.reward import *
 from graph_irl.buffer_v2 import GraphBuffer
 
-from torch_geometric.utils import barabasi_albert_graph
+from torch_geometric.utils import barabasi_albert_graph, degree
+from torch_geometric.nn import knn_graph
 import warnings
 
 
@@ -99,6 +100,7 @@ params_func_config = dict(
     log_sigma_min=None,#-20,
     log_sigma_max=None,#2,
     use_valid_samples=False,
+    with_knn_msgs=False,
 )
 
 
@@ -107,6 +109,7 @@ def get_params(
     node_dim,
     nodes,
     num_edges_expert,
+    expert_edge_index,
     num_iters=100,
     batch_size=100,
     graphs_per_batch=100,
@@ -148,7 +151,12 @@ def get_params(
     log_sigma_min=None,#-20,
     log_sigma_max=None,#2,
     use_valid_samples=False,
+    with_knn_msgs=False,
 ):
+    knn_edge_index = None
+    if with_knn_msgs:
+        k = degree(expert_edge_index[0], num_nodes=n_nodes).mean().int().item()
+        knn_edge_index = knn_graph(nodes, k=k)
     # if we do multitask loss for gnn, make sure nothing gets
     # appended to the graph level embedding for now;
     if with_multitask_gnn_loss:
@@ -173,42 +181,43 @@ def get_params(
     action_dim = embed_dim * 2
 
     encoder_dict = dict(
-        encoder = GCN(node_dim + n_cols_append, encoder_hiddens, 
+        encoder = GCN(
+                      node_dim + n_cols_append, 
+                      encoder_hiddens, 
                       heads=heads,
-                      with_batch_norm=with_batch_norm, 
                       final_tanh=final_tanh,
-                      bet_on_homophily=bet_on_homophily, 
-                      net2_batch_norm=net2_batch_norm),
-        encoderq1 = GCN(node_dim + n_cols_append, encoder_hiddens, 
+                      knn_edge_index=knn_edge_index,
+                      ),
+        encoderq1 = GCN(node_dim + n_cols_append, 
+                      encoder_hiddens, 
                       heads=heads,
-                      with_batch_norm=with_batch_norm, 
                       final_tanh=final_tanh,
-                      bet_on_homophily=bet_on_homophily, 
-                      net2_batch_norm=net2_batch_norm), 
-        encoderq2 = GCN(node_dim + n_cols_append, encoder_hiddens, 
+                      knn_edge_index=knn_edge_index,
+                      ), 
+        encoderq2 = GCN(node_dim + n_cols_append, 
+                      encoder_hiddens, 
                       heads=heads,
-                      with_batch_norm=with_batch_norm, 
                       final_tanh=final_tanh,
-                      bet_on_homophily=bet_on_homophily, 
-                      net2_batch_norm=net2_batch_norm),
-        encoderq1t = GCN(node_dim + n_cols_append, encoder_hiddens, 
+                      knn_edge_index=knn_edge_index,
+                      ),
+        encoderq1t = GCN(node_dim + n_cols_append, 
+                      encoder_hiddens, 
                       heads=heads,
-                      with_batch_norm=with_batch_norm, 
                       final_tanh=final_tanh,
-                      bet_on_homophily=bet_on_homophily, 
-                      net2_batch_norm=net2_batch_norm),
-        encoderq2t = GCN(node_dim + n_cols_append, encoder_hiddens, 
+                      knn_edge_index=knn_edge_index,
+                      ),
+        encoderq2t = GCN(node_dim + n_cols_append, 
+                      encoder_hiddens, 
                       heads=heads,
-                      with_batch_norm=with_batch_norm, 
                       final_tanh=final_tanh,
-                      bet_on_homophily=bet_on_homophily, 
-                      net2_batch_norm=net2_batch_norm),
-        encoder_reward = GCN(node_dim + n_cols_append, encoder_hiddens, 
+                      knn_edge_index=knn_edge_index,
+                      ),
+        encoder_reward = GCN(node_dim + n_cols_append, 
+                      encoder_hiddens, 
                       heads=heads,
-                      with_batch_norm=with_batch_norm, 
                       final_tanh=final_tanh,
-                      bet_on_homophily=bet_on_homophily, 
-                      net2_batch_norm=net2_batch_norm),
+                      knn_edge_index=knn_edge_index,
+                      ),
     )
 
     reward_funcs = dict(

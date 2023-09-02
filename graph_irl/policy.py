@@ -10,7 +10,7 @@ from torch import nn
 import torch.distributions as dists
 from pathlib import Path
 from graph_irl.distributions import *
-from graph_irl.graph_rl_utils import get_action_vector_from_idx
+from graph_irl.graph_rl_utils import get_action_vector_from_idx, get_batch_knn_index
 import torch_geometric.nn as tgnn
 from math import exp
 
@@ -22,26 +22,28 @@ if not TEST_OUTPUTS_PATH.exists():
 
 class GCN(nn.Module):
     def __init__(
-        self, in_dim, 
-        hiddens, heads=1,
-        with_batch_norm=False, final_tanh=False,
-        bet_on_homophily=False, net2_batch_norm=False,
+        self, 
+        in_dim, 
+        hiddens, 
+        heads=1, 
+        final_tanh=False,
+        knn_edge_index=None,
     ):
         super(GCN, self).__init__()
 
         # set attributes from constructor;
         self.hiddens = hiddens.copy()
-        self.with_batch_norm = with_batch_norm
         self.final_tanh = final_tanh
-        self.bet_on_homophily = bet_on_homophily
-        if self.bet_on_homophily:
+
+        self.knn_edge_index = knn_edge_index
+        if knn_edge_index is not None:
             assert self.hiddens[-1] % 2 == 0
             self.hiddens[-1] = self.hiddens[-1] // 2
 
         # init network;
         tgnet = []
-        if bet_on_homophily:
-            self.net2 = nn.Sequential()
+        if knn_edge_index is not None:
+            self.net2 = []
 
         # create a dummy list for ease of creating net;
         temp = [in_dim] + self.hiddens
@@ -52,28 +54,34 @@ class GCN(nn.Module):
                                          heads=heads), 
                           f"x, edge_index -> x"))
             if i < len(temp) - 2:
-                if self.with_batch_norm:
-                    tgnet.append(nn.BatchNorm1d(temp[i + 1], affine=True))
                 tgnet.append(nn.ReLU())
-            if bet_on_homophily:
-                self.net2.append(nn.Linear(temp[i], temp[i + 1]))
+            if knn_edge_index is not None:
+                self.net2.append((tgnn.GATv2Conv(temp[i], temp[i + 1] // heads, 
+                                         heads=heads), 
+                          f"x, edge_index -> x"))
                 if i < len(temp) - 2:
-                    if net2_batch_norm:
-                        self.net2.append(nn.BatchNorm1d(temp[i + 1], affine=True))
                     self.net2.append(nn.ReLU())
         
         # get graph net in Sequential container;
         self.net = tgnn.Sequential('x, edge_index', tgnet)
+        if knn_edge_index is not None:
+            self.net2 = tgnn.Sequential('x, edge_index', self.net2)
 
     def forward(self, batch, extra_graph_level_feats=None):
         x, edge_index = batch.x, batch.edge_index
-        if self.bet_on_homophily:
-            mlp_x = self.net2(x)
         x = self.net(x, edge_index)
+
+        if self.knn_edge_index is not None:
+            knn_index = get_batch_knn_index(
+                batch, self.knn_edge_index
+            )
+            x_knn = self.net2(
+                batch.x, knn_index
+            )
+            x = torch.cat((x, x_knn), -1)
+
         # return avg node embedding for each graph in the batch;
         # together with node embeddings;
-        if self.bet_on_homophily:
-            x = torch.cat((x, mlp_x), -1)
         if self.final_tanh:
             x = torch.tanh(x)
         graph_level_feats = tgnn.global_mean_pool(x, batch.batch)

@@ -15,7 +15,6 @@ from graph_irl.irl_trainer import IRLGraphTrainer
 from graph_irl.eval_metrics import *
 
 from functools import partial
-import re
 
 from torch_geometric.data import Data
 
@@ -24,7 +23,7 @@ import numpy as np
 import torch
 
 
-# circular graph with 7 nodes;
+# circular graph;
 n_nodes, node_dim = 15, 2
 num_edges_expert = n_nodes
 
@@ -79,6 +78,7 @@ if __name__ == "__main__":
     params_func_config['node_dim'] = node_dim
     params_func_config['nodes'] = nodes
     params_func_config['num_edges_expert'] = expert_edge_index.shape[-1] // 2
+    params_func_config['expert_edge_index'] = expert_edge_index
     get_params_train = partial(get_params, **params_func_config)
 
     if params_func_config['do_graphopt']:
@@ -98,10 +98,13 @@ if __name__ == "__main__":
     # init IRL trainer;
     irl_trainer = IRLGraphTrainer(
         reward_fn=reward_fn,
-        reward_optim=torch.optim.Adam(reward_fn.parameters(), lr=1e-3),
+        reward_optim=torch.optim.Adam(
+            reward_fn.parameters(), 
+            lr=params_func_config['reward_lr']
+        ),
         agent=agent,
-        nodes=nodes,
-        expert_edge_index=expert_edge_index,
+        nodes=graph_source.x,
+        expert_edge_index=graph_source.edge_index,
         **irl_trainer_config,
     )
 
@@ -117,7 +120,7 @@ if __name__ == "__main__":
     )
     
     irl_trainer_config['multitask_gnn'] = agent_kwargs['with_multitask_gnn_loss']
-    irl_trainer_config['irl_iters'] = 2
+    irl_trainer_config['irl_iters'] = 7
     irl_trainer_config['policy_epochs'] = 1
     irl_trainer_config['vis_graph'] = False
     irl_trainer_config['save_edge_index'] = True
@@ -129,7 +132,7 @@ if __name__ == "__main__":
     irl_trainer_config['discount']=agent_kwargs['discount']
     irl_trainer_config['fixed_temperature'] = agent_kwargs['fixed_temperature']
     for k, v in params_func_config.items():
-        if k in ('nodes', 'transform_'):
+        if k in ('nodes', 'transform_', 'expert_edge_index'):
             continue
         irl_trainer_config[k] = v
     
@@ -166,7 +169,7 @@ if __name__ == "__main__":
         irl_trainer.agent,
         reward_fn, 
         agent_constructor, 
-        num_epochs_new_policy=1,
+        num_epochs_new_policy=3,
         target_graph=graph_source,
         run_k_times=2,
         new_policy_param_getter_fn=get_params_train,
