@@ -1,5 +1,6 @@
 \documentclass{report}
 \usepackage{setspace}
+\usepackage{bookmark}
 %\usepackage{subfigure}
 
 % my extra package imports;
@@ -98,7 +99,22 @@ $\Box$ \end{quotation}}
 % NEW CHAPTER - RL BACKGROUND;
 \chapter{Reinforcement Learning Background}
 \label{chap:RL}
+\textbf{TODO}: A SHORT SUMMARY OF THE FOLLOWING SENTENCES IS TO BE PUT 
+IN THE END OF THE INTRO WHERE I EXPLAIN THE STRUCTURE OF THE 
+REPORT.
 
+In this section I cover the necessary background to follow the 
+rest of the work. The main algorithm is model-free but has value 
+functions and an explicit parameterised policy. I will not cover 
+model-based RL in detail in what is to follow, therefore. The 
+following will summarise the knowledge about the goal of RL, 
+MDPs, Value functions, Policy gradients, off-policy learning 
+and Actor-Critics. The last is particularly relevant, given 
+that the policy learning algorithm in the inner loop of the IRL 
+problem can be thought of as a ``soft'' variant of an Actor-Critic 
+learning algorithm.
+
+% SECTION - THE GOAL OF RL;
 \section{The Goal of Reinforcement Learning}
 \label{sec:RLGoal}
 
@@ -110,7 +126,7 @@ maximisation of the reward signal.
 In the Reinforcement learning setup, we distinguish between two 
 key entities - environment and agent. The environment is the 
 entity that specifies a set of rules based on which, an action 
-is judged given its current configuration. 
+is judged given the environment's configuration. 
 More specifically, let the configuration or state of the 
 environment at time $t$ be denoted by $s_t$. Then, 
 given an action, $a_t$ at time $t$, the environment evaluates 
@@ -132,35 +148,41 @@ observed problems.
 
 An example of such a problem could be a robot 
 whose goal is to find its way out of a maze as quickly as possible.
-Suppose the robot only `sees' what is 
+Suppose the robot only ``sees'' what is 
 immediately surrounding it, in which case this would be its state 
 or observation, $o_t$. 
 In contrast, if it had access to the environment's state, it could 
 see the shortest path out of the maze and take the necessary actions 
 that yield the greatest accumulated reward (or return).
 
-\section{Markov Decision Process (MDP)}
+% SECTION - MDPs
+\section{Markov Decision Processes (MDP)}
 \label{sec:RLMDP}
-Based on the robot and maze example, the reader may have noticed 
-that given the current state of the environment and an action taken 
-by the robot, the next environment state does not depend on any 
-past states and/or actions. That is, the environment state 
-is first-order Markovian (given the present state and action). Indeed, this leads us to a convenint 
+Suppose the robot from the previous example has access to the 
+environment state (sees the whole map). Then, given the 
+current state of the environment 
+and the action taken 
+at that state, the next environment state does not depend on any 
+past states and/or actions. That is, the 
+environment state is first-order Markovian 
+(given the present state and action). Indeed, this 
+leads us to a convenint 
 mathematical formulation of the dynamics of the 
 Reinforcement learning problem called 
 a Markov Decision Process (MDP).
 
-An MDP is defined by the tuple 
+An MDP with fully observed, Markovian states, is defined by the tuple 
 ($\mathcal{S},\; \mathcal{A},\; \mathcal{P},\; r(\cdot),\; \gamma$), where
 \begin{itemize}
   \item $\mathcal{S}$ is the state space of the environment 
     (Markovian states).
   \item $\mathcal{A}$ is the action space (actions among which 
     the agent can select).
-  \item $\mathcal{P}:\mathcal{S}\times \mathcal{A}\rightarrow\mathcal{S}$ 
-    is the transition operator and specifies the transition 
-    dynamics from 
-    the current state-action pair to the next state.
+  \item $\mathcal{P}:\mathcal{S}\times \mathcal{A}\times \mathcal{S}\rightarrow [0, \infty)$ 
+    is the transition operator and maps 
+    the current state-action pair and the next state to the 
+    correspondin probability density (in discrete state spaces, 
+    the range will be $[0, 1]$).
   \item $r(\cdot)$ is the scalar-valued reward function 
     (usually defined as $r:\mathcal{S}\times \mathcal{A}\rightarrow \reals$, 
     although $r:\mathcal{S}\rightarrow \reals$ is also possible).
@@ -185,13 +207,26 @@ this corresponds to a myopic return, $G_t=r_{t+1}$, while if
 $\gamma=1$, we get a far-sighted return where we equally weigh 
 all rewards along the trajectory $\tau$.
 
-The MDP as currently defined induces a probabilistic graphical model 
-(pgm) that is illustrated in Figure \ref{fig:MDP}.
+The MDP, as currently defined, induces a probabilistic graphical model 
+(pgm) that is illustrated in Figure \ref{fig:MDP}. Due to D-separation 
+we see that given $s_t$ and  $a_t$, $s_{t+1}$ is independent of 
+$s_j$ and $a_j$ for all $j<t$.
+Given a \textit{finite trajectory}/episode of length $T$, the induced 
+factorisation is:
+\begin{equation}
+  p^{\pi}(\tau):=p(s_1)\prod_{t=1}^T \pi(a_t|s_t)p(s_{t+1}|s_t,a_t),
+\end{equation}
+where $\pi(\cdot)$ is known as the policy according to which the 
+agent makes decisions and $p(s_{t+1}|s_t, a_t)$ is defined by the 
+transition operator of the MDP, $\mathcal{P}$. Note the superscript 
+in $p^{\pi}(\tau)$. This is there because we are giving the probability 
+of the trajectory under the current behaviour of the agent, given 
+by the policy $\pi$.
 
 \begin{figure}[H]
   \centering
   \begin{tikzpicture}[-latex ,auto ,node distance =1 cm and 1cm ,
-      on grid , inner sep=0pt, minimum size=9mm,
+      on grid , inner sep=0pt, minimum size=7mm,
       semithick, state/.style={circle, draw}]
       % s1, a1, s2;
       \node[state](s_1) at(0,0) {$s_1$};
@@ -210,10 +245,85 @@ The MDP as currently defined induces a probabilistic graphical model
       \node (dots) at(7.5,0) {$\ldots$};
       \path (s_3) edge (dots);
   \end{tikzpicture}
-  \caption{\label{fig:MDP} Graph of MDP.}
+  \caption{\label{fig:MDP} Graph of MDP with Markovian states.}
 \end{figure}
 
+As mentioned earlier with the robot example, we can have our agent 
+not observe the Markovian state, and instead receive an observation, 
+$o_t$, from its sensors. This induces a Partially Observed MDP (POMDP) 
+whose graphical model is presented in Figure \ref{fig:POMDP}. As we 
+can read off of the pgm in figure \ref{fig:POMDP}, we see that given 
+$s_t$ and $a_t$, $s_{t+1}$ is still independent of 
+$o_{1:t}$, $s_{1:t-1}$ and $a_{1:t-1}$ by D-separation. However,
+The observations are not Markovian in general since $o_j$ for $j<t$ 
+can influence $o_{t+1}$ even if $o_t$ and $a_t$ are known (again by 
+D-separation). The observation is, however, independent of the past
+givent the current state (unobserved in the POMDP setting).
 
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[-latex ,auto ,node distance =1 cm and 1cm ,
+      on grid , inner sep=0pt, minimum size=7mm,
+      semithick, state/.style={circle, draw}]
+      % s1, o1, a1, s2;
+      \node[state](s_1) at(0,0) {$s_1$};
+      \node[state](o_1) at (0, 1){$o_1$};
+      \path (s_1) edge (o_1);
+      \node[state](a_1) at(1.5,1) {$a_1$};
+      \path (o_1) edge (a_1);
+      \node[state](s_2) at(3,0) {$s_2$};
+      \path (s_1) edge (s_2);
+      \path (a_1) edge (s_2);
+      % s2, o2, a2, s3
+      \node[state](o_2) at (3,1) {$o_2$};
+      \path (s_2) edge (o_2);
+      \node[state] (a_2) at(4.5,1) {$a_2$};
+      \path (o_2) edge (a_2);
+      \node[state] (s_3) at(6,0){$s_3$};
+      \path (s_2) edge (s_3);
+      \path (a_2) edge (s_3);
+      % dots;
+      \node (dots) at(7.5,0) {$\ldots$};
+      \path (s_3) edge (dots);
+  \end{tikzpicture}
+  \caption{\label{fig:POMDP} Graph of POMDP, $s_t$ is the Markovian 
+  state, $o_t$ is the observation of the agent.}
+\end{figure}
+
+The associated factorisation based on the pgm in 
+figure \ref{fig:POMDP} is:
+\begin{equation}
+  p^{\pi}(\tau)=p(s_1)\prod_{t=1}^T p(o_t|s_t)\pi(a_t|o_t)p(s_{t+1}|s_t, a_t).
+\end{equation}
+We see that in the POMDP setting, the agent makes decisions based 
+on the observation and not the Markovian state. Depending on how 
+informative the observation is, it may be difficult to construct 
+a well-performing policy. Additionally, due to the non-Markovian 
+nature of the observations, it is common to track and process old 
+observations in order to form the agent state. Intuitively, one 
+would expect the influence of observations from a long time ago 
+to decay, so it might be useful to have a moving window over the 
+collected experience.
+
+In cases where we have deterministic transitions from state and action 
+to the next state (and similarly from state to observation), 
+$p(s_{t+1}|s_t, a_t)=\delta(s_{t+1},f(s_t, a_t))$, where 
+$\delta(\cdot)$ denotes the delta distribution (placing all 
+probability mass on $f(s_t, a_t)$) and 
+$f: \mathcal{S}\times\mathcal{A}\rightarrow \mathcal{S}$ is some deterministic 
+transition function (similarly $g:\mathcal{S}\rightarrow \mathcal{O}$ 
+can be the sensor giving the observation).
+
+% SECTION - FORMULATING EPISODIC AND CONTINUAL SETTING REWARD;
+\section{Formulating objective functions}
+\label{sec:RLObjectives}
+\begin{itemize}
+  \item Talk about episodic and continual settings;
+  \item Talk about value functions;
+\end{itemize}
+
+% SECTION - improving the policy;
+\section{title}
 
 
 
@@ -239,7 +349,7 @@ Test citation \citep{NgIRL} - done.
   \item Talk about the max-margin approach (Ng) to IRL.
     State drawbacks;
   \item Talk about the max-entropy Ziebart approach;
-    Show the (soft) `duality' between this probabilistic setting and 
+    Show the (soft) ``duality'' between this probabilistic setting and 
     the updates from the Bellman equations - see Levine lectures 
     and motivations and his review paper. Here should talk about the 
     works of Todorov, Sergey's review paper and SAC as a means to 
@@ -359,22 +469,5 @@ By induction over $n$.
 
 \bibliographystyle{apa}
 \bibliography{my_bib.bib}
-
-% \begin{thebibliography}{HHM99}
-
-
-% \bibitem[Pri70]{PriorNOP70}  %%only an example
-% A.~Prior.
-% \newblock The notion of the present.
-% \newblock {\em Studium Generale}, 23:  245--248, 1970.
-
-
-% \bibitem[Rey97]{Rey:D}
-% M.~Reynolds.
-% \newblock A decidable temporal logic of parallelism.
-% \newblock {\em Notre Dame Journal of Formal Logic}, 38(3):  419--436,
-%   1997.
-% \end{thebibliography}
-% \chapter{Other appendices, e.g. code listing}
 
 \end{document}
