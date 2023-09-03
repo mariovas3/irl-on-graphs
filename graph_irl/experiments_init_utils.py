@@ -101,6 +101,9 @@ params_func_config = dict(
     log_sigma_max=None,#2,
     use_valid_samples=False,
     with_knn_msgs=False,
+    with_lcr=True,
+    with_mono=True,
+    zero_interm_rew=False,
 )
 
 
@@ -152,6 +155,9 @@ def get_params(
     log_sigma_max=None,#2,
     use_valid_samples=False,
     with_knn_msgs=False,
+    with_lcr=True,
+    with_mono=True,
+    zero_interm_rew=False,
 ):
     knn_edge_index = None
     if with_knn_msgs:
@@ -341,6 +347,7 @@ def get_params(
         multitask_coef=multitask_coef,
         no_q_encoder=no_q_encoder,
         use_valid_samples=use_valid_samples,
+        zero_interm_rew=zero_interm_rew,
     )
 
     config = dict(
@@ -371,10 +378,11 @@ def get_params(
             per_decision_imp_sample=per_decision_imp_sample,
             reward_scale=reward_scale,
             log_offset=0.,
-            lcr_reg=True, 
+            lcr_reg=with_lcr, 
             verbose=True,
             unnorm_policy=unnorm_policy,
             be_deterministic=False,
+            zero_interm_rew=zero_interm_rew,
         ),
         env_kwargs=dict(
             x=nodes,
@@ -407,13 +415,14 @@ def get_params(
         weight_scaling_type=weight_scaling_type,
         unnorm_policy=config['buffer_kwargs']['unnorm_policy'],
         add_expert_to_generated=False,
-        lcr_regularisation_coef=num_edges_expert - config['env_kwargs']['num_edges_start_from'],
-        mono_regularisation_on_demo_coef=num_edges_expert - config['env_kwargs']['num_edges_start_from'],
+        lcr_regularisation_coef=num_edges_expert - config['env_kwargs']['num_edges_start_from'] if with_lcr else None,
+        mono_regularisation_on_demo_coef=num_edges_expert - config['env_kwargs']['num_edges_start_from'] if with_mono else None,
         verbose=True,
         do_dfs_expert_paths=do_dfs_expert_paths,
         num_reward_grad_steps=1,
         ortho_init=ortho_init,
         do_graphopt=do_graphopt,
+        zero_interm_rew=zero_interm_rew,
     )
     return agent_kwargs, config, reward_fn, irl_trainer_config
 

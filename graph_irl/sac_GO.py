@@ -346,6 +346,9 @@ class SACAgentGO(SACAgentGraph):
                         (obs_t, action_t), extra_graph_level_feats_t, 
                         action_is_index=self.buffer.action_is_index
                     ).detach().view(-1) * self.buffer.reward_scale
+                if self.zero_interm_rew:
+                    # assume all rewards before termination were 0.
+                    reward_t = reward_t * terminated_tp1
                 
                 # print(action_t.T, reward_t, sep='\n', end='\n\n')
                 # get temperature and policy loss;
