@@ -14,7 +14,6 @@ from graph_irl.eval_metrics import *
 from graph_irl.experiments_init_utils import *
 
 from functools import partial
-import re
 
 import random
 import numpy as np
@@ -67,6 +66,7 @@ if __name__ == "__main__":
     params_func_config['node_dim'] = graph_source.x.shape[-1]
     params_func_config['nodes'] = graph_source.x
     params_func_config['num_edges_expert'] = graph_source.edge_index.shape[-1] // 2
+    params_func_config['expert_edge_index'] = graph_source.edge_index
 
     # IRL train config;
     get_params_train = partial(get_params, **params_func_config)
@@ -128,7 +128,7 @@ if __name__ == "__main__":
     irl_trainer_config['discount']=agent_kwargs['discount']
     irl_trainer_config['fixed_temperature'] = agent_kwargs['fixed_temperature']
     for k, v in params_func_config.items():
-        if k in ('nodes', 'transform_'):
+        if k in ('nodes', 'transform_', 'expert_edge_index'):
             continue
         irl_trainer_config[k] = v
     
@@ -155,6 +155,7 @@ if __name__ == "__main__":
     params_func_config['node_dim']= graph_target.x.shape[-1]
     params_func_config['nodes'] = graph_target.x
     params_func_config['num_edges_expert'] = graph_target.edge_index.shape[-1] // 2
+    params_func_config['expert_edge_index'] = graph_target.edge_index
     get_params_eval = partial(get_params, **params_func_config)
 
     # run test suite 3 - gen similar graphs to source graph;
