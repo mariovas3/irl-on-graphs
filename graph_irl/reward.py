@@ -34,7 +34,7 @@ class GraphReward(nn.Module):
         
         # up to here this corresponds to getting the cost function;
         self.net.append(nn.Linear(hiddens[-1], 1))
-        self.net.append(nn.Softplus())
+        # self.net.append(nn.Softplus())
     
     def reset(self):
         pass
@@ -100,7 +100,7 @@ class StateGraphReward(nn.Module):
         
         # up to here this corresponds to getting the cost function;
         self.net.append(nn.Linear(hiddens[-1], 1))
-        self.net.append(nn.Softplus())
+        # self.net.append(nn.Softplus())
     
     def reset(self):
         pass
