@@ -1,15 +1,16 @@
 import networkx as nx
 import networkx.algorithms as nxalgos
 
-from math import sqrt
 import numpy as np
 from scipy.stats import gaussian_kde
 import matplotlib.pyplot as plt
 
-from typing import Callable
+from graph_irl.graph_rl_utils import edge_index_to_adj_list, get_dfs_edge_order
+
+from typing import Callable, Tuple
 from pathlib import Path
 
-from torch_geometric.data import Data
+from torch_geometric.data import Data, Batch
 import pickle
 
 import torch
@@ -136,6 +137,10 @@ def save_graph_stats_k_runs_GO1(
     Notes: 
         
     """
+    # build adjacency list from edge index;
+    adj_list = edge_index_to_adj_list(target_graph.edge_index[:, ::2], len(target_graph.x))
+    
+    # dir to save topo stats;
     target_graph_dir = irl_policy.save_to / 'target_graph_stats'
     if not target_graph_dir.exists():
         target_graph_dir.mkdir(parents=True)
@@ -164,6 +169,26 @@ def save_graph_stats_k_runs_GO1(
                             [ans],
                             prefix_name_of_stats='targetgraph_')
             print(f"og graph has sum of edge dists: {ans}")
+    
+    r_perms, r_dfss = [], []
+    for _ in range(3):
+        r_perm, r_dfs = get_perm_and_dfs_rewards(
+            np.random.randint(0, len(target_graph.x)),
+            adj_list,
+            target_graph.edge_index,
+            target_graph.x,
+            irl_policy
+        )
+        r_perms.append(r_perm)
+        r_dfss.append(r_dfs)
+
+    save_graph_stats(irl_policy.save_to, ['RandPermRewards'],
+                        [r_perms],
+                        prefix_name_of_stats=f"irlpolicyOnExpert_")
+    
+    save_graph_stats(irl_policy.save_to, ['DFSRewards'],
+                        [r_dfss],
+                        prefix_name_of_stats=f"irlpolicyOnExpert_")
 
     # init empty edge set for target graph;
     for k in range(run_k_times):
@@ -195,6 +220,27 @@ def save_graph_stats_k_runs_GO1(
         save_graph_stats(irl_policy.save_to, ['rewards'],
                          [rewards],
                          prefix_name_of_stats=f"newpolicyOnTarget_{k}_")
+        
+        
+        r_perms, r_dfss = [], []
+        for _ in range(3):
+            r_perm, r_dfs = get_perm_and_dfs_rewards(
+                np.random.randint(0, len(target_graph.x)),
+                adj_list,
+                target_graph.edge_index,
+                target_graph.x,
+                new_policy
+            )
+            r_perms.append(r_perm)
+            r_dfss.append(r_dfs)
+
+        save_graph_stats(irl_policy.save_to, ['RandPermRewards'],
+                         [r_perms],
+                         prefix_name_of_stats=f"newpolicyOnExpert_{k}_")
+        
+        save_graph_stats(irl_policy.save_to, ['DFSRewards'],
+                         [r_dfss],
+                         prefix_name_of_stats=f"newpolicyOnExpert_{k}_")
 
         # see if should calculate euclidean distances;
         if euc_dist_idxs is not None:
@@ -422,3 +468,136 @@ def save_mrr_and_avg(
         pickle.dump(found_rate_stats, f)
     print("MRR stats:", mrr_stats, 
           "found rates stats:", found_rate_stats, sep='\n')
+
+
+def _get_single_ep_expert_return(
+    edge_index,
+    nodes,
+    agent,
+) -> Tuple[float, torch.Tensor]:
+        """
+        Returns sum of rewards along single expert trajectory as well as all
+        rewards along the trajectory in 1-D torch.Tensor.
+        """
+        # permute even indexes of edge index;
+        # edge index is assumed to correspond to an undirected graph;
+        perm = np.random.permutation(
+            range(0, edge_index.shape[-1], 2)
+        )
+        # expert_edge_index[:, (even_index, even_index + 1)] should
+        # correspond to the same edge in the undirected graph in torch_geom.
+        # this is because in torch_geometric, undirected graph duplicates
+        # each edge e.g., (from, to), (to, from) are both in edge_index;
+        idxs = sum([(i, i + 1) for i in perm], ())
+        return _get_return_and_rewards_on_path(
+            edge_index, nodes, idxs,
+            agent
+        )
+
+
+def _get_single_ep_dfs_return(
+    start_node, 
+    adj_list, 
+    edge_index,
+    nodes,
+    agent,
+):
+    edge_index = get_dfs_edge_order(adj_list, start_node)
+    idxs = list(range(edge_index.shape[-1]))
+    return _get_return_and_rewards_on_path(
+            edge_index, nodes, idxs,
+            agent
+        )
+
+def _get_return_and_rewards_on_path(
+    edge_index, nodes, idxs, agent,
+):
+    pointer = 0
+    return_val = 0.0
+    cached_rewards = []
+    reward_fn = agent.env.reward_fn
+    reward_scale = agent.buffer.reward_scale
+    graphs_per_batch = agent.buffer.graphs_per_batch
+    reward_encoder = agent.old_encoder
+
+    # the * 2 multiplier is because undirected graph is assumed
+    # and effectively each edge is duplicated in edge_index;
+    while (
+        pointer * graphs_per_batch * 2
+        < edge_index.shape[-1]
+    ):
+        batch_list = []
+        action_idxs = []
+        for i in range(
+            pointer * graphs_per_batch * 2,
+            min(
+                (pointer + 1) * graphs_per_batch * 2,
+                edge_index.shape[-1],
+            ),
+            2,
+        ):
+            batch_list.append(
+                Data(
+                    x=nodes,
+                    edge_index=edge_index[
+                        :, idxs[pointer * graphs_per_batch * 2 : i]
+                    ],
+                )
+            )
+            first, second = (
+                edge_index[0, idxs[i]],
+                edge_index[1, idxs[i]],
+            )
+            action_idxs.append([first, second])
+            if agent.buffer.state_reward:
+                batch_list[-1].edge_index = torch.cat(
+                    (
+                        batch_list[-1].edge_index, 
+                        torch.tensor([[first, second], 
+                                        [second, first]], dtype=torch.long)
+                    ), -1
+                )
+
+        # create batch of graphs;
+        batch = Batch.from_data_list(batch_list)
+        extra_graph_level_feats = None
+        if agent.buffer.transform_ is not None:
+            agent.buffer.transform_(batch)
+            if agent.buffer.transform_.get_graph_level_feats_fn is not None:
+                extra_graph_level_feats = agent.buffer.transform_.get_graph_level_feats_fn(batch)
+
+        pointer += 1
+        assert agent.buffer.state_reward
+        # check if in graphopt setting;
+        out = batch
+        if reward_encoder is not None:
+            out = reward_encoder(batch, extra_graph_level_feats)[0]
+        curr_rewards = reward_fn(out)
+        
+        curr_rewards = curr_rewards.view(-1) * reward_scale
+        return_val += curr_rewards.sum()
+        cached_rewards.append(curr_rewards)
+    return return_val, torch.cat(cached_rewards)
+
+
+def get_perm_and_dfs_rewards(
+    start_node, 
+    adj_list, 
+    edge_index,
+    nodes,
+    agent,
+):
+    _, r_perm = _get_single_ep_expert_return(
+        edge_index,
+        nodes,
+        agent,
+    )
+    _, r_dfs = _get_single_ep_dfs_return(
+        start_node, 
+        adj_list, 
+        edge_index,
+        nodes,
+        agent,
+    )
+
+    return r_perm.tolist(), r_dfs.tolist()

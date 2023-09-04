@@ -648,7 +648,6 @@ class IRLGraphTrainer:
                           irl_dir, 
                           seed=self.seed,
                           suptitle=f"irl training for {num_iters} iters")
-
     
     def OI_init_nets(self):
         OI_init(self.reward_fn)
