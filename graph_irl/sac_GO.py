@@ -30,7 +30,6 @@ class SACAgentGO(SACAgentGraph):
             with_pos=with_pos, save_edge_index=save_edge_index, 
             **kwargs
         )
-        track_params(self.old_encoder, self.policy.encoder, tau=1)
 
     def get_policy_loss_and_temperature_loss(
         self, obs_t, extra_graph_level_feats=None
@@ -370,3 +369,5 @@ class SACAgentGO(SACAgentGraph):
 
                 # target q funcs update;
                 self.track_qfunc_params()
+            # after doing the grad steps, change the reward encoder;
+            track_params(self.old_encoder, self.policy.encoder, tau=1)
