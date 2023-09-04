@@ -256,7 +256,6 @@ class IRLGraphTrainer:
         self.weight_processor = WeightsProcessor(
             self.weight_type, 
             self.agent.env.spec.max_episode_steps,
-            scaling_type=self.weight_scaling_type,
         )
         if self.per_decision_imp_sample:
             return self._get_per_dec_imp_samp_returns()
