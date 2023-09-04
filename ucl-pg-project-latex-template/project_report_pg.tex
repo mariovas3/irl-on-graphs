@@ -5,6 +5,8 @@
 
 % my extra package imports;
 \usepackage{caption}
+\usepackage{algpseudocode}
+\usepackage{algorithm}
 \usepackage{float}
 \usepackage{hyperref}
 \usepackage{subcaption}
@@ -76,6 +78,7 @@ $\Box$ \end{quotation}}
 \numberwithin{equation}{section}
 \numberwithin{figure}{section}
 \numberwithin{table}{section}  
+\numberwithin{algorithm}{section}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % START DOCUMENT;
@@ -389,6 +392,106 @@ Test citation \citep{NgIRL} - done.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - EXPERIMENTS;
 \chapter{Experiments}
+
+\section{Description of tests}
+\label{sec:test_description}
+The experimental suite consists of four tests.
+\begin{algorithm}
+  \caption{Reward function transfer vs direct policy deployment}
+  \label{tests:test_reward_transfer}
+  \begin{algorithmic}
+    \State $irlreward,\; irlpolicy \gets irlalgorithm(sourcegraph)$
+    \State $irlstats,\; newpolicystats \gets [],\; []$
+    \For{$t=1\ldots k$}
+    \State $irlstats_t \gets collect\_irlstats(targetgraph)$
+    \State $newpolicy_t \gets train\_policy(targetgraph,\; irlreward)$
+    \State $newpolicystats_t \gets collect\_newpolicystats(targetgraph)$
+    \State $irlstats.append(irlstats_t)$
+    \State $newpolicystats.append(newpolicystats_t)$
+    \EndFor
+    \State $return\; (irlstats,\; newpolicystats)$
+  \end{algorithmic}
+\end{algorithm}
+In Algorithm \ref{tests:test_reward_transfer}, by ``stats'', it is meant 
+graph topology statistics such as triangles, clustering coefficients, 
+degrees and rewards along generated paths associated with the 
+relevant policy. The \verb|collect_stats| function deploys the relevant 
+policy on the vertex set of the relevant graph, having emptied the 
+edge set. The termination condition is when we have build the same 
+number of edges as the original graph (passed to the \verb|collect_paths|
+function) or when along the process of graph building we propose 
+too many repeated edges (edges we had added earlier) or 
+self-loops (connects a node to itself).
+
+After these numbers are saved, we calculate summary 
+statistics such as \verb|min|, \verb|median|, \verb|max|, 
+\verb|mean|, \verb|standard_deviation| and 
+then report the average and the standard deviations of the five number 
+summaries ($k$ total) over the $k$ runs. For example, for each of the 
+$k$ passes of the for loop of algorithm \ref{tests:test_reward_transfer} 
+we get the degrees of all nodes, then take the \verb|median| degree for 
+that pass and append it to the medians of the other passes. This way 
+we obtain the median degree for each of the $k$ passes. We then average 
+the $k$ numbers and calculate the standard deviation. The final reported 
+value will then be the average median degree over $k$ passes, together 
+with its standard deviation.
+
+Based on the raw graph topology statistics (e.g., we concatenate the 
+degrees of the nodes over the $k$ passes), we report the 
+p-values from a two-sample Kolmogorov-Smirnov (KS) test against the 
+graph topology statistics of the true graphs (source or target graph). 
+This way we usually compare the distribution of a sample of $k\times |\mathcal{V}|$ 
+numbers versus the distribution of $|\mathcal{V}|$ numbers (the latter being the 
+true graph statistics), where $|\mathcal{V}|$ denotes the number 
+of nodes/vertices in the relevant graph.
+
+This test is used to determine whether we were able to learn a better 
+graph construction policy for the target graph 
+by retraining a new policy using the IRL-reward 
+or by directly deploying the IRL-policy on the target graph.
+
+Since the irlpolicy was trained on the source graph, we should expect 
+it to construct a graph on the targetgraph vertex set, that resembles 
+the topology of the source graph. On the other hand, if the source 
+graph and the target graph are very similar, we should expect 
+the learned reward from IRL (on the source graph) to give a useful 
+criterion to guide the 
+newpolicy in constructing graphs with similar topology to that 
+of the target graph.
+
+\begin{algorithm}
+  \caption{Learning the source graph distribution}
+  \label{tests:test_learn_source_graph_dist}
+  \begin{algorithmic}
+    \State $irlreward,\; irlpolicy \gets irlalgorithm(sourcegraph)$
+    \State $irlstats \gets []$
+    \For{$t=1\ldots k$}
+    \State $irlstats_t\gets collect\_irlstats(sourcegraph)$
+    \State $irlstats.append(irlstats_t)$
+    \EndFor
+    \State $return\; irlstats$
+  \end{algorithmic}
+\end{algorithm}
+Similarly to Algorithm \ref{tests:test_reward_transfer}, ``stats'' 
+is used for the graph topology statistics described above. We again 
+calculate averages and standard deviations of the summary statistics 
+over the $k$ runs, as well as p-values from the KS test.
+
+This test is used to determine if the trained irlpolicy can be used 
+to build graphs similar to the source graph (in terms of topology). 
+As in the previous test, the \verb|collect_irlstats| function deploys 
+the policy on the vertex set, having emptied the edge set.
+
+Since the irlpolicy was trained on the source graph during IRL, 
+we should expect it to be able to reconstruct graphs with similar 
+topological properties. We judge this numerically by the p-value 
+from two-sample KS tests.
+
+
+\begin{enumerate}
+  \item Run IRL training on a source graph. Receive trained policy 
+  and reward function.
+\end{enumerate}
 \begin{itemize}
   \item T1 is about transferring learned reward on target graph;
   also compares learned policy directly on target, compared to 
@@ -416,55 +519,116 @@ Test citation \citep{NgIRL} - done.
   \item total is 160 experiments;
   \item  Run best config on Urban nets 10 times;
 \end{itemize}
+
 \chapter{Conclusion and Further work}
+This work builds on prior research in inverse reinforcement learning 
+for graph domains. Our contributions are, firstly, the addition of the 
+per-decision importance sampling for the IRL reward objective, 
+secondly, the addition of a graph encoder to the reward function, 
+and finally, an empirical comparison of applying the Unscented 
+Transform \citep{JulierUT} versus the reparameterisation trick 
+for approximating expectations.
+
+We have empirically shown that the per-decision importance 
+sampling increases
+the stability of the algorithm over multiple seeds as seen by 
+the plots of the returns during training.
+
+Adding a graph encoder as part of the reward function, seems to 
+have helped learn appropriate embeddings, which were useful for 
+evaluating the states on the target graph. This is seen in the 
+performance comparison between this method and 
+the vanilla GraphOpt \citep{GraphOpt} 
+implementation which uses a single graph encoder. Our method 
+also allows for the ``full'' transfer of the reward function, 
+rather than simply taking the MLP associated with the reward and 
+then retraining a graph encoder and a policy. The latter actually 
+can ``trick'' the reward to think a state is more advantageous than 
+it actually is by providing an ``adversarial'' embedding that is 
+mapped to a high reward from the reward MLP. Providing the reward 
+with its own graph encoder, helped avoid such situations.
+
+Finally, we showed that the UT trick also lead to more stable 
+training of the algorithm as seen by the plots of the losses 
+and the returns recorded during evaluation.
+
+Despite the proposed improvements, it is still unclear what constitutes 
+a good strategy for generating expert samples for the IRL objective. 
+Merely giving a random permutation of the edge set removes the possible 
+temporal component in building the graph. In many cases, such as 
+road-network planning, previously built connections can actually 
+be the main reason for new road segments. As a simple illustration 
+of this idea, the reader is directed to Figure \ref{fig:bad_rand_perm}.
+In contrast to most IRL scenarios where new demonstrations are generated, 
+we only work with a single demonstration, which we assume the temporal 
+component has no effect, allowing us to treat any permutation of the 
+edge set as a separate expert trajectory. As seen in the figure, this 
+could lead to very different demonstrations from the optimal control 
+demonstration and may result in learning poor policies.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[scale=0.5]{bad_rand_perm.png}
+  \caption{\label{fig:bad_rand_perm} Optimal control path 
+  in blue colour for both plots. The ``optimal control path'' 
+  is simply a $sin(\cdot)$ function. The two x-marks are the 
+  starting and ending point of all paths. It is assumed 
+  we always start from the same position and the ``goal'' is also 
+  at the same position. Left: different soft-optimal 
+  paths sampled alongside the optimal control path (soft-optimal 
+  paths generated by adding random Gaussian noise to the optimal 
+  path). Right: different 
+  random permutations of the optimal control path sampled alongside 
+  the optimal control path.}
+\end{figure}
 
 
-\chapter{title of first chapter}
-This is just a bare minimum to get started.  There is unlimited guidance on using latex, e.g. {\tt https://en.wikibooks.org/wiki/LaTeX}.   You are still responsible to check the detailed requirements of a project, including formatting instructions, see \\
-{\tt https://moodle.ucl.ac.uk/pluginfile.php/3591429/mod\_resource/content/7/UGProjects2017.pdf}.
-Leave at least a line of white space when you want to start a new paragraph.
+% \chapter{title of first chapter}
+% This is just a bare minimum to get started.  There is unlimited guidance on using latex, e.g. {\tt https://en.wikibooks.org/wiki/LaTeX}.   You are still responsible to check the detailed requirements of a project, including formatting instructions, see \\
+% {\tt https://moodle.ucl.ac.uk/pluginfile.php/3591429/mod\_resource/content/7/UGProjects2017.pdf}.
+% Leave at least a line of white space when you want to start a new paragraph.
 
-Mathematical expressions are placed inline between dollar signs, e.g. $\sqrt 2, \sum_{i=0}^nf(i)$, or in display mode
-\[ e^{i\pi}=-1\] and another way, this time with labels,
-\begin{align}
-\label{line1} A=B\wedge B=C&\rightarrow A=C\\
-&\rightarrow C=A\\
-\intertext{note that}
-n!&=\prod_{1\leq i\leq n}i \\
-\int_{x=1}^y \frac 1 x \mathrm{d}x&=\log y
-\end{align}
-We can refer to labels like this \eqref{line1}.   
+% Mathematical expressions are placed inline between dollar signs, e.g. $\sqrt 2, \sum_{i=0}^nf(i)$, or in display mode
+% \[ e^{i\pi}=-1\] and another way, this time with labels,
+% \begin{align}
+% \label{line1} A=B\wedge B=C&\rightarrow A=C\\
+% &\rightarrow C=A\\
+% \intertext{note that}
+% n!&=\prod_{1\leq i\leq n}i \\
+% \int_{x=1}^y \frac 1 x \mathrm{d}x&=\log y
+% \end{align}
+% We can refer to labels like this \eqref{line1}.   
 
-\chapter{title of second chapter}
-% Often lots of citations here (and elsewhere), e.g. \cite{Rey:D} or \cite[Theorem 2.3]{PriorNOP70}.   Bibtex can help with this, but is not essential. If you want pictures, try
+% \chapter{title of second chapter}
+% % Often lots of citations here (and elsewhere), e.g. \cite{Rey:D} or \cite[Theorem 2.3]{PriorNOP70}.   Bibtex can help with this, but is not essential. If you want pictures, try
 
-\begin{center}
-\includegraphics[scale=.5]{aristotle.jpg}
-\end{center}
-You can use 
-\begin{itemize}
-\item lists
-\item like this
-\end{itemize}
-or numbered
-\begin{enumerate}
-\item like this,
-\item or this
-\end{enumerate}
-but don't overdo it.
-\chapter{title of third chapter}
-If you have a formal theorem you might try this.
-\begin{definition}\label{def}
-See definition~\ref{def}.
-\end{definition}
-\begin{theorem}
-For all $n\in\nats,\; 1^n=1$.
-\end{theorem}
-\begin{proof}
-By induction over $n$.
-\end{proof}
+% \begin{center}
+% \includegraphics[scale=.5]{aristotle.jpg}
+% \end{center}
+% You can use 
+% \begin{itemize}
+% \item lists
+% \item like this
+% \end{itemize}
+% or numbered
+% \begin{enumerate}
+% \item like this,
+% \item or this
+% \end{enumerate}
+% but don't overdo it.
+% \chapter{title of third chapter}
+% If you have a formal theorem you might try this.
+% \begin{definition}\label{def}
+% See definition~\ref{def}.
+% \end{definition}
+% \begin{theorem}
+% For all $n\in\nats,\; 1^n=1$.
+% \end{theorem}
+% \begin{proof}
+% By induction over $n$.
+% \end{proof}
 
-\chapter{etc.}
+% \chapter{etc.}
 \appendix
 
 \bibliographystyle{apa}
