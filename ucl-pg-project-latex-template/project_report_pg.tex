@@ -55,7 +55,7 @@ $\Box$ \end{quotation}}
 % COVER PAGE;
 \title{
   { \includegraphics[scale=.5]{ucl_logo.png}}\\
-  {{\Huge Graph style transfer via Inverse Reinforcement Learning}}\\
+  {{\Huge Graph style transfer using Inverse Reinforcement Learning}}\\
   {\large An application to subway networks}\\
 }
 
@@ -416,8 +416,8 @@ In Algorithm \ref{tests:test_reward_transfer}, by ``stats'', it is meant
 graph topology statistics such as triangles, clustering coefficients, 
 degrees and rewards along generated paths associated with the 
 relevant policy. The \verb|collect_stats| function deploys the relevant 
-policy on the vertex set of the relevant graph, having emptied the 
-edge set. The termination condition is when we have build the same 
+policy on the vertex set of the relevant graph (starting with an 
+empty edge set). The termination condition is when we have build the same 
 number of edges as the original graph (passed to the \verb|collect_paths|
 function) or when along the process of graph building we propose 
 too many repeated edges (edges we had added earlier) or 
@@ -438,7 +438,8 @@ with its standard deviation.
 
 Based on the raw graph topology statistics (e.g., we concatenate the 
 degrees of the nodes over the $k$ passes), we report the 
-p-values from a two-sample Kolmogorov-Smirnov (KS) test against the 
+p-values from a two-sample Kolmogorov-Smirnov (KS) \citep{KSTest} 
+test against the 
 graph topology statistics of the true graphs (source or target graph). 
 This way we usually compare the distribution of a sample of $k\times |\mathcal{V}|$ 
 numbers versus the distribution of $|\mathcal{V}|$ numbers (the latter being the 
@@ -451,7 +452,7 @@ by retraining a new policy using the IRL-reward
 or by directly deploying the IRL-policy on the target graph.
 
 Since the irlpolicy was trained on the source graph, we should expect 
-it to construct a graph on the targetgraph vertex set, that resembles 
+it to construct a graph on the targetgraph's vertex set, that resembles 
 the topology of the source graph. On the other hand, if the source 
 graph and the target graph are very similar, we should expect 
 the learned reward from IRL (on the source graph) to give a useful 
@@ -472,21 +473,90 @@ of the target graph.
     \State $return\; irlstats$
   \end{algorithmic}
 \end{algorithm}
+The second test we employ, is used to determine if the trained 
+irlpolicy can be used 
+to build graphs similar to the source graph (in terms of topology). 
+The pseudocode for this test is provided in Algorithm 
+\ref{tests:test_learn_source_graph_dist}.
+As in the previous test, the \verb|collect_irlstats| 
+function deploys 
+the policy on the vertex set, having emptied the edge set.
+
 Similarly to Algorithm \ref{tests:test_reward_transfer}, ``stats'' 
-is used for the graph topology statistics described above. We again 
+refers to the graph topology statistics described above. We again 
 calculate averages and standard deviations of the summary statistics 
 over the $k$ runs, as well as p-values from the KS test.
 
-This test is used to determine if the trained irlpolicy can be used 
-to build graphs similar to the source graph (in terms of topology). 
-As in the previous test, the \verb|collect_irlstats| function deploys 
-the policy on the vertex set, having emptied the edge set.
-
 Since the irlpolicy was trained on the source graph during IRL, 
 we should expect it to be able to reconstruct graphs with similar 
-topological properties. We judge this numerically by the p-value 
+topological properties. We judge how well the irlpolicy constructs 
+graphs that are topologically similar to the source graph 
+based on the p-values 
 from two-sample KS tests.
 
+\begin{algorithm}
+  \caption{Held-out edges prediction}
+  \label{tests:test_edge_prediction}
+  \begin{algorithmic}
+    \State $train\_edges,\; val\_edges \gets split(sourcegraph,\; proportion)$
+    \State $irlreward,\; irlpolicy \gets irlalgorithm(sourcegraph)$
+    \State $mrrs,\; prop\_guessed \gets [],\;[]$
+    \For{$t=1\ldots k$}
+      \State $ranks,\; flag \gets [],\; True$
+      \State $guesses\_dict=\{e:\; 0\; for\; e\; in\; val\_edges\}$
+      \State $s \gets env.start\_from\_train\_edges()$
+      \While{episode not finished}
+        \State $ps \gets irlpolicy(s, k\_proposals)$
+        \State $action\gets ps[0]$
+        \State $position=\infty$
+        \For{$i,\; a\; in\; enumerate(ps,\; start=1)$}
+          \If{$a$ is repeated or is self loop}
+            \State continue
+          \EndIf
+          \If{$flag$}
+            \State{$action\gets a$}
+            \State{$flag\gets False$}
+          \EndIf
+          \If{$a\in val\_edges$}
+            \State $position=i$
+            \State $guesses\_dict[a] = 1$
+            \State $break$
+          \EndIf
+        \EndFor
+        \State{$ranks.append(1/position)$}
+        \State{$s\gets env(action)$}
+      \EndWhile
+      \State{$mrrs.append(mean(rank))$}
+      \State{$prop\_guessed.append(sum(guesses\_dict.values())/len(val\_edges))$}
+    \EndFor
+    \State{$return\; summary(mrrs),\; summary(prop\_guessed)$}
+  \end{algorithmic}
+\end{algorithm}
+
+The third test evaluates the learned irlpolicy on a task it was not 
+explicitly trained on - missing edge prediction. We judge how good 
+the irlpolicy is at predicting the missing edges by reporting summary 
+statistics of Mean Reciprocal Ranks (MRR) and proportions of held-out 
+edges that were guessed during the course of graph construction.
+These summaries are done over $k$ runs 
+of graph constructions starting with the vertex set of the source 
+graph, and edge set initialised with the edges that were 
+available for training (treated as expert demos wrt IRL). 
+
+The MRR tells us the ``preference'' 
+of the policy for the held-out edges. As can be seen in Algorithm 
+\ref{tests:test_edge_prediction}, each rank is in the range $[0, 1]$. 
+If a held-out edge is at the $n^{th}$ position in the list of proposals 
+$ps$, then its reciprocal rank for that iteration is $1/n$. Alternatively, 
+if none of the proposed actions in $ps$ are in the held-out edge set, 
+the reciprocal rank is $1/\infty\rightarrow 0$. This shows, that the 
+best possible MRR score is $1$, corresponding to a held-out edge 
+always being the first proposed action in the list of proposals $ps$.
+
+The proportion of guessed edges tells us what proportion of the 
+hel-out edges were proposed during the graph construction process. 
+The python dictionary implementation in Algorithm \ref{tests:test_edge_prediction} 
+prevents double-counting edges if they are proposed multiple times.
 
 \begin{enumerate}
   \item Run IRL training on a source graph. Receive trained policy 
