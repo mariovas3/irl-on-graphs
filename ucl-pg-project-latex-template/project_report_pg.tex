@@ -96,7 +96,86 @@ $\Box$ \end{quotation}}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - INTRODUCTION;
-\chapter{Introduction}
+\chapter{Introduction and Related Work}
+As more and more graph data become available, researchers in 
+areas such as biology \citep{VGAEDisease}, quantum chemistry 
+\citep{MPNNs}, social networks \citep{SocialNets} and others 
+seek ways to analyse these data in a way that extracts 
+maximum information 
+and requires the least amount of hand-designed features.
+
+Although methods such as ``node2vec'' and ``DeepWalk'' 
+\citep{node2vec,DeepWalk} 
+have been 
+proposed to automatically learn node features based on random 
+walks over the graph, it has been shown that Graph Neural Networks 
+(GNN) \citep{ScarselliGNN,GCN} achieve superior performance in domains 
+such as citation graphs \citep{VGAE} and Disease-gene link prediction 
+(DGP) \citep{VGAEDisease}. It has been postulated that this is because 
+of the way GNNs utilise node features during the (neural) 
+message passing procedure.
+
+Furthermore, it has been shown that graph generative 
+models can be used for downstream prediction tasks 
+with great success \citep{VGAE,VGAEDisease}.
+Apart from downstream prediction tasks, however, 
+having access to a graph-generative mechanism allows 
+one to create synthetic data from a given distribution, which can 
+be used for data augmentation. Graph-style transfer, is another 
+venue of interest, where given a generative mechanism for 
+a source graph, one can apply the same on a target graph in order 
+to induce structure similar to that of the source graph. The 
+last mentioned task is somewhat similar to Neural Style Transfer (NST) 
+\citep{NSTGatys} from the computer vision literature, where we 
+have a ``content'' image and a ``style'' image. The goal in NST 
+is to transfer artistic traits of the ``style'' image 
+(e.g., color or style of painting) to the ``content'' image 
+while preserving the entities seen in the ``content'' image. In 
+the graph setting, we can think of the style as the topology, 
+while the content are the nodes. 
+
+In practice, learning a graph generative mechanism is challenging 
+since, most of the time, we are not provided with (multiple) demonstrations 
+of the graph building process. Instead, we are only given the 
+final constructed graph. 
+
+\section{Related work}
+Graph construction approacehs have been shown to be of 
+use in many domains where we are not only interested in the 
+features of individual entities, but also about their connection 
+to other entities. For example, \cite{VGAEDisease} approach the 
+task of Disease-gene link prediction (DGP) using a Variational 
+Graph Auto Encoder \citep{VAEs,VGAE}. They show that, this approach 
+significantly outperforms node2vec and DeepWalk
+have entities that are somehow 
+related 
+In their work, \cite{VGAEDisease} propose 
+
+\begin{itemize}
+  \item Mention deep learning for images Krizhevsky, as the 
+  beginner of the current deep learning revolution.
+  \item Mention applications to images and text.
+  \item Mention Deep Learning for autoregressive models - language 
+  models whose aim is to generate plausible text.
+  \item Mention other generative models such as VAEs 
+  and GANs for images.
+  \item Mention the difficulty of working with graphs.
+  \item Mention the invention of the GNN.
+  \item Mention efforts to build graph generative models 
+  by other people.
+  \subitem
+    probabilistic - DeepMind, NerveNet, NetGan etc.
+  \subitem
+    Optimisation based - Victor;
+  \item Mention how our problem is a type of graph generation;
+  \item Mention how it differs from other methods - the IRL component.
+\end{itemize}
+
+In recent years, deep learning has been used for learning expressive 
+representations of abstract data types. For example
+The invention of Graph Neural Networks \citep{ScarselliGNN} has 
+unlocked 
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - RL BACKGROUND;
@@ -106,16 +185,21 @@ $\Box$ \end{quotation}}
 IN THE END OF THE INTRO WHERE I EXPLAIN THE STRUCTURE OF THE 
 REPORT.
 
-In this section I cover the necessary background to follow the 
+In this section I cover the necessary background from Reinforcement 
+Learning (RL) to follow the 
 rest of the work. The main algorithm is model-free but has value 
 functions and an explicit parameterised policy. I will not cover 
 model-based RL in detail in what is to follow, therefore. The 
-following will summarise the knowledge about the goal of RL, 
+following will summarise the goal of RL, 
 MDPs, Value functions, Policy gradients, off-policy learning 
-and Actor-Critics. The last is particularly relevant, given 
-that the policy learning algorithm in the inner loop of the IRL 
+and Actor-Critics \citep{Tsitsiklis}. The last is particularly relevant, given 
+that the policy learning algorithm in the inner loop of the 
+Inverse Reinforcement Learning (IRL) 
 problem can be thought of as a ``soft'' variant of an Actor-Critic 
-learning algorithm.
+learning algorithm. The ``softness'' comes from the backup equations, 
+to be discussed later. Finally, as we work in the multistep interaction 
+setting (episodes longer than one time step), we omit discussions about 
+bandit problems.
 
 % SECTION - THE GOAL OF RL;
 \section{The Goal of Reinforcement Learning}
@@ -128,7 +212,7 @@ maximisation of the reward signal.
 
 In the Reinforcement learning setup, we distinguish between two 
 key entities - environment and agent. The environment is the 
-entity that specifies a set of rules based on which, an action 
+entity that specifies a set of rules, based on which an action 
 is judged given the environment's configuration. 
 More specifically, let the configuration or state of the 
 environment at time $t$ be denoted by $s_t$. Then, 
@@ -184,8 +268,13 @@ An MDP with fully observed, Markovian states, is defined by the tuple
   \item $\mathcal{P}:\mathcal{S}\times \mathcal{A}\times \mathcal{S}\rightarrow [0, \infty)$ 
     is the transition operator and maps 
     the current state-action pair and the next state to the 
-    correspondin probability density (in discrete state spaces, 
-    the range will be $[0, 1]$).
+    corresponding probability density value (in discrete state spaces, 
+    the range will be $[0, 1]$). We therefore have:
+    \begin{itemize}
+      \item $\int_{\mathcal{S}}p(s'|s_t, a_t)ds'=1$ for continuous states,
+      \item $\sum_{s'\in\mathcal{S}}p(s'|s_t, a_t)=1$ for discrete states.
+    \end{itemize}
+     
   \item $r(\cdot)$ is the scalar-valued reward function 
     (usually defined as $r:\mathcal{S}\times \mathcal{A}\rightarrow \reals$, 
     although $r:\mathcal{S}\rightarrow \reals$ is also possible).
@@ -195,7 +284,7 @@ An MDP with fully observed, Markovian states, is defined by the tuple
 
 The way $\gamma$ is used is typically alongside some function of 
 the rewards collected along a path/trajectory. Let $\tau$ denote a 
-path/trajectory given by:
+finite path/trajectory/episode given by:
 \begin{equation}
   \tau:=(s_1, a_1, r_2, s_2, a_2, \ldots, s_T, a_T, r_{T+1}, s_{T+1}),\label{eq:tau} 
 \end{equation} 
@@ -203,7 +292,7 @@ and $G:\mathcal{T}\rightarrow \reals$ denote the return
 function. Among the simplest examples of $G$ is the Monte-Carlo 
 return:
 \begin{equation}
-  G(\tau):=\sum_{k=0}^{T-t}\gamma^kr_{t+k+1}.\label{eq:MCReturn}
+  G_t(\tau):=\sum_{k=0}^{T-t}\gamma^kr_{t+k+1}.\label{eq:MCReturn}
 \end{equation}
 Looking at \eqref{eq:MCReturn}, we see that if we set $\gamma=0$ 
 this corresponds to a myopic return, $G_t=r_{t+1}$, while if 
@@ -213,7 +302,8 @@ all rewards along the trajectory $\tau$.
 The MDP, as currently defined, induces a probabilistic graphical model 
 (pgm) that is illustrated in Figure \ref{fig:MDP}. Due to D-separation 
 we see that given $s_t$ and  $a_t$, $s_{t+1}$ is independent of 
-$s_j$ and $a_j$ for all $j<t$.
+$s_{1:t-1}$ and $a_{1:t-1}$, where $a_{1:t-1}:=(a_j)_{j=1}^{j=t-1}$ 
+and $s_{1:t-1}:=(s_j)_{j=1}^{j=t-1}$.
 Given a \textit{finite trajectory}/episode of length $T$, the induced 
 factorisation is:
 \begin{equation}
@@ -253,8 +343,23 @@ by the policy $\pi$.
 
 As mentioned earlier with the robot example, we can have our agent 
 not observe the Markovian state, and instead receive an observation, 
-$o_t$, from its sensors. This induces a Partially Observed MDP (POMDP) 
-whose graphical model is presented in Figure \ref{fig:POMDP}. As we 
+$o_t$, from its sensors. This observation is associated with 
+an emission operator $\mathcal{E}$, that defines a (possibly stochastic) 
+mapping from the state space, $\mathcal{S}$, to the observation 
+space, $\mathcal{O}$. This induces a Partially Observed MDP (POMDP) 
+whose graphical model is presented in Figure \ref{fig:POMDP}. The 
+POMDP is defined by the tuple ($\mathcal{S}$, $\mathcal{A}$, 
+$\mathcal{O}$, $\mathcal{P}$, $\mathcal{E}$, $r(\cdot)$, $\gamma$), 
+where $\mathcal{O}$ and $\mathcal{E}$ are the observation space and 
+the emission operator respectively and everything else in the tuple 
+is the same as for the MDP case. It is important to note that the 
+reward function is still dependent on the states, and not the observations 
+since it specifies the goal and is external to the agent. Intuitively, 
+the environment is oblivious to the sensory limitations of the agent 
+and only bases its reward signal on the current configuration/state and 
+the action that is selected by the agent.
+
+As we 
 can read off of the pgm in figure \ref{fig:POMDP}, we see that given 
 $s_t$ and $a_t$, $s_{t+1}$ is still independent of 
 $o_{1:t}$, $s_{1:t-1}$ and $a_{1:t-1}$ by D-separation. However,
@@ -315,11 +420,28 @@ $\delta(\cdot)$ denotes the delta distribution (placing all
 probability mass on $f(s_t, a_t)$) and 
 $f: \mathcal{S}\times\mathcal{A}\rightarrow \mathcal{S}$ is some deterministic 
 transition function (similarly $g:\mathcal{S}\rightarrow \mathcal{O}$ 
-can be the sensor giving the observation).
+can be the sensor mapping the state to the observation).
 
 % SECTION - FORMULATING EPISODIC AND CONTINUAL SETTING REWARD;
-\section{Formulating objective functions}
-\label{sec:RLObjectives}
+\section{Formulating objective functions}\label{sec:RLGoalMaths}
+In section \ref{sec:RLGoal} we explained the goal of RL in words. 
+In this section we will give a more formal mathematical definition. 
+To that end we will first define the finite/episodic case objective, 
+and then define the continual setting objective.
+
+First, recall the Monte Carlo return \ref{eq:MCReturn}. The episodic 
+objective is to find a behaviour/policy, $\pi(\cdot)$, that maximises 
+the expected Monte Carlo return over the distribution of finite 
+trajectories, induced by the policy. This is summarised by equation \ref{eq:ep_objective}.
+\begin{align}
+  \label{eq:ep_objective}
+  \pi^*&=\arg \max_{\pi}\; \mathbb{E}_{\tau\sim p^{\pi}(\tau)}[G_0(\tau)]\notag\\
+  &=\arg \max_{\pi}\; \mathbb{E}_{\tau\sim p^{\pi}(\tau)}\left[\sum_{t=0}^{len(\tau)}\gamma^tr(a_{t+1}, s_{t+1})\right].
+\end{align}
+In \ref{eq:ep_objective}, $len(\tau)$ denotes the length of the episode.
+
+
+% \label{sec:RLObjectives}
 \begin{itemize}
   \item Talk about episodic and continual settings;
   \item Talk about value functions;
@@ -362,6 +484,58 @@ Test citation \citep{NgIRL} - done.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - GRAPH REPRESENTATIONS;
 \chapter{Graph representations}
+Currently, Deep Learning (DL) is among the most prominent paradigms 
+for representation learning. Although the advent of the 
+Multilayered Perceptron (MLP) dates back to 
+1958 \citep{perceptron}, DL saw a long period 
+of stagnation. This all changed after the successful application of 
+Convolutional Neural 
+Networks (CNNs) \citep{CNNsLecun} to image classification
+in the ImageNet challenge 
+\citep{alexnet,imagenet}. The unprecedented success 
+popularised DL as a prominent way 
+to obtain expressive representations of abstract data types. 
+Apart from image classification, 
+Deep Learning has also been successfully 
+applied to text domains in problems such as 
+sentiment analysis \citep{SentimentRNN,textCNN,BERT},  
+natural language translation \citep{nlpTranslation},
+and generative autoregressive systems \citep{GPT,GPT2020}.
+
+Efficient implementations \citep{PyTorch,tensorflow} 
+of the Backpropagation algorithm \citep{backprop} and the 
+advance of computing 
+hardware have also encouraged the development of highly parallelisable 
+model classes such as the Transformer \citep{transformers}. The 
+Transformer currently plays a key role in achieving the 
+State-Of-The-Art (SOTA) performance 
+in various fields and efforts are made to adopt the attention 
+mechanism to other areas.
+
+Theoretical work \citep{UnivApproxNN} has also established
+that under some conditions, sufficiently deep MLPs 
+can be used as universal function approximators. To this end, 
+MLPs have also been used to map random noise from a latent 
+dimension to the data dimension, approximating 
+the data generating process \citep{goodfellow2014generative,VAEs}.
+
+An area that is particularly relevant for this work, 
+is Deep Reinforcement Learning 
+(DRL). In their application, \cite{DQN}, use a CNN directly on 
+raw image pixels to approximate the Q-function, part of a 
+Q-learning algorithm \citep{QlearningWatkins1992}. 
+
+In contrast to images, that can be thought of as grid-like graphs 
+(where each pixel/node is connected to the neighbouring pixels), 
+general graphs are difficult to represent using standard 
+neural architectures such as MLPs. While one can use an MLP 
+to learn embeddings of the nodes of a graph, this does not 
+account for the connectivity of the graph, specified by the edge set. 
+These limitations of standard Deep Neural architectures 
+have motivated the invention of Graph Neural Networks (GNN) \citep{ScarselliGNN}. 
+These models have found applications in areas such as 
+Quantum Chemistry \citep{MPNNs},  general Message Passing Neural Net (MPNN)
+
 \begin{itemize}
   \item Give a lit review with the Scarsalli (can be enough to just 
   mention his name and give the general MPNN structure).
