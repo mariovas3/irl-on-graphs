@@ -511,7 +511,7 @@ class IRLGraphTrainer:
                     Data(
                         x=self.nodes,
                         edge_index=edge_index[
-                            :, idxs[pointer * self.graphs_per_batch * 2 : i]
+                            :, idxs[ : i]
                         ],
                     )
                 )

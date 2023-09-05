@@ -540,7 +540,7 @@ def _get_return_and_rewards_on_path(
                 Data(
                     x=nodes,
                     edge_index=edge_index[
-                        :, idxs[pointer * graphs_per_batch * 2 : i]
+                        :, idxs[ : i]
                     ],
                 )
             )
