@@ -104,12 +104,12 @@ class SACAgentGO(SACAgentGraph):
                 math.exp(self.log_temperature.item()) * log_prob - q_est
             ).mean()
 
-        if self.fixed_temperature is None:
-            # get temperature loss;
-            self.temperature_loss = -(
-                self.log_temperature.exp()
-                * (log_prob + self.entropy_lb).detach()
-            ).mean()
+            if self.fixed_temperature is None:
+                # get temperature loss;
+                self.temperature_loss = -(
+                    self.log_temperature.exp()
+                    * (log_prob + self.entropy_lb).detach()
+                ).mean()
     
         # housekeeping;
         self.policy_losses.append(self.policy_loss.item())

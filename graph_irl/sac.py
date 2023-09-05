@@ -10,6 +10,8 @@ import numpy as np
 import torch
 from torch import nn
 
+import torch_geometric.nn as tgnn
+
 
 from graph_irl.distributions import batch_UT_trick_from_samples
 # from graph_irl.buffer_v2 import *
@@ -1019,7 +1021,7 @@ class SACAgentMuJoCo(SACAgentBase):
         # had lower value predictions;
         q_target = (
             torch.min(qt1_est, qt2_est).view(-1)
-            - agent.log_temperature.exp() * log_probs
+            - self.log_temperature.exp() * log_probs
         )
 
         q_target = (
