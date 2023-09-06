@@ -59,7 +59,7 @@ $\Box$ \end{quotation}}
   {\large An application to subway networks}\\
 }
 
-\date{Submission date: Day Month Year}
+\date{Submission date: 11 September 2023}
 \author{
   Candidate Number: YLLK3\thanks{
       {\bf Disclaimer:}
@@ -89,14 +89,34 @@ $\Box$ \end{quotation}}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % ABSTRACT;
 \begin{abstract}
-  Summarise your report concisely.
+  In this report we investigate methods for learning a graph 
+  construction mechanism based on a single graph example. More 
+  specifically, we focus on methods of Inverse Reinforcement Learning 
+  (IRL) whose goal is to learn a reward function, which when optimised 
+  should lead to the construction of graphs similar to the source graph.
+  
+  We also propose improvements over current methods with respect 
+  to decreasing the variance during training of the IRL procedure, 
+  which are inspired by the literature on per-decision importance 
+  samples.
+  
+  In our experiments, we test for the efficacy of 
+  transfering the topological properties of the source graph 
+  to an unseen target graph. We compare two ways to do this. 
+  First, we try  
+  directly deploying the 
+  jointly learned policy from IRL on the target graph, and second, 
+  by training 
+  a new policy on the target graph using the learned reward 
+  function from IRL. In all experiments, we use GraphOpt as 
+  our baseline. 
 \end{abstract}
 \tableofcontents
 \setcounter{page}{1}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - INTRODUCTION;
-\chapter{Introduction and Related Work}
+\chapter{Introduction and Related Work}\label{chap:intro}
 As more and more graph data become available, researchers in 
 areas such as biology \citep{VGAEDisease}, quantum chemistry 
 \citep{MPNNs}, social networks \citep{SocialNets} and others 
@@ -139,7 +159,7 @@ since, most of the time, we are not provided with (multiple) demonstrations
 of the graph building process. Instead, we are only given the 
 final constructed graph. 
 
-\section{Related work}
+\section{Related work}\label{sec:relatedWork}
 Graph construction approacehs have been shown to be of 
 use in many domains where we are not only interested in the 
 features of individual entities, but also about their connection 
@@ -150,6 +170,9 @@ significantly outperforms node2vec and DeepWalk
 have entities that are somehow 
 related 
 In their work, \cite{VGAEDisease} propose 
+
+\section{Structure of the Report}\label{sec:structureOfReport}
+In Chapter \ref{chap:RL}
 
 \begin{itemize}
   \item Mention deep learning for images Krizhevsky, as the 
@@ -191,7 +214,8 @@ rest of the work. The main algorithm is model-free but has value
 functions and an explicit parameterised policy. I will not cover 
 model-based RL in detail in what is to follow, therefore. The 
 following will summarise the goal of RL, 
-MDPs, Value functions, Policy gradients, off-policy learning 
+MDPs, Value functions, Policy gradients \citep{REINFORCE}, 
+off-policy learning 
 and Actor-Critics \citep{Tsitsiklis}. The last is particularly relevant, given 
 that the policy learning algorithm in the inner loop of the 
 Inverse Reinforcement Learning (IRL) 
@@ -362,11 +386,11 @@ the action that is selected by the agent.
 As we 
 can read off of the pgm in figure \ref{fig:POMDP}, we see that given 
 $s_t$ and $a_t$, $s_{t+1}$ is still independent of 
-$o_{1:t}$, $s_{1:t-1}$ and $a_{1:t-1}$ by D-separation. However,
-The observations are not Markovian in general since $o_j$ for $j<t$ 
+$o_{1:t}$, $s_{1:t-1}$ and $a_{1:t-1}$ by D-separation.
+The observations, however, are not Markovian in general 
+(if states are not observed) since $o_j$ for $j<t$ 
 can influence $o_{t+1}$ even if $o_t$ and $a_t$ are known (again by 
-D-separation). The observation is, however, independent of the past
-givent the current state (unobserved in the POMDP setting).
+D-separation).
 
 \begin{figure}[H]
   \centering
@@ -440,12 +464,119 @@ trajectories, induced by the policy. This is summarised by equation \ref{eq:ep_o
 \end{align}
 In \ref{eq:ep_objective}, $len(\tau)$ denotes the length of the episode.
 
+Before we tackle the continual setting, observe that the MDP in 
+figure \ref{fig:MDP} can be seen as a Markov chain where we define 
+the new state $z_t:=(s_t, a_t)$. Based on this formulation we also 
+get a new transition operator 
+$p(a_{t+1},s_{t+1}|a_t,s_t)=\pi(a_{t+1}|s_{t+1})p(s_{t+1}|a_t,s_t)$ and 
+the corresponding pgm can be observed in figure \ref{fig:MCz}.
 
-% \label{sec:RLObjectives}
-\begin{itemize}
-  \item Talk about episodic and continual settings;
-  \item Talk about value functions;
-\end{itemize}
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[-latex ,auto ,node distance =1 cm and 1cm ,
+      on grid , inner sep=0pt, minimum size=7mm,
+      semithick, state/.style={circle, draw}]
+      % s1, a1, s2;
+      \node[state](z_1) at(0,0) {$s_1,a_1$};
+      \node[state](z_2) at(2,0) {$s_2, a_2$};
+      \path (z_1) edge (z_2);
+      \node[state](z_3) at(4,0) {$s_3, a_3$};
+      \path (z_2) edge (z_3);
+      \node (dots) at(6,0) {$\ldots$};
+      \path (z_3) edge (dots);
+  \end{tikzpicture}
+  \caption{\label{fig:MCz} Markov chain induced by MDP.}
+\end{figure}
+
+It can be shown that if the Markov chain is aperiodic and if there 
+is a path to all possible tuples $(s_t, a_t)$ from any other tuple 
+$(s_j, a_j)$, then an equilibrium distribution exists, which 
+tells us the long-term probability of visiting a state-action tuple 
+$\mu(s_t, a_t)$.
+
+Observe that we could also rewrite the episodic definition as:
+\begin{align}
+  \label{eq:cont_objective}
+  \pi^*&=\arg \max_{\pi}\; \mathbb{E}_{\tau\sim p^{\pi}(\tau)}[G_0(\tau)]\notag\\
+  &=\arg \max_{\pi}\; \mathbb{E}_{\tau\sim p^{\pi}(\tau)}\left[\sum_{t=0}^{len(\tau)}\gamma^tr(a_{t+1}, s_{t+1})\right]\\
+  &=\arg \max_{\pi}\; \sum_{t=1}^{maxlen(\tau)}\mathbb{E}_{s_t, a_t\sim p^{\pi}(s_t, a_t)}[r(s_t, a_t)\gamma^{t-1}]\\
+  &=\arg \max_{\pi}\; \frac{1}{maxlen(\tau)}\sum_{t=1}^{maxlen(\tau)}\mathbb{E}_{s_t, a_t\sim p^{\pi}(s_t, a_t)}[r(s_t, a_t)\gamma^{t-1}],
+\end{align}
+where $maxlen(\tau)$ is the maximum length of a trajectory possible under $\pi$. 
+In the continual setting, $maxlen(\tau)\rightarrow\infty$, and provided the 
+equilibrium distribution for the Markov Chain in \ref{fig:MCz} exists, 
+after some time (burn-in), $p^{\pi}\rightarrow \mu^{\pi}$. Additionally,
+ due to the division by $maxlen(\tau)$, 
+the first finite number of steps from $p^{\pi}$ 
+will be negligable and only the steps sampled according to the equilibrium, 
+$\mu^{\pi}$ will persist. This intuition, helps us arrive at the 
+continual objective known as expected long-term reward:
+\begin{equation}\label{eq:continualObjective}
+  \arg \max_{\pi}\; {E}_{s, a\sim \mu^{\pi}(s, a)}[r(s_t, a_t)],
+\end{equation}
+where $\mu^{\pi}$ is the limiting distribution of the Markov chain 
+induced by $\pi$ \ref{fig:MCz}.
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% NEW SECTION - VALUE FUNCS;
+\section{Value functions}\label{sec:valueFuncs}
+A key quantity in our application and of much of modern Reinforcement Learning 
+are the value functions. These quantities aim to estimate the 
+expected future return, given the current state or state-action pair. 
+We shall derive those quantities from the RL objective functions 
+defined in the previous section.
+
+Starting from the episodic objective \ref{eq:ep_objective},
+\begin{align}\label{eq:valFuncDef}
+  \mathbb{E}_{\tau\sim p^{\pi}(\tau)}\left[\sum_{t=1}^{len(\tau)}r(s_t, a_t)\gamma^{t-1}\right]
+  &=\mathbb{E}_{s_1\sim p(s_1)}\left[\mathbb{E}_{\tau\sim p^{\pi}(\tau|s_1)}\left[\sum_{t=1}^{len(\tau)}r(s_t, a_t)\gamma^{t-1}|s_1\right]\right]\notag\\
+  &=\mathbb{E}_{s_1\sim p(s_1)}\left[
+      \mathbb{E}_{a_1\sim \pi(\cdot|s_1)}\left[
+          r(s_1, a_1) + 
+          \mathbb{E}_{\tau\sim p^{\pi}(\tau|s_1,a_1)}\left[\sum_{t=2}^{len(\tau)}r(s_t, a_t)\gamma^{t-1}|s_1,a_1\right]
+        \right]
+    \right]\notag\\
+  &=:\mathbb{E}_{s_1\sim p(s_1)}\left[
+      \mathbb{E}_{a_1\sim \pi(\cdot|s_1)}\left[Q^{\pi}(s_1,a_1)|s_1,a_1\right]
+      \right]\notag\\
+      &=:\mathbb{E}_{s_1\sim p(s_1)}\left[
+        V^{\pi}(s_1)|s_1
+      \right],
+\end{align}
+where $Q^{\pi}(s_1,a_1)$ is the state-action value function,  
+sometimes referred to as the Q-function, and $V^{\pi}$ is the state-value 
+function.
+
+In \ref{eq:valFuncDef} we already used a form of the Bellman expectation/prediction 
+equation:
+\begin{align}\label{eq:bellmanv}
+  V^{\pi}(s)&=\mathbb{E}_{a\sim \pi(\cdot|s)}[Q^{\pi}(s, a)|s]\notag\\
+  &=\mathbb{E}_{a\sim \pi(\cdot|s)}\left[r(s, a) + \gamma \sum_{s'\in \mathcal{S}}p(s'|s,a)V^{\pi}(s')|s\right].
+\end{align}
+
+The same for the Q-function is given by equation \ref{eq:bellmanq}.
+\begin{align}\label{eq:bellmanq}
+  Q^{\pi}(s, a)&=r(s, a) + \gamma \sum_{s'\in \mathcal{S}}p(s'|s, a)V^{\pi}(s')\notag\\
+  &= r(s,a) + \gamma \sum_{s'\in \mathcal{S}}p(s'|s, a)\sum_{a'\in \mathcal{A}}\pi(a'|s')Q^{\pi}(s', a').
+\end{align}
+
+The other pair of Bellman equations are known as the Bellman optimality 
+equations and enforce a consistency criterion for optimal policies. 
+\begin{align}\label{eq:bellmanOptV}
+  V^{\pi^*}(s)&=\max_{a\in \mathcal{A}}\; \left[r(s, a) + \gamma \sum_{s'\in \mathcal{S}}p(s'|s,a)V^{\pi}(s')|s\right]\notag\\
+  &=\max_{a\in \mathcal{A}}\;Q^{\pi^*}(s, a).
+\end{align}
+
+\begin{align}\label{eq:bellmanOptQ}
+  Q^{\pi^*}(s,a)&=r(s,a) + \gamma \sum_{s'\in \mathcal{S}}p(s'|s, a)\max_{a'\in \mathcal{A}}\;Q^{\pi*}(s', a').
+\end{align}
+
+It can be shown that there always exists at least one optimal 
+policy \citep{Sutton1998}, and the Bellman optimality equations 
+in \ref{eq:bellmanOptV} and \ref{eq:bellmanOptQ} can be viewed 
+as consistency equations for an optimal policy $\pi^*$.
 
 % SECTION - improving the policy;
 \section{title}
@@ -463,7 +594,64 @@ In \ref{eq:ep_objective}, $len(\tau)$ denotes the length of the episode.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTHER - IRL THEORY;
-\chapter{Inverse Reinforcement Learning}
+\chapter{Inverse Reinforcement Learning}\label{chap:IRL}
+Inverse Reinforcement Learning (IRL) is a method of estimating 
+a reward function given expert trajectories/demonstration 
+on performing a given task. Estimating the reward function can be 
+useful for learning about how natural systems operate and potentially 
+try to mimic their behaviour by learning a policy that 
+optimises the 
+estimated reward function. Moreover, in some settings, the true 
+reward function may be very complex, thereby, 
+making it difficult to hand-engineer a good objective for the 
+forward RL problem.
+
+There are broadly two popular approaches to IRL. The first one 
+\citep{NgIRL}, is based on a heuristic search for reward 
+functions such 
+that the observed behaviour looks better (through the ``eyes'' of 
+the reward) than any other behaviour by the largest 
+possible margin. 
+This formulation resembles a lot the problem setting for 
+support vector machines (SVMs) \citep{SVMs}, 
+where the task is to find the 
+optimal separating hyperplane.
+
+The authors of \cite{NgIRL} first show that the problem of IRL is 
+fundamentally ill-posed. This is because there are many possible 
+rewards that make a given policy look optimal. First, they use the 
+fact that there always exists at least one optimal policy \citep{Sutton1998} 
+such that $V^{\pi}$ is maximised. This implies that if $\pi^*$ is 
+an optimal policy and $\pi$ is any other policy, 
+$V^{\pi^*}(s)\ge V^{\pi}(s)\;\forall s\in\mathcal{S}$ and a 
+similar inequality holds
+for the Q-function. Then, with no loss of generality, the 
+authors use a state-reward function and rewrite the bellman 
+expectation equations in \ref{eq:bellmanv} and \ref{eq:bellmanq} 
+to:
+\begin{align}
+  V^{\pi}(s)&=r(s) + \gamma\sum_{s'\in\mathcal{S}}p()
+\end{align}
+
+
+\begin{itemize}
+  \item model known and complete policy is given;
+  \begin{itemize}
+    \item discrete state space - linear programming;
+    \item continuous state space - linear func approx;
+  \end{itemize}
+  \item many rewards possible based on policy (ill posedness);
+  \begin{itemize}
+    \item use svm heuristic - solve with linear prog in discrete state case;
+    \item for cont cases again solvable by linear progs;
+  \end{itemize}
+  \item if expert policy only trough finite num of traj, 
+  solve with iterative algo;
+\end{itemize}
+
+
+
+
 Test citation \citep{NgIRL} - done.
 \begin{itemize}
   \item State the goal of IRL - estimate an objective function
@@ -483,7 +671,7 @@ Test citation \citep{NgIRL} - done.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - GRAPH REPRESENTATIONS;
-\chapter{Graph representations}
+\chapter{Graph representations}\label{chap:GNNs}
 Currently, Deep Learning (DL) is among the most prominent paradigms 
 for representation learning. Although the advent of the 
 Multilayered Perceptron (MLP) dates back to 
@@ -550,7 +738,7 @@ Quantum Chemistry \citep{MPNNs},  general Message Passing Neural Net (MPNN)
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - OUR CONTRIBUTION;
-\chapter{Our Contribution}
+\chapter{The baseline model and our contribution}\label{chap:contribution}
 \begin{itemize}
   \item Basically the different spins on GrphOpt;
     \subitem Check effect of adding separate reward encoder;
@@ -565,7 +753,7 @@ Quantum Chemistry \citep{MPNNs},  general Message Passing Neural Net (MPNN)
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - EXPERIMENTS;
-\chapter{Experiments}
+\chapter{Experiments}\label{chap:experiments}
 
 \section{Description of tests}
 \label{sec:test_description}
@@ -764,7 +952,7 @@ prevents double-counting edges if they are proposed multiple times.
   \item  Run best config on Urban nets 10 times;
 \end{itemize}
 
-\chapter{Conclusion and Further work}
+\chapter{Conclusion and Further work}\label{chap:conclusion}
 This work builds on prior research in inverse reinforcement learning 
 for graph domains. Our contributions are, firstly, the addition of the 
 per-decision importance sampling for the IRL reward objective, 
