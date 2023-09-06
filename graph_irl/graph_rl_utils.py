@@ -161,11 +161,9 @@ def select_actions_from_scores(scores, positives_dict, edge_set):
         recip_rank = 0
         flag = True
         firsts, seconds = batch_argmax(scores)
+        first, second = firsts[0], seconds[0]
         for i, (f, s) in enumerate(zip(firsts, seconds)):
             e1, e2 = min(f, s), max(f, s)
-            if positives_dict is not None and recip_rank == 0:
-                if (e1, e2) in positives_dict:
-                    recip_rank = 1 / (i + 1)
             # ignore repeats and self loops;
             if (e1, e2) in edge_set or e1 == e2:
                 continue
@@ -173,6 +171,10 @@ def select_actions_from_scores(scores, positives_dict, edge_set):
                 first, second = f, s
                 which_action = i
                 flag = False
+            if positives_dict is not None and recip_rank == 0:
+                if (e1, e2) in positives_dict:
+                    recip_rank = 1 / (i + 1)
+                    positives_dict[(e1, e2)] = 1
             if not flag and recip_rank > 0:
                 return first, second, which_action, recip_rank
     else:
