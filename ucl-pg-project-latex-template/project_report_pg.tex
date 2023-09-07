@@ -90,26 +90,34 @@ $\Box$ \end{quotation}}
 % ABSTRACT;
 \begin{abstract}
   In this report we investigate methods for learning a graph 
-  construction mechanism based on a single graph example. More 
-  specifically, we focus on methods of Inverse Reinforcement Learning 
-  (IRL) whose goal is to learn a reward function, which when optimised 
-  should lead to the construction of graphs similar to the source graph.
+  construction mechanism based on a single graph example. We 
+  tackle this problem from the angle of Inverse Reinforcement Learning 
+  (IRL) whose goal is to learn a reward function given 
+  expert demonstrations. 
   
-  We also propose improvements over current methods with respect 
-  to decreasing the variance during training of the IRL procedure, 
-  which are inspired by the literature on per-decision importance 
-  samples.
+  After learning a reward function we could use it as an 
+  objective on a different graph and perform style-transfer.  
+  The style-transfer constitutes transferring the topological 
+  propoerties of the source graph to the target graph, while 
+  preserving the vertex set attributes of the target graph.
   
-  In our experiments, we test for the efficacy of 
-  transfering the topological properties of the source graph 
-  to an unseen target graph. We compare two ways to do this. 
-  First, we try  
+  We investigate different ways to achieve this and 
+  propose improvements over current methods with respect 
+  to decreasing the variance during training of the IRL procedure. 
+  These improvements are inspired by the 
+  literature on per-decision importance samples 
+  in Reinforcement Learning, exploiting conditional independence 
+  properties of rewards given state and actions.
+  
+  In our experiments, we test two ways to achieve style-transfer 
+  on graphs. First, we try  
   directly deploying the 
-  jointly learned policy from IRL on the target graph, and second, 
-  by training 
+  jointly learned policy from IRL based on the source graph, 
+  on the target graph, and second, 
+  we train 
   a new policy on the target graph using the learned reward 
-  function from IRL. In all experiments, we use GraphOpt as 
-  our baseline. 
+  function from IRL and then sample trajectories from it. 
+  In all experiments, we use GraphOpt as our baseline. 
 \end{abstract}
 \tableofcontents
 \setcounter{page}{1}
@@ -124,16 +132,120 @@ seek ways to analyse these data in a way that extracts
 maximum information 
 and requires the least amount of hand-designed features.
 
+When it comes to automatic feature-selection, Deep Learning (DL)
+is among the most successful paradigms spanning domains like 
+text \citep{textCNN,RNNs,SentimentRNN,BERT}, 
+vision \citep{alexnet}, and even graphs \citep{ScarselliGNN,VGAE,GCN,GAT}.
+
+The ability of DL to extract predictive features, and generaly 
+arrive at continuous embeddings of abstract data types, makes 
+it a prominent component of current Deep Graph Learning techniques.
+
 Although methods such as ``node2vec'' and ``DeepWalk'' 
-\citep{node2vec,DeepWalk} 
-have been 
+\citep{node2vec,DeepWalk} have been 
 proposed to automatically learn node features based on random 
 walks over the graph, it has been shown that Graph Neural Networks 
 (GNN) \citep{ScarselliGNN,GCN} achieve superior performance in domains 
 such as citation graphs \citep{VGAE} and Disease-gene link prediction 
-(DGP) \citep{VGAEDisease}. It has been postulated that this is because 
+(DGP) \citep{VGAEDisease}, among others. 
+It has been postulated that this is because 
 of the way GNNs utilise node features during the (neural) 
 message passing procedure.
+
+While many prediction tasks, such as edge and/or node-attribute 
+prediction \citep{GCN,VGAE,VGAEDisease,node2vec,DeepWalk}, 
+have been successfully tackled, 
+the area of graph construction has only recently gained popularity 
+\citep{Darvariu,DeepMindGraphGen,GCNPolicyGraphGen,GraphRNN,GraphOpt}.
+Some methods 
+utilise probabilistic formulations of the graph generative 
+procedure \citep{NetGAN,DeepMindGraphGen,GraphRNN}, 
+while others frame graph 
+construction as a sequntial decision-making problem 
+\cite{Darvariu,GraphOpt,GCNPolicyGraphGen}. This work 
+is concerned with the latter approach to graph generation. 
+
+In their application 
+for generating edges in urban-networks, 
+\cite{Darvariu}, exploit the knowledge of the dynamics of 
+the MDP and use Monte Carlo Tree Search (MCTS), a discrete 
+model-based control algorithm, to arrive at 
+graphs which are optimised for 
+Efficiency and Robustness. These are metrics that were assumed 
+to be important for the construction of urban networks. Intuitively, 
+Efficiency implies that the graph is ``well-connected'' and 
+information can flow via fewer edges from any given node to any 
+other node. Robustness can be understood as the property of 
+stability given a deletion of a node - ``how 
+much does the deletion of one node impact the information flow 
+of the network''. The mentioned work uses fully hand-designed 
+rewards to specify the goal of the agent.
+
+On the other hand, in their application on 
+molecule construction, 
+additionally to hand-designed properties, \cite{GCNPolicyGraphGen}
+incorporate ``prior knowledge'' to the graph generation task, which 
+they argue, constrains the generated molecules to resemble the 
+molecules observed in a given dataset without harming the 
+policy's ability to explore. This prior knowledge is 
+summarised in the loss function of a Discriminator network trained 
+jointly with a Generator on a given dataset. Similarly to \cite{Darvariu}, 
+graph embeddings are obtained using a GNN encoder taking a graph 
+object as input. This is argued to additionally stabilise the 
+performance of the algorithm, as opposed to using 
+simplified molecular-input line-entry system (SMILES) as 
+graph embeddings.
+ The RL part is achieved by policy gradients 
+on the given hand-engineered 
+reward signals combined with the loss of the Discriminator 
+network. Furthermore, \cite{GCNPolicyGraphGen} promote the RL 
+approach to graph generation due to the fact that it can explore 
+different graph structures outside the ones observed in any 
+given dataset. The latter is severly limited in probabilistic 
+approaches where the generated graphs are built with the goal 
+to resemble the distribution in the dataset.
+
+Finally, it is worth emphasising the effort that is put into 
+designing good reward signals for the forward RL problem 
+in both \cite{Darvariu} and \cite{GCNPolicyGraphGen}. While 
+\cite{Darvariu} have only used hand-designed rewards, 
+\cite{GCNPolicyGraphGen} acknowledge the difficulty to 
+design a suitable reward signal for very complex problems 
+such as molecular graph generation. To this end, as mentioned 
+earlier, \cite{GCNPolicyGraphGen} resort to learning part 
+of their reward via GAN training given a dataset of molecular 
+graphs. The hope is that the Discriminator network should be 
+able to ``look'' for desirable properties in proposed graph 
+constructions and convey its ``displeasement'' via the 
+Discriminator loss function.
+
+To completely avoid the issue of designing a reward function, 
+necessary for solving a forward RL problem,
+\cite{GraphOpt} propose to learn the reward given expert 
+demonstrations. This is achieved using the framework of 
+Maximum-Entropy (MaxEnt) Inverse Reinforcement 
+Learning (IRL) \citep{Ziebart2008}. 
+While the originally proposed MaxEnt IRL work \citep{Ziebart2008}, 
+operates in discrete settings or small state spaces, \cite{GraphOpt} 
+operate in the space of continuously embedded graphs as states and 
+continuos actions (in the graph embedding space). This 
+requires augmenting the method in \cite{Ziebart2008} by 
+introducing sampling of trajectories from an expert behaviour 
+and the current policy \citep{FinnGCL}. As such, 
+the work of \cite{GraphOpt} 
+is strongly related to the work done by \cite{FinnGCL} in the field 
+of robotics. In their task, \cite{FinnGCL} aim to learn a reward function 
+that gave rise to observed expert demonstrations of performing 
+robotic grasping tasks.
+
+In our study, we use \cite{GraphOpt} as a baseline, and propose 
+a different way of sampling the trajectories, required to learn 
+the reward function, by exploiting the conditional 
+independencies induced by the probabilistic graphical 
+model (pgm) of the MDP. Through our experiments, we demonstrate 
+that our method leads to 
+more stable (less variance) learning of the reward function.
+
 
 Furthermore, it has been shown that graph generative 
 models can be used for downstream prediction tasks 
@@ -159,17 +271,6 @@ since, most of the time, we are not provided with (multiple) demonstrations
 of the graph building process. Instead, we are only given the 
 final constructed graph. 
 
-\section{Related work}\label{sec:relatedWork}
-Graph construction approacehs have been shown to be of 
-use in many domains where we are not only interested in the 
-features of individual entities, but also about their connection 
-to other entities. For example, \cite{VGAEDisease} approach the 
-task of Disease-gene link prediction (DGP) using a Variational 
-Graph Auto Encoder \citep{VAEs,VGAE}. They show that, this approach 
-significantly outperforms node2vec and DeepWalk
-have entities that are somehow 
-related 
-In their work, \cite{VGAEDisease} propose 
 
 \section{Structure of the Report}\label{sec:structureOfReport}
 In Chapter \ref{chap:RL}

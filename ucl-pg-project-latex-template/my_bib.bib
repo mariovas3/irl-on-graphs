@@ -9,20 +9,12 @@
 }
 
 @inproceedings{Ziebart2008,
-  added-at = {2012-12-10T00:00:00.000+0100},
   author = {Ziebart, Brian D. and Maas, Andrew L. and Bagnell, J. Andrew and Dey, Anind K.},
-  biburl = {https://www.bibsonomy.org/bibtex/2231d8449e296188b91673570bc70b1d6/dblp},
   booktitle = {AAAI},
-  crossref = {conf/aaai/2008},
-  editor = {Fox, Dieter and Gomes, Carla P.},
-  ee = {http://www.aaai.org/Library/AAAI/2008/aaai08-227.php},
-  interhash = {b7a2d62a0a6b56f0bf94f4392f8f445a},
-  intrahash = {231d8449e296188b91673570bc70b1d6},
   isbn = {978-1-57735-368-3},
   keywords = {dblp},
   pages = {1433-1438},
   publisher = {AAAI Press},
-  timestamp = {2012-12-11T11:46:42.000+0100},
   title = {Maximum Entropy Inverse Reinforcement Learning.},
   url = {http://dblp.uni-trier.de/db/conf/aaai/aaai2008.html#ZiebartMBD08},
   year = 2008
@@ -60,20 +52,12 @@ describe perspectives on future research.},
   year = 2018
 }
 @inproceedings{FinnGCL,
-  added-at = {2019-05-29T00:00:00.000+0200},
   author = {Finn, Chelsea and Levine, Sergey and Abbeel, Pieter},
-  biburl = {https://www.bibsonomy.org/bibtex/29dbf4c44fddfa4305fac4f566b21f547/dblp},
   booktitle = {ICML},
-  crossref = {conf/icml/2016},
-  editor = {Balcan, Maria-Florina and Weinberger, Kilian Q.},
-  ee = {http://proceedings.mlr.press/v48/finn16.html},
-  interhash = {365aecb78318e1c7dc11396d12f8feb0},
-  intrahash = {9dbf4c44fddfa4305fac4f566b21f547},
   keywords = {dblp},
   pages = {49-58},
   publisher = {JMLR.org},
   series = {JMLR Workshop and Conference Proceedings},
-  timestamp = {2019-05-30T11:52:41.000+0200},
   title = {Guided Cost Learning: Deep Inverse Optimal Control via Policy Optimization.},
   url = {http://dblp.uni-trier.de/db/conf/icml/icml2016.html#FinnLA16},
   volume = 48,
@@ -518,4 +502,66 @@ url = {http://papers.neurips.cc/paper/9015-pytorch-an-imperative-style-high-perf
  url = {https://proceedings.neurips.cc/paper_files/paper/1999/file/6449f44a102fde848669bdd9eb6b76fa-Paper.pdf},
  volume = {12},
  year = {1999}
+}
+@misc{DeepMindGraphGen,
+      title={Learning Deep Generative Models of Graphs}, 
+      author={Yujia Li and Oriol Vinyals and Chris Dyer and Razvan Pascanu and Peter Battaglia},
+      year={2018},
+      eprint={1803.03324},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG}
+}
+@misc{GCNPolicyGraphGen,
+      title={Graph Convolutional Policy Network for Goal-Directed Molecular Graph Generation}, 
+      author={Jiaxuan You and Bowen Liu and Rex Ying and Vijay Pande and Jure Leskovec},
+      year={2019},
+      eprint={1806.02473},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG}
+}
+@misc{GraphRNN,
+      title={GraphRNN: Generating Realistic Graphs with Deep Auto-regressive Models}, 
+      author={Jiaxuan You and Rex Ying and Xiang Ren and William L. Hamilton and Jure Leskovec},
+      year={2018},
+      eprint={1802.08773},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG}
+}
+@misc{GraphRecAttNetGraphGen,
+      title={Efficient Graph Generation with Graph Recurrent Attention Networks}, 
+      author={Renjie Liao and Yujia Li and Yang Song and Shenlong Wang and Charlie Nash and William L. Hamilton and David Duvenaud and Raquel Urtasun and Richard S. Zemel},
+      year={2020},
+      eprint={1910.00760},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG}
+}
+@misc{NetGAN,
+      title={NetGAN: Generating Graphs via Random Walks}, 
+      author={Aleksandar Bojchevski and Oleksandr Shchur and Daniel Zügner and Stephan Günnemann},
+      year={2018},
+      eprint={1803.00816},
+      archivePrefix={arXiv},
+      primaryClass={stat.ML}
+}
+@misc{RNNs,
+      title={Recurrent Neural Networks (RNNs): A gentle Introduction and Overview}, 
+      author={Robin M. Schmidt},
+      year={2019},
+      eprint={1912.05911},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG}
+}
+@article{Darvariu,
+author = {Darvariu, Victor-Alexandru  and Hailes, Stephen  and Musolesi, Mirco },
+title = {Planning spatial networks with Monte Carlo tree search},
+journal = {Proceedings of the Royal Society A: Mathematical, Physical and Engineering Sciences},
+volume = {479},
+number = {2269},
+pages = {20220383},
+year = {2023},
+doi = {10.1098/rspa.2022.0383},
+URL = {https://royalsocietypublishing.org/doi/abs/10.1098/rspa.2022.0383},
+eprint = {https://royalsocietypublishing.org/doi/pdf/10.1098/rspa.2022.0383}
+,
+abstract = { We tackle the problem of goal-directed graph construction: given a starting graph, finding a set of edges whose addition maximally improves a global objective function. This problem emerges in many transportation and infrastructure networks that are of critical importance to society. We identify two significant shortcomings of present reinforcement learning methods: their exclusive focus on topology to the detriment of spatial characteristics (which are known to influence the growth and density of links), as well as the rapid growth in the action spaces and costs of model training. Our formulation as a deterministic Markov decision process allows us to adopt the Monte Carlo tree search framework, an artificial intelligence decision-time planning method. We propose improvements over the standard upper confidence bounds for trees (UCT) algorithm for this family of problems that addresses their single-agent nature, the trade-off between the cost of edges and their contribution to the objective, and an action space linear in the number of nodes. Our approach yields substantial improvements over UCT for increasing the efficiency and attack resilience of synthetic networks and real-world Internet backbone and metro systems, while using a wall clock time budget similar to other search-based algorithms. We also demonstrate that our approach scales to significantly larger networks than previous reinforcement learning methods, since it does not require training a model. }
 }
