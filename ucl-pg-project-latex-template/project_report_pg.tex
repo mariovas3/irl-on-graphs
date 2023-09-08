@@ -56,7 +56,7 @@ $\Box$ \end{quotation}}
 \title{
   { \includegraphics[scale=.5]{ucl_logo.png}}\\
   {{\Huge Graph style transfer using Inverse Reinforcement Learning}}\\
-  {\large An application to subway networks}\\
+  % {\large An application to subway networks}\\
 }
 
 \date{Submission date: 11 September 2023}
@@ -72,7 +72,7 @@ $\Box$ \end{quotation}}
     }
     \\ \\
   MSc Machine Learning\\ \\
-  Supervisor's name
+  Supervisors: Prof. Steve Hailes, Prof. Mirco Musolesi, Dr. Victor-Alexandru Darvariu
 }
 
 \numberwithin{equation}{section}
@@ -89,14 +89,18 @@ $\Box$ \end{quotation}}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % ABSTRACT;
 \begin{abstract}
+  \textbf{I THINK THIS IS DONE}
+
+
   In this report we investigate methods for learning a graph 
   construction mechanism based on a single graph example. We 
   tackle this problem from the angle of Inverse Reinforcement Learning 
   (IRL) whose goal is to learn a reward function given 
   expert demonstrations. 
   
-  After learning a reward function we could use it as an 
-  objective on a different graph and perform style-transfer.  
+  After learning a reward function, we use it as an 
+  objective on a different graph and learn a 
+  new policy to perform style-transfer.  
   The style-transfer constitutes transferring the topological 
   propoerties of the source graph to the target graph, while 
   preserving the vertex set attributes of the target graph.
@@ -107,13 +111,14 @@ $\Box$ \end{quotation}}
   These improvements are inspired by the 
   literature on per-decision importance samples 
   in Reinforcement Learning, exploiting conditional independence 
-  properties of rewards given state and actions.
+  properties of rewards given states and actions.
   
   In our experiments, we test two ways to achieve style-transfer 
   on graphs. First, we try  
   directly deploying the 
-  jointly learned policy from IRL based on the source graph, 
-  on the target graph, and second, 
+  jointly learned (together with the reward)  
+  policy from IRL based on the source graph, 
+  on the target graph. Second, 
   we train 
   a new policy on the target graph using the learned reward 
   function from IRL and then sample trajectories from it. 
@@ -125,6 +130,8 @@ $\Box$ \end{quotation}}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - INTRODUCTION;
 \chapter{Introduction and Related Work}\label{chap:intro}
+\textbf{I THINK THIS IS DONE;}
+
 As more and more graph data become available, researchers in 
 areas such as biology \citep{VGAEDisease}, quantum chemistry 
 \citep{MPNNs}, social networks \citep{SocialNets} and others 
@@ -144,36 +151,69 @@ it a prominent component of current Deep Graph Learning techniques.
 Although methods such as ``node2vec'' and ``DeepWalk'' 
 \citep{node2vec,DeepWalk} have been 
 proposed to automatically learn node features based on random 
-walks over the graph, it has been shown that Graph Neural Networks 
+walks over the graph (ignoring node features), 
+it has been shown that Graph Neural Networks 
 (GNN) \citep{ScarselliGNN,GCN} achieve superior performance in domains 
 such as citation graphs \citep{VGAE} and Disease-gene link prediction 
 (DGP) \citep{VGAEDisease}, among others. 
 It has been postulated that this is because 
 of the way GNNs utilise node features during the (neural) 
-message passing procedure.
+message passing procedure. Unsurprisingly, this has sparked interest 
+in engineering different architectures for neural message passing 
+\citep{GCN,MPNNs,GAT,GATv2}.
+
+Outside of prediction, there exist other graph tasks that may be 
+of interest such as graph construction. Having access to a 
+graph-generative mechanism allows 
+one to create synthetic data from a given distribution, which can 
+be used for data augmentation, for example. 
+
+Graph-style transfer, is another 
+venue of interest, where given a generative mechanism for 
+a source graph, one can apply the same on a target graph in order 
+to induce structure similar to that of the source graph. The 
+last mentioned task is somewhat similar to Neural Style Transfer (NST) 
+\citep{NSTGatys} from the computer vision literature, where we 
+have a ``content'' image and a ``style'' image. The goal in NST 
+is to transfer artistic traits of the ``style'' image 
+(e.g., color or style of painting) to the ``content'' image 
+while preserving the entities seen in the ``content'' image. In 
+the graph setting, we can think of the style as the topology, 
+while the content are the nodes (or node features).  
 
 While many prediction tasks, such as edge and/or node-attribute 
 prediction \citep{GCN,VGAE,VGAEDisease,node2vec,DeepWalk}, 
 have been successfully tackled, 
 the area of graph construction has only recently gained popularity 
-\citep{Darvariu,DeepMindGraphGen,GCNPolicyGraphGen,GraphRNN,GraphOpt}.
+\citep{Darvariu,DeepMindGraphGen,GCNPolicyGraphGen,GraphRNN,GraphOpt,olivecrona2017molecular,Yang2017}.
 Some methods 
 utilise probabilistic formulations of the graph generative 
 procedure \citep{NetGAN,DeepMindGraphGen,GraphRNN}, 
 while others frame graph 
 construction as a sequntial decision-making problem 
-\cite{Darvariu,GraphOpt,GCNPolicyGraphGen}. This work 
+\cite{Darvariu,GraphOpt,GCNPolicyGraphGen,Yang2017,olivecrona2017molecular}. 
+This work 
 is concerned with the latter approach to graph generation. 
 
-In their application 
-for generating edges in urban-networks, 
+While \cite{Yang2017} and \cite{olivecrona2017molecular} 
+still frame graph construction as a 
+sequential decision making problem, 
+they use simplified molecular-input line-entry system (SMILES) to 
+encode molecules (the graph domain in their application). 
+This is in contrast to the works of \citet{Darvariu,GCNPolicyGraphGen,GraphOpt},
+where the graphs are the states and embeddings are obtained 
+from a GNN 
+encoder. The work of \citet{Darvariu,GCNPolicyGraphGen,GraphOpt} 
+is therefore, more relevant to our application. 
+
+In their application for generating edges in urban-networks, 
 \cite{Darvariu}, exploit the knowledge of the dynamics of 
 the MDP and use Monte Carlo Tree Search (MCTS), a discrete 
 model-based control algorithm, to arrive at 
 graphs which are optimised for 
 Efficiency and Robustness. These are metrics that were assumed 
 to be important for the construction of urban networks. Intuitively, 
-Efficiency implies that the graph is ``well-connected'' and 
+high Efficiency implies that the graph is ``well-connected'' and 
 information can flow via fewer edges from any given node to any 
 other node. Robustness can be understood as the property of 
 stability given a deletion of a node - ``how 
@@ -181,7 +221,7 @@ much does the deletion of one node impact the information flow
 of the network''. The mentioned work uses fully hand-designed 
 rewards to specify the goal of the agent.
 
-On the other hand, in their application on 
+On the other hand, in their application to 
 molecule construction, 
 additionally to hand-designed properties, \cite{GCNPolicyGraphGen}
 incorporate ``prior knowledge'' to the graph generation task, which 
@@ -205,17 +245,17 @@ given dataset. The latter is severly limited in probabilistic
 approaches where the generated graphs are built with the goal 
 to resemble the distribution in the dataset.
 
-Finally, it is worth emphasising the effort that is put into 
+Finally, it is worth emphasising the effort put into 
 designing good reward signals for the forward RL problem 
 in both \cite{Darvariu} and \cite{GCNPolicyGraphGen}. While 
 \cite{Darvariu} have only used hand-designed rewards, 
 \cite{GCNPolicyGraphGen} acknowledge the difficulty to 
-design a suitable reward signal for very complex problems 
+design a suitable reward signal for complex problems 
 such as molecular graph generation. To this end, as mentioned 
 earlier, \cite{GCNPolicyGraphGen} resort to learning part 
 of their reward via GAN training given a dataset of molecular 
 graphs. The hope is that the Discriminator network should be 
-able to ``look'' for desirable properties in proposed graph 
+able to ``look'' for desirable properties in proposed-graph 
 constructions and convey its ``displeasement'' via the 
 Discriminator loss function.
 
@@ -225,7 +265,7 @@ necessary for solving a forward RL problem,
 demonstrations. This is achieved using the framework of 
 Maximum-Entropy (MaxEnt) Inverse Reinforcement 
 Learning (IRL) \citep{Ziebart2008}. 
-While the originally proposed MaxEnt IRL work \citep{Ziebart2008}, 
+While the originally proposed MaxEnt IRL work \citep{Ziebart2008} 
 operates in discrete settings or small state spaces, \cite{GraphOpt} 
 operate in the space of continuously embedded graphs as states and 
 continuos actions (in the graph embedding space). This 
@@ -240,91 +280,46 @@ robotic grasping tasks.
 
 In our study, we use \cite{GraphOpt} as a baseline, and propose 
 a different way of sampling the trajectories, required to learn 
-the reward function, by exploiting the conditional 
+the reward function. This is done by exploiting the conditional 
 independencies induced by the probabilistic graphical 
 model (pgm) of the MDP. Through our experiments, we demonstrate 
 that our method leads to 
 more stable (less variance) learning of the reward function.
 
-
-Furthermore, it has been shown that graph generative 
-models can be used for downstream prediction tasks 
-with great success \citep{VGAE,VGAEDisease}.
-Apart from downstream prediction tasks, however, 
-having access to a graph-generative mechanism allows 
-one to create synthetic data from a given distribution, which can 
-be used for data augmentation. Graph-style transfer, is another 
-venue of interest, where given a generative mechanism for 
-a source graph, one can apply the same on a target graph in order 
-to induce structure similar to that of the source graph. The 
-last mentioned task is somewhat similar to Neural Style Transfer (NST) 
-\citep{NSTGatys} from the computer vision literature, where we 
-have a ``content'' image and a ``style'' image. The goal in NST 
-is to transfer artistic traits of the ``style'' image 
-(e.g., color or style of painting) to the ``content'' image 
-while preserving the entities seen in the ``content'' image. In 
-the graph setting, we can think of the style as the topology, 
-while the content are the nodes. 
-
-In practice, learning a graph generative mechanism is challenging 
-since, most of the time, we are not provided with (multiple) demonstrations 
-of the graph building process. Instead, we are only given the 
-final constructed graph. 
-
-
-\section{Structure of the Report}\label{sec:structureOfReport}
-In Chapter \ref{chap:RL}
-
-\begin{itemize}
-  \item Mention deep learning for images Krizhevsky, as the 
-  beginner of the current deep learning revolution.
-  \item Mention applications to images and text.
-  \item Mention Deep Learning for autoregressive models - language 
-  models whose aim is to generate plausible text.
-  \item Mention other generative models such as VAEs 
-  and GANs for images.
-  \item Mention the difficulty of working with graphs.
-  \item Mention the invention of the GNN.
-  \item Mention efforts to build graph generative models 
-  by other people.
-  \subitem
-    probabilistic - DeepMind, NerveNet, NetGan etc.
-  \subitem
-    Optimisation based - Victor;
-  \item Mention how our problem is a type of graph generation;
-  \item Mention how it differs from other methods - the IRL component.
-\end{itemize}
-
-In recent years, deep learning has been used for learning expressive 
-representations of abstract data types. For example
-The invention of Graph Neural Networks \citep{ScarselliGNN} has 
-unlocked 
+\section*{Structure of the Report}\label{sec:structureOfReport}
+The remainder of the report is organised as follows:
+in chapter \ref{chap:RL} we introduce the necessary background 
+of Reinforcement Learning to understand the policy learning 
+algorithm in the inner loop of the IRL algorithm. In chapter 
+\ref{chap:IRL} we review the two main approaches to IRL, 
+\citep{NgIRL,Ziebart2008}, and communicate key findings that 
+make the task of IRL difficult. In chapter \ref{chap:GNNs} 
+we provide a brief overview of current Graph Neural Network 
+architectures, since this is what we use as our graph encoder.
+In chapter \ref{chap:contribution} we describe the architecture 
+of the baseline model, GraphOpt \citep{GraphOpt}, and we 
+discuss our contribution. In chapter \ref{chap:experiments} we 
+provide experimental results and a description of the testing 
+suite. In chapter \ref{chap:conclusion} we conclude the 
+report by briefly summarising our findings and suggest avenues 
+for further research.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - RL BACKGROUND;
 \chapter{Reinforcement Learning Background}
 \label{chap:RL}
-\textbf{TODO}: A SHORT SUMMARY OF THE FOLLOWING SENTENCES IS TO BE PUT 
-IN THE END OF THE INTRO WHERE I EXPLAIN THE STRUCTURE OF THE 
-REPORT.
-
 In this section I cover the necessary background from Reinforcement 
 Learning (RL) to follow the 
-rest of the work. The main algorithm is model-free but has value 
-functions and an explicit parameterised policy. I will not cover 
-model-based RL in detail in what is to follow, therefore. The 
-following will summarise the goal of RL, 
+rest of the work. The main algorithm in the inner 
+loop of the IRL procedure \citep{SAC2}, is model-free and has value 
+functions and an explicitly parameterised policy. Although usually 
+classified as a maximum-entropy RL algorithm, it is strongly related 
+to the method of Actor-Critics. In this chapter I will cover 
+the goal of RL, 
 MDPs, Value functions, Policy gradients \citep{REINFORCE}, 
-off-policy learning 
-and Actor-Critics \citep{Tsitsiklis}. The last is particularly relevant, given 
-that the policy learning algorithm in the inner loop of the 
-Inverse Reinforcement Learning (IRL) 
-problem can be thought of as a ``soft'' variant of an Actor-Critic 
-learning algorithm. The ``softness'' comes from the backup equations, 
-to be discussed later. Finally, as we work in the multistep interaction 
-setting (episodes longer than one time step), we omit discussions about 
-bandit problems.
+off-policy learning, Actor-Critics \citep{Tsitsiklis} and 
+the maximum entropy approach to RL.
 
 % SECTION - THE GOAL OF RL;
 \section{The Goal of Reinforcement Learning}
@@ -613,7 +608,7 @@ will be negligable and only the steps sampled according to the equilibrium,
 $\mu^{\pi}$ will persist. This intuition, helps us arrive at the 
 continual objective known as expected long-term reward:
 \begin{equation}\label{eq:continualObjective}
-  \arg \max_{\pi}\; {E}_{s, a\sim \mu^{\pi}(s, a)}[r(s_t, a_t)],
+  \arg \max_{\pi}\; {E}_{s, a\sim \mu^{\pi}(s, a)}[r(s, a)],
 \end{equation}
 where $\mu^{\pi}$ is the limiting distribution of the Markov chain 
 induced by $\pi$ \ref{fig:MCz}.
@@ -636,14 +631,14 @@ Starting from the episodic objective \ref{eq:ep_objective},
   &=\mathbb{E}_{s_1\sim p(s_1)}\left[
       \mathbb{E}_{a_1\sim \pi(\cdot|s_1)}\left[
           r(s_1, a_1) + 
-          \mathbb{E}_{\tau\sim p^{\pi}(\tau|s_1,a_1)}\left[\sum_{t=2}^{len(\tau)}r(s_t, a_t)\gamma^{t-1}|s_1,a_1\right]
+          \mathbb{E}_{\tau\sim p^{\pi}(\tau|s_1,a_1)}\left[\sum_{t=2}^{len(\tau)}r(s_t, a_t)\gamma^{t-1}\right]|s_1,a_1
         \right]
     \right]\notag\\
   &=:\mathbb{E}_{s_1\sim p(s_1)}\left[
-      \mathbb{E}_{a_1\sim \pi(\cdot|s_1)}\left[Q^{\pi}(s_1,a_1)|s_1,a_1\right]
+      \mathbb{E}_{a_1\sim \pi(\cdot|s_1)}\left[Q^{\pi}(s_1,a_1)\right]
       \right]\notag\\
       &=:\mathbb{E}_{s_1\sim p(s_1)}\left[
-        V^{\pi}(s_1)|s_1
+        V^{\pi}(s_1)
       \right],
 \end{align}
 where $Q^{\pi}(s_1,a_1)$ is the state-action value function,  
@@ -680,80 +675,115 @@ in \ref{eq:bellmanOptV} and \ref{eq:bellmanOptQ} can be viewed
 as consistency equations for an optimal policy $\pi^*$.
 
 % SECTION - improving the policy;
-\section{title}
-
-
-
+\section{Value iteration}
+\textbf{TODO NEED TO FINISH;}
+\section{Q-learning}
 \begin{itemize}
-  \item Define the RL objective - optimising long term reward 
-    or the episodic objective with the returns;
-  \item Give the Bellman equations as a means to solve an MDP;
-    Give proof of the convergence of those Bellman operators;
-  \item Make the claim about the existence of an optimal greedy 
-    policy, given an MDP;
+  \item Mention it's the sampled version of the bellman optimality 
+  equation.
+  \item Cite the source that proves the convergence.
+  \item Mention it's 1-step off-policy method;
+\end{itemize}
+\section{Policy gradients}
+\begin{itemize}
+  \item Derive policy grad;
+  \item Show that adding a baseline that does not depend on 
+  an action, still keeps the update unbiased;
+  \item Substitute the baseline for the state-value function 
+  and motivate Actor-Critic;
+\end{itemize}
+\section{Maximum Entropy Reinforcement Learning}\label{sec:MaxEntRL}
+\begin{itemize}
+  \item Draw pgm based on \citep{LevineRLasInf};
+  \item Mention it can also be given as MRF with $\exp(r(s, a))$ 
+  as pairwise potential between $s$ and $a$.
+  \item Show connection to the Bellman update.
 \end{itemize}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTHER - IRL THEORY;
 \chapter{Inverse Reinforcement Learning}\label{chap:IRL}
 Inverse Reinforcement Learning (IRL) is a method of estimating 
-a reward function given expert trajectories/demonstration 
-on performing a given task. Estimating the reward function can be 
+a reward function given expert trajectories/demonstrations 
+from performing a given task. Estimating the reward function can be 
 useful for learning about how natural systems operate and potentially 
 try to mimic their behaviour by learning a policy that 
 optimises the 
-estimated reward function. Moreover, in some settings, the true 
-reward function may be very complex, thereby, 
-making it difficult to hand-engineer a good objective for the 
-forward RL problem.
-
-There are broadly two popular approaches to IRL. The first one 
-\citep{NgIRL}, is based on a heuristic search for reward 
-functions such 
-that the observed behaviour looks better (through the ``eyes'' of 
-the reward) than any other behaviour by the largest 
-possible margin. 
-This formulation resembles a lot the problem setting for 
-support vector machines (SVMs) \citep{SVMs}, 
-where the task is to find the 
-optimal separating hyperplane.
-
-The authors of \cite{NgIRL} first show that the problem of IRL is 
-fundamentally ill-posed. This is because there are many possible 
-rewards that make a given policy look optimal. First, they use the 
-fact that there always exists at least one optimal policy \citep{Sutton1998} 
-such that $V^{\pi}$ is maximised. This implies that if $\pi^*$ is 
-an optimal policy and $\pi$ is any other policy, 
-$V^{\pi^*}(s)\ge V^{\pi}(s)\;\forall s\in\mathcal{S}$ and a 
-similar inequality holds
-for the Q-function. Then, with no loss of generality, the 
-authors use a state-reward function and rewrite the bellman 
-expectation equations in \ref{eq:bellmanv} and \ref{eq:bellmanq} 
-to:
-\begin{align}
-  V^{\pi}(s)&=r(s) + \gamma\sum_{s'\in\mathcal{S}}p()
-\end{align}
+estimated reward function. Fruthermore, the idea of learning a 
+reward function 
+is particularly appealing for complex environment settings 
+where it is not obvious what the reward function looks like. 
+In such settings blindly applying RL to learn a policy may 
+prove difficult or infeasible. 
 
 
-\begin{itemize}
-  \item model known and complete policy is given;
-  \begin{itemize}
-    \item discrete state space - linear programming;
-    \item continuous state space - linear func approx;
-  \end{itemize}
-  \item many rewards possible based on policy (ill posedness);
-  \begin{itemize}
-    \item use svm heuristic - solve with linear prog in discrete state case;
-    \item for cont cases again solvable by linear progs;
-  \end{itemize}
-  \item if expert policy only trough finite num of traj, 
-  solve with iterative algo;
-\end{itemize}
+The authors of \cite{NgIRL} 
+further argue that in settings where we wish to understand 
+the behaviour of a (natural) system, the reward might give an even 
+more concise explanation to the observed behaviour 
+than learning a policy to mimic the behaviour of the subject 
+of study. This statement is based on the assumption 
+of RL that any goal can be achieved by maximising a relevant reward 
+function.
+
+As shown in \cite{NgIRL}, however, it turns out there are many 
+reward functions that explain a given behaviour/policy. Among 
+them are degenerate solutions such as reward being zero everywhere, 
+and indeed the constant reward function that assigns equal reward 
+regardless of the action taken. - \textbf{Not sure if I should give a short proof}
+
+In what follows, we describe ways in which to select ``feasible'' 
+reward functions that are not degenerate. 
+
+We cover two such approaches to regularising the reward 
+search space. - \textbf{I think I'm fine mentioning the Ng 
+approach with SVM heuristic and not go into too much detail 
+since I end up using the MaxEnt IRL approach}
 
 
+The first approach is heuristic-based \citep{NgIRL} and 
+aims to find 
+a reward function according to which the observed expert behaviour 
+is maximally optimal/different relative to any other behaviour. The 
+authors of \cite{NgIRL} formulate this problem as a linear problem, 
+very similar to the problem setting of Support Vector Machines 
+(SVMs) \citep{SVMs}, where the goal is to find a hyperplane that 
+best separates the expert behaviour/policy from any other policy. 
+In the continuous state space setting, the reward in \cite{NgIRL} 
+is linear in its parameters who have similar constraints to 
+the hyperplane in SVMs.
+
+\textbf{TODO: GIVE THE MATHS}
+The second approach, is the Maximum-Entropy IRL approach 
+\citep{Ziebart2008}, that aims to find a reward that induces 
+a policy who apart from matching the features of 
+states along the paths of the expert demonstrations (feature 
+matching), has 
+to act as randomly as possible (maximum entropy). To do this, 
+\cite{Ziebart2008} effectively do maximum likelihood learning 
+for the parameters of the reward function in the setting of 
+Maximum Entropy RL \ref{sec:MaxEntRL}. Due to using a linear 
+function approximation for the reward in \cite{Ziebart2008}, 
+we get a familiar equation for parameter estimation, reducing 
+to matching expected sufficient statistics of an exponential 
+family distribution over trajectories. 
 
 
-Test citation \citep{NgIRL} - done.
+% \begin{itemize}
+  % \item model known and complete policy is given;
+  % \begin{itemize}
+    % \item discrete state space - linear programming;
+    % \item continuous state space - linear func approx;
+  % \end{itemize}
+  % \item many rewards possible based on policy (ill posedness);
+  % \begin{itemize}
+    % \item use svm heuristic - solve with linear prog in discrete state case;
+    % \item for cont cases again solvable by linear progs;
+  % \end{itemize}
+  % \item if expert policy only trough finite num of traj, 
+  % solve with iterative algo;
+% \end{itemize}
+
 \begin{itemize}
   \item State the goal of IRL - estimate an objective function
     that when optimised should yield a behaviour similar to the 
@@ -762,26 +792,39 @@ Test citation \citep{NgIRL} - done.
     classic optimal control not suitable for the job.
   \item Talk about the max-margin approach (Ng) to IRL.
     State drawbacks;
-  \item Talk about the max-entropy Ziebart approach;
-    Show the (soft) ``duality'' between this probabilistic setting and 
-    the updates from the Bellman equations - see Levine lectures 
-    and motivations and his review paper. Here should talk about the 
-    works of Todorov, Sergey's review paper and SAC as a means to 
-    work in this probabilistic setting.
+  \item Give the update equation for the rewards in the 
+  continuous state space setting - rewards on expert traj 
+  vs rewards with imp-weights due to sampling;
 \end{itemize}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - GRAPH REPRESENTATIONS;
 \chapter{Graph representations}\label{chap:GNNs}
+\begin{itemize}
+  \item the current stuff might be a bit verbose and talks 
+  a bit too much about general DL; 
+  \item I am thinking, just start directly with \cite{ScarselliGNN};
+  \item Mention a few prominent works such as \cite{MPNNs,GCN};
+  \item Give the relevant equations for a general neural message 
+  passing procedure;
+  \item finish off with the GATv2 \citep{GATv2} architecture, 
+  since this is what I am using.
+  \item Give the equations for GATv2 and connect it to the 
+  attention mechanism \citep{transformers}.
+  \item State drawbacks and potential reasons, why it is difficult 
+    to work with graph topography rather than topology when using 
+    GNNs - perm inv agg over nodes loses info.
+\end{itemize}
 Currently, Deep Learning (DL) is among the most prominent paradigms 
 for representation learning. Although the advent of the 
 Multilayered Perceptron (MLP) dates back to 
 1958 \citep{perceptron}, DL saw a long period 
-of stagnation. This all changed after the successful application of 
+of stagnation. After the successful application of 
 Convolutional Neural 
 Networks (CNNs) \citep{CNNsLecun} to image classification
 in the ImageNet challenge 
-\citep{alexnet,imagenet}. The unprecedented success 
+\citep{alexnet,imagenet}, however, DL regained 
+its popularity. The unprecedented success 
 popularised DL as a prominent way 
 to obtain expressive representations of abstract data types. 
 Apart from image classification, 
@@ -823,33 +866,32 @@ account for the connectivity of the graph, specified by the edge set.
 These limitations of standard Deep Neural architectures 
 have motivated the invention of Graph Neural Networks (GNN) \citep{ScarselliGNN}. 
 These models have found applications in areas such as 
-Quantum Chemistry \citep{MPNNs},  general Message Passing Neural Net (MPNN)
+Quantum Chemistry \citep{MPNNs}, where 
+a general form of the Message Passing Neural Net (MPNN) was 
+introduced.
 
-\begin{itemize}
-  \item Give a lit review with the Scarsalli (can be enough to just 
-  mention his name and give the general MPNN structure).
-  \item Talk about the applications of GNNs - e.g., the Kipf paper 
-    with GCN and application to citation graphs;
-  \item Talk about the GATv2 which I am using.
-  \item Read/skim the new paper about how much can gnns learn.
-  \item State drawbacks and potential reasons, why it is difficult 
-    to work with graph topography rather than topology when using 
-    GNNs.
-\end{itemize}
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - OUR CONTRIBUTION;
 \chapter{The baseline model and our contribution}\label{chap:contribution}
+% In practice, learning a graph generative mechanism is challenging 
+% since, most of the time, we are not provided with (multiple) demonstrations 
+% of the graph building process. Instead, we are only given the 
+% final constructed graph.
 \begin{itemize}
-  \item Basically the different spins on GrphOpt;
-    \subitem Check effect of adding separate reward encoder;
-    \subitem Check effect of UT trick - didn't seem so good, might drop;
-    \subitem Check effect of multitask training - see if works;
-    \subitem Talk about particular implementation experience
-      gathering and storing it in the Replay Buffer; talk about 
-      the batch-sampling time reward computation and not wasting 
-      state-action trajectory experience by having to clear the 
-      buffer after reward update, had we stayed with vanilla description;
+  \item Describe GraphOpt;
+  \item Describe our spin on it:
+  \begin{itemize}
+    \item Separate reward func encoder;
+    \item Per-dec imp samples;
+    \item UT trick if results are good;
+  \end{itemize}
+  \item Maybe also give some notes on technical 
+  implementation for efficiency with the replay buffer 
+  where we only save state-action data and eval rewards 
+  at batch sampling time; that way we don't have to clear the 
+  buffer after reward update every time;
 \end{itemize}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -1022,6 +1064,7 @@ The python dictionary implementation in Algorithm \ref{tests:test_edge_predictio
 prevents double-counting edges if they are proposed multiple times.
 
 \begin{enumerate}
+  \item Experimental Recipe:
   \item Run IRL training on a source graph. Receive trained policy 
   and reward function.
 \end{enumerate}
