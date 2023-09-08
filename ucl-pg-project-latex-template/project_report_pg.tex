@@ -16,8 +16,16 @@
 \usetikzlibrary {positioning, shapes, bayesnet}
 \graphicspath{{./}}
 \usepackage{natbib}
-% end of my imports;
 
+\usepackage[top=2.5cm, left=3cm, right=3cm, bottom=4.0cm]{geometry}                                                                                      
+% Colour table cells
+% \usepackage[table]{xcolor}
+% Get larger line spacing in table
+% \newcommand{\tablespace}{\\[1.25mm]}
+% \newcommand\Tstrut{\rule{0pt}{2.6ex}}         % = `top' strut
+% \newcommand\tstrut{\rule{0pt}{2.0ex}}         % = `top' strut
+% \newcommand\Bstrut{\rule[-0.9ex]{0pt}{0pt}}   % = `bottom' strut
+% end of my imports;
 \pagestyle{plain}
 \usepackage{amssymb,color}
 \usepackage{amsfonts}
@@ -94,7 +102,8 @@ $\Box$ \end{quotation}}
 
   In this report we investigate methods for learning a graph 
   construction mechanism based on a single graph example. We 
-  tackle this problem from the angle of Inverse Reinforcement Learning 
+  tackle this problem from the angle of Maximum-Entropy (MaxEnt) 
+  Inverse Reinforcement Learning 
   (IRL) whose goal is to learn a reward function given 
   expert demonstrations. 
   
@@ -241,7 +250,7 @@ reward signals combined with the loss of the Discriminator
 network. Furthermore, \cite{GCNPolicyGraphGen} promote the RL 
 approach to graph generation due to the fact that it can explore 
 different graph structures outside the ones observed in any 
-given dataset. The latter is severly limited in probabilistic 
+given dataset. Exploration is severly limited in probabilistic 
 approaches where the generated graphs are built with the goal 
 to resemble the distribution in the dataset.
 
@@ -251,8 +260,7 @@ in both \cite{Darvariu} and \cite{GCNPolicyGraphGen}. While
 \cite{Darvariu} have only used hand-designed rewards, 
 \cite{GCNPolicyGraphGen} acknowledge the difficulty to 
 design a suitable reward signal for complex problems 
-such as molecular graph generation. To this end, as mentioned 
-earlier, \cite{GCNPolicyGraphGen} resort to learning part 
+such as molecular graph generation. To this end, \cite{GCNPolicyGraphGen} resort to learning part 
 of their reward via GAN training given a dataset of molecular 
 graphs. The hope is that the Discriminator network should be 
 able to ``look'' for desirable properties in proposed-graph 
@@ -334,7 +342,7 @@ In the Reinforcement learning setup, we distinguish between two
 key entities - environment and agent. The environment is the 
 entity that specifies a set of rules, based on which an action 
 is judged given the environment's configuration. 
-More specifically, let the configuration or state of the 
+More specifically, let the configuration, or state, of the 
 environment at time $t$ be denoted by $s_t$. Then, 
 given an action, $a_t$ at time $t$, the environment evaluates 
 how good this action is, given its 
@@ -343,7 +351,8 @@ $r_{t+1}$, and also updates its state to $s_{t+1}$. The agent
 is the entity responsible for giving an action $a_t$. 
 
 It is worth noting that there are 
-different conventions about indexing the reward, but in this work 
+different conventions for indexing the reward. In this work, 
+unless stated otherwise, 
 we adopt the convention from the Sutton and Barto book 
 \citep{Sutton1998} where the reward is thought of as feedback 
 given to the agent the step after the action was taken.
@@ -484,7 +493,7 @@ can read off of the pgm in figure \ref{fig:POMDP}, we see that given
 $s_t$ and $a_t$, $s_{t+1}$ is still independent of 
 $o_{1:t}$, $s_{1:t-1}$ and $a_{1:t-1}$ by D-separation.
 The observations, however, are not Markovian in general 
-(if states are not observed) since $o_j$ for $j<t$ 
+since $o_j$ for $j<t$ 
 can influence $o_{t+1}$ even if $o_t$ and $a_t$ are known (again by 
 D-separation).
 
@@ -542,6 +551,7 @@ $f: \mathcal{S}\times\mathcal{A}\rightarrow \mathcal{S}$ is some deterministic
 transition function (similarly $g:\mathcal{S}\rightarrow \mathcal{O}$ 
 can be the sensor mapping the state to the observation).
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % SECTION - FORMULATING EPISODIC AND CONTINUAL SETTING REWARD;
 \section{Formulating objective functions}\label{sec:RLGoalMaths}
 In section \ref{sec:RLGoal} we explained the goal of RL in words. 
@@ -556,7 +566,7 @@ trajectories, induced by the policy. This is summarised by equation \ref{eq:ep_o
 \begin{align}
   \label{eq:ep_objective}
   \pi^*&=\arg \max_{\pi}\; \mathbb{E}_{\tau\sim p^{\pi}(\tau)}[G_0(\tau)]\notag\\
-  &=\arg \max_{\pi}\; \mathbb{E}_{\tau\sim p^{\pi}(\tau)}\left[\sum_{t=0}^{len(\tau)}\gamma^tr(a_{t+1}, s_{t+1})\right].
+  &=\arg \max_{\pi}\; \mathbb{E}_{\tau\sim p^{\pi}(\tau)}\left[\sum_{t=1}^{len(\tau)}\gamma^{t-1}r(a_{t}, s_{t})\right].
 \end{align}
 In \ref{eq:ep_objective}, $len(\tau)$ denotes the length of the episode.
 
@@ -594,14 +604,14 @@ Observe that we could also rewrite the episodic definition as:
 \begin{align}
   \label{eq:cont_objective}
   \pi^*&=\arg \max_{\pi}\; \mathbb{E}_{\tau\sim p^{\pi}(\tau)}[G_0(\tau)]\notag\\
-  &=\arg \max_{\pi}\; \mathbb{E}_{\tau\sim p^{\pi}(\tau)}\left[\sum_{t=0}^{len(\tau)}\gamma^tr(a_{t+1}, s_{t+1})\right]\\
-  &=\arg \max_{\pi}\; \sum_{t=1}^{maxlen(\tau)}\mathbb{E}_{s_t, a_t\sim p^{\pi}(s_t, a_t)}[r(s_t, a_t)\gamma^{t-1}]\\
-  &=\arg \max_{\pi}\; \frac{1}{maxlen(\tau)}\sum_{t=1}^{maxlen(\tau)}\mathbb{E}_{s_t, a_t\sim p^{\pi}(s_t, a_t)}[r(s_t, a_t)\gamma^{t-1}],
+  &=\arg \max_{\pi}\; \mathbb{E}_{\tau\sim p^{\pi}(\tau)}\left[\sum_{t=1}^{len(\tau)}\gamma^{t-1}r(a_{t}, s_{t})\right]\\
+  &=\arg \max_{\pi}\; \sum_{t=1}^{maxlen(\tau)}\mathbb{E}_{s_{t}, a_{t}\sim p^{\pi}(s_{t}, a_{t})}[r(s_t, a_t)\gamma^{t-1}]\\
+  &=\arg \max_{\pi}\; \frac{1}{maxlen(\tau)}\sum_{t=1}^{maxlen(\tau)}\mathbb{E}_{s_{t}, a_{t}\sim p^{\pi}(s_{t}, a_{t})}[r(s_{t}, a_{t})\gamma^{t-1}],
 \end{align}
 where $maxlen(\tau)$ is the maximum length of a trajectory possible under $\pi$. 
 In the continual setting, $maxlen(\tau)\rightarrow\infty$, and provided the 
 equilibrium distribution for the Markov Chain in \ref{fig:MCz} exists, 
-after some time (burn-in), $p^{\pi}\rightarrow \mu^{\pi}$. Additionally,
+after some time (burn-in), $p^{\pi}\rightarrow \mu^{\pi}$. Intuitively,
  due to the division by $maxlen(\tau)$, 
 the first finite number of steps from $p^{\pi}$ 
 will be negligable and only the steps sampled according to the equilibrium, 
@@ -641,8 +651,8 @@ Starting from the episodic objective \ref{eq:ep_objective},
         V^{\pi}(s_1)
       \right],
 \end{align}
-where $Q^{\pi}(s_1,a_1)$ is the state-action value function,  
-sometimes referred to as the Q-function, and $V^{\pi}$ is the state-value 
+where $Q^{\pi}(s_1,a_1):=\mathbb{E}[G_0(\tau)|s_1, a_1, \pi]$ is the state-action value function,  
+sometimes referred to as the Q-function, and $V^{\pi}:=\mathbb{E}_{a_1\sim\pi(\cdot)}[Q^{\pi}(s_1, a_1)|s_1]$ is the state-value 
 function.
 
 In \ref{eq:valFuncDef} we already used a form of the Bellman expectation/prediction 
@@ -675,16 +685,270 @@ in \ref{eq:bellmanOptV} and \ref{eq:bellmanOptQ} can be viewed
 as consistency equations for an optimal policy $\pi^*$.
 
 % SECTION - improving the policy;
-\section{Value iteration}
-\textbf{TODO NEED TO FINISH;}
+\section{Policy iteration}
+Based on the Value functions, $Q^{\pi}$ and $V^{\pi}$ introduced in the 
+previous section, there exists a powerful paradigm that allows 
+us to arrive at an optimal policy. This paradim is called Generalised 
+Policy Iteration.
+
+Given a policy one might be interested in understanding how good 
+it is - evalueate it. Another question, given a current policy, 
+might be whether we can improve it. In the tabular case, where 
+we can enumarate all state-action pairs, it can be shown that 
+for $\gamma\in[0, 1)$, the updates given in \ref{eq:policyEval} correspond to operators 
+leading to a convergent sequence, whose stationary point is the 
+value of the policy $\pi$.
+\begin{align}\label{eq:policyEval}
+  v_{k+1}(s_t) &\gets \mathbb{E}[r_{t+1} + \gamma v_k(s_{t+1})|s_t]\notag\\
+  q_{k+1}(s_t, a_t)&\gets r(s_t, a_t) 
+  + \gamma\mathbb{E}[q_{k}(s_{t+1}, a_{t+1})|s_t,a_t].
+\end{align}
+
+We can iterate the equations in \ref{eq:policyEval} until $v_{k+1}(s)=v_k(s)$ 
+$\forall s\in \mathcal{S}$ at which point we get $v_k\approx v^{\pi}$ 
+(and similarly for $q$).
+
+
+For the policy improvement step, it can be shown \citep{Sutton1998} 
+that after the 
+policy evaluation \ref{eq:policyEval} converges, updating the policy 
+to be greedy with respect to the action value $q^{\pi}$ of the 
+current policy, improves the policy.
+\begin{equation}\label{eq:policyImp}
+  \pi'(s)=\arg \max_a q^{\pi}(s, a).
+\end{equation}
+
+Together, policy evaluation \ref{eq:policyEval} and \ref{eq:policyImp} 
+can be iterated one after another until we reach an optimal policy 
+given an MDP.
+
+It is worth noting, that instead of waiting for policy evaluation 
+\ref{eq:policyEval} to converge, we can instead do just one sweep 
+of updates (single iteration) and then immediately do a policy 
+improvement step. This procedure is known as value iteration and 
+can also be shown to converge to the value functions of an 
+optimal policy given an MDP. The equations for value iteration 
+are shown in \ref{eq:valueIter}
+\begin{align}\label{eq:valueIter}
+  v_{k+1}(s_t)&\gets\max_a \left[r(s_t, a) 
+  + \gamma \sum_{s'\in\mathcal{S}}p(s'|s_t, a)v_{k}(s')\right]\notag\\
+  q_{k+1}(s_t, a_t)&\gets r(s_t, a_t) 
+  + \gamma \sum_{s'\in\mathcal{S}}p(s'|s_t, a_t)\max_a\; q_{k}(s', a).
+\end{align}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% NEW SECTION - Q-learning;
 \section{Q-learning}
-\begin{itemize}
-  \item Mention it's the sampled version of the bellman optimality 
-  equation.
-  \item Cite the source that proves the convergence.
-  \item Mention it's 1-step off-policy method;
-\end{itemize}
-\section{Policy gradients}
+In this section we use Q-learning \citep{QlearningWatkins1992} 
+as a motivating example 
+for single-step off-policy methods. These are methods 
+that aim to evaluate a target policy, $\pi$, while following 
+a different behaviour policy, $\mu$. This will be relevant when 
+we describe the algorithm \citep{SAC2} 
+used in the inner loop of our IRL routine.
+
+The simplest way to understand Q-learning, is perhaps by 
+first introducing an on-line variant called SARSA \citep{SARSA}. 
+SARSA is an algorithm that samples the policy evaluation update 
+for the Q-function as given in Equation \ref{eq:policyEval}.
+The sampling is done based on the current policy/behaviour and can 
+be motivated by gradient descent on the Mean Squared Error of 
+the true Q-function, $Q^{\pi}$, and our current estimate $Q_{k}$.
+Intuitively, taking a gradient with respect to $Q_{k}$ we get the 
+expression in Equation \ref{eq:sarsaGrad}.
+\begin{align}\label{eq:sarsaGrad}
+  \frac{\partial}{\partial Q_{k}}(Q^{\pi}(s_t, a_t) - Q_{k}(s_t, a_t))^2&=-2(Q^{\pi}(s_t, a_t) - Q_{k}(s_t,a_t)).
+\end{align}
+
+Since we do not know the true $Q^{\pi}$ (otherwise we would be done) 
+we receive a reward, $r_{t+1}$, and the next state $s_{t+1}$ 
+based on taking action $a_t$ at state $s_t$, then sample the next 
+action, $a_{t+1}$, according to the current policy and instead of the 
+true Q-function, we use our estimate $Q_{k}(s_{t+1}, a_{t+1})$ to evaluate 
+the next state-action pair. This process gives the update in 
+Equation \ref{eq:sarsa}.
+The technique for using $Q_{k}(s_{t+1}, a_{t+1})$ instead 
+of $Q^{\pi}(s_{t+1}, a_{t+1})$ is known as bootstrapping and needs to be 
+handled with care since it is not 
+necessarily a good estimate of $Q^{\pi}(s_{t+1}, a_{t+1})$ (it is biased). 
+To this end, take note of the learning rate, $\alpha$ in equation 
+\ref{eq:sarsa} which is there to account for the noise introduced 
+by bootstrapping.
+
+Note that we did not require access to the model, $\mathcal{P}$, at 
+any point. Because of this, SARSA is classified as a model-free method.
+
+\begin{equation}\label{eq:sarsa}
+  Q_{k+1}(s_t, a_t) = Q_{k}(s_t, a_t) + \alpha (r_{t+1} + \gamma Q_{k}(s_{t+1}, a_{t+1}) - Q_{k}(s_t, a_t)).
+\end{equation}
+
+% In Equation \ref{eq:sarsa}, first we interact with the environment 
+% by proposing $a_t$, sampled by the current policy, then the environment 
+% gives us the reward $r$ as feedback and transitions to the next state 
+% $s_{t+1}$. At this point we once again sample an action $a_{t+1}$ 
+% from the current policy and update in a gradient descent on the 
+% Q-value fashion, towards the reward plus the discounted Q-value for 
+% the next state action pair, $(s_{t+1},\; a_{t+1})$.
+
+While SARSA evaluates the current policy $\pi$, Q-learning aims 
+to evaluate the greedy policy given the current estimate $Q_{k}$, 
+while following another policy, $\mu$, known as the behaviour. 
+This is why Q-learning is an off-policy method.
+
+The associated update (for tabular Q-learning) is given in equation 
+\ref{eq:qlearning}
+\begin{equation}\label{eq:qlearning}
+  Q_{k+1}(s_t, a_t) = Q_{k}(s_t, a_t) + \alpha \left(r_{t+1} + \gamma \max_{a'\in\mathcal{A}}\;Q_{k}(s_{t+1}, a') - Q_{k}(s_t, a_t)\right).
+\end{equation}
+
+The reader may have noticed that the update for Q-learning is like 
+a sampled version of the value iteration update \ref{eq:valueIter} 
+for the Q-function. Both SARSA and Q-learning can be shown to 
+converge given appropriately decaying learning rates $\alpha$ 
+that satisfy the Robbins-Monro conditions given in Equation 
+\ref{eq:RobbinsMonro} and a behaviour, $\mu$ that explores 
+sufficiently often (needed for Q-learning).
+
+\begin{align}\label{eq:RobbinsMonro}
+  \sum_{k=0}^\infty \alpha_k&\rightarrow \infty\notag\\
+  \sum_{k=0}^\infty \alpha_k^2&< \infty.
+\end{align}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%5
+% NEW SECTION;
+\section{Policy Gradients}\label{sec:PolicyGrads}
+In the previous sections we have focused on ways to estimate 
+value functions, which we can then use to derive a policy implicitly. 
+
+In this section we introduce methods from 
+the policy-based RL family, where we explicitly 
+parameterise a policy function 
+$\pi_\theta$ and aim to estimate its parameters. This is perhaps 
+the most direct-looking way to achieve the goal of RL as defined 
+in Section \ref{sec:RLGoal}.
+
+Before we begin, it is worth inspecting the pgm of the MDP
+in Figure \ref{fig:MDPRew}, 
+this time having included the rewards. Note how the reward 
+at time $t$ does not depend on future actions and/or states 
+given the state and action at time $t-1$.
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[-latex ,auto ,node distance =1 cm and 1cm ,
+      on grid , inner sep=0pt, minimum size=7mm,
+      semithick, state/.style={circle, draw}]
+      % s1, a1, s2;
+      \node[state](s_1) at(0,0) {$s_1$};
+      \node[state](a_1) at(1,1) {$a_1$};                                                                                                       
+      \path (s_1) edge (a_1);
+      \node[state](r_2) at(0, 2) {$r_2$};
+      \node[state](s_2) at(3,0) {$s_2$};
+      \path (s_1) edge (s_2);
+      \path (a_1) edge (s_2);
+      \path (s_1) edge (r_2);
+      \path (a_1) edge (r_2);
+      % s2, a2, s3
+      \node[state] (a_2) at(4,1) {$a_2$};
+      \path (s_2) edge (a_2);
+      \node[state] (r_3) at(3, 2) {$r_3$};
+      \node[state] (s_3) at(6,0){$s_3$};
+      \path (s_2) edge (s_3);
+      \path (a_2) edge (s_3);
+      \path (s_2) edge (r_3);
+      \path (a_2) edge (r_3);
+      % dots;
+      \node (dots) at(7.5,0) {$\ldots$};
+      \path (s_3) edge (dots);
+  \end{tikzpicture}
+  \caption{\label{fig:MDPRew} Graph of MDP including rewards.}
+\end{figure}
+
+We derive Policy Gradients \citep{REINFORCE} 
+by starting from the episodic objective as introduced in Section 
+\ref{sec:RLGoalMaths}. Due to parameterising our policy 
+with parameters, $\theta$, and assuming it is among a 
+class of functions who are 
+differentiable in $\theta$, we reformulate the episodic 
+objective as given in Equation \ref{eq:PGObjective}.
+
+\begin{align}\label{eq:PGObjective}
+  J_\theta&:=\mathbb{E}_{\tau\sim p_{\theta}(\tau)}
+   \left[
+    \sum_{t=1}^{len(\tau)}\gamma^{t-1}r(a_t, s_t)\right]\notag\\ 
+  \theta^*&=\arg \max_{\theta}J_\theta.
+\end{align}
+
+The gradient of this objective with respect to the parameters, $\theta$ 
+of the policy is derived in Equation \ref{eq:PGDerive}.
+\begin{align}\label{eq:PGDerive}
+  \nabla J_\theta&=\nabla\sum_{\tau}p_{\theta}(\tau)\sum_{t=1}^{\text{len}(\tau)}\gamma^{t-1}r(s_t, a_t)\notag\\
+  &=\sum_{\tau}\nabla p_{\theta}(\tau)\sum_{t=1}^{\text{len}(\tau)}\gamma^{t-1}r(s_t, a_t)\notag\\
+  &=\sum_{\tau}p_{\theta}(\tau)\nabla \log p_\theta(\tau)\sum_{t=1}^{\text{len}(\tau)}\gamma^{t-1}r(s_t, a_t)\notag\\
+  &=\sum_{\tau}p_{\theta}(\tau)\left(
+    \sum_{t=1}^{\text{len}(\tau)}\nabla \log \pi_\theta(a_t|s_t)
+  \right)\sum_{k=1}^{\text{len}(\tau)}\gamma^{k-1}r(s_k, a_k)\notag\\
+  &=\sum_{\tau}p_\theta(\tau)\sum_{t=1}^{\text{len}(\tau)}\nabla \log \pi_\theta(a_t|s_t)
+  \left(
+    \sum_{k=1}^{t-1}\gamma^{k-1}r(s_k, a_k)
+    + \sum_{k=t}^{\text{len}(\tau)}\gamma^{k-1}r(s_k, a_k)
+  \right)\notag\\
+  &=\sum_{\tau}p_\theta(\tau)\sum_{t=1}^{\text{len}(\tau)}\nabla \log \pi_\theta(a_t|s_t)
+  \left(
+    \sum_{k=t}^{\text{len}(\tau)}\gamma^{t-1}r(s_k, a_k)
+  \right)\notag\\
+  &=\sum_{\tau}p_\theta(\tau)\sum_{t=1}^{\text{len}(\tau)}\nabla \log \pi_\theta(a_t|s_t)
+  \gamma^{t-1}\left(
+    \sum_{k=t}^{\text{len}(\tau)}\gamma^{k-t}r(s_k, a_k)
+  \right)\notag\\
+  &=\sum_{\tau}p_\theta(\tau)\sum_{t=1}^{\text{len}(\tau)}\nabla \log \pi_\theta(a_t|s_t)
+  \gamma^{t-1}G_t(\tau_{t:})\notag\\
+  &=\mathbb{E}_{\tau\sim p_\theta(\tau)}\left[\sum_{t=1}^{\text{len}(\tau)}\nabla \log \pi_\theta(a_t|s_t)
+  \gamma^{t-1}G_t(\tau_{t:})\right]\notag\\
+  &=\mathbb{E}_{\tau\sim p_\theta(\tau)}\left[\sum_{t=1}^{\text{len}(\tau)}\nabla \log \pi_\theta(a_t|s_t)
+  \gamma^{t-1}Q^{\pi}(s_t, a_t)\right].
+\end{align}
+
+In the derivation in \ref{eq:PGDerive} we have used the 
+fact in Equation \ref{eq:dropPrevRews}.
+
+\begin{align}\label{eq:dropPrevRews}
+  \sum_{\tau}p_\theta(\tau)\nabla \log \pi_\theta(a_t|s_t)
+  \left(
+    \sum_{k=1}^{t-1}\gamma^{k-1}r(s_k, a_k)
+  \right)\notag\\
+  &=\sum_{\tau_{1:t-1}}p_\theta(\tau_{:t-1})\left(
+    \sum_{k=1}^{t-1}\gamma^{k-1}r(s_k, a_k)
+  \right)\sum_{a_t\in\mathcal{A}}\pi_\theta(a_t|s_t)\nabla \log \pi(a_t|s_t)\sum_{\tau_{t:}}p_\theta(\tau_{t:})\notag\\
+  &=\sum_{\tau_{1:t-1}}p_\theta(\tau_{:t-1})\left(
+    \sum_{k=1}^{t-1}\gamma^{k-1}r(s_k, a_k)
+  \right)\sum_{a_t\in\mathcal{A}}\pi_\theta(a_t|s_t)\nabla \log \pi(a_t|s_t)\notag\\
+  &=\sum_{\tau_{1:t-1}}p_\theta(\tau_{:t-1})\left(
+    \sum_{k=1}^{t-1}\gamma^{k-1}r(s_k, a_k)
+  \right)\sum_{a_t\in\mathcal{A}}\pi_\theta(a_t|s_t)\frac{\nabla\pi(a_t|s_t)}{\pi_\theta(a_t|s_t)}\notag\\
+  &=\sum_{\tau_{1:t-1}}p_\theta(\tau_{:t-1})\left(
+    \sum_{k=1}^{t-1}\gamma^{k-1}r(s_k, a_k)
+  \right)\nabla\sum_{a_t\in\mathcal{A}}\pi_\theta(a_t|s_t)\notag\\
+  &=\sum_{\tau_{1:t-1}}p_\theta(\tau_{:t-1})\left(
+    \sum_{k=1}^{t-1}\gamma^{k-1}r(s_k, a_k)
+  \right)\times 0\notag\\
+  &=0.
+\end{align}
+
+Taking a closer look at Equation \ref{eq:PGDerive}, we see that 
+if we sample it we get Equation \ref{eq:sampledPG}.
+\begin{equation}\label{eq:sampledPG}
+  \sum_{n=1}^N
+    \sum_{t=1}^{\text{len}(\tau^{(n)})}\nabla \log \pi_\theta(a_t^{(n)}|s_t^{(n)})
+  \gamma^{t-1}G_t(\tau_{t:}^{(n)}).
+\end{equation}
+
+This is very similar to maximum likelihood estimation of $\theta$ 
+given trajectories sampled according to $p_\theta$, however, 
+also weighted by a discounted return $\gamma^{t-1}G_t(\tau_{t:}^{(n)})$.
+Intuitively, we prioritise optimising in the direction of actions that 
+led to greater returns.
+
 \begin{itemize}
   \item Derive policy grad;
   \item Show that adding a baseline that does not depend on 
@@ -898,6 +1162,67 @@ introduced.
 % NEW CHAPTER - EXPERIMENTS;
 \chapter{Experiments}\label{chap:experiments}
 
+\begin{itemize}
+  \item TODO: MAKE THE TABLES FANCIER BY CAPTIONING;
+  \item TODO: THE PLOTS DISPLAYED BELOW ARE OVER SINGLE RUNS, 
+  MAKE THEM OVER MULTIPLE SEEDS AND MAKE THEM PRETIER;
+  \item TODO: ALSO WILL ADD PLOTS FOR REWARDS ALONG TRAJECTORIES;
+\end{itemize}
+
+In \ref{tab:tab1} we see five number summary of the pvalues 
+from a two sample Kolmogorov-Smirnov test over 10 seeds.
+The tests compare the distributions of the cluster coefficients 
+induced by the different policies. Higher is better since 
+less evidence the distributions are different.
+\begin{center}\label{tab:tab1}  
+  % \caption{Table summarising Kolmogorov-Smirnov test p values over 10 seeds.}
+  \begin{tabular}{|c|c|c|c|c|c|}
+    \hline
+    Groups & min & median & max & mean & stddev\\
+    irlpolicy clustcoefs vs source  & 0.00402 & 0.18364 & 0.96074 &  0.24467 & 0.27462\\
+    irlpolicy clustcoefs vs target  & 0.00203 & 0.19918 & 0.67856 & 0.23484 & 0.22424\\
+    newpolicy clustcoefs vs target & 8.9445e-06 & 0.44585 & 0.94538 & 0.45086 & 0.31906\\
+    \hline
+    % \caption{Table summarising Kolmogorov-Smirnov test p values over 10 seeds.}
+  \end{tabular}
+  
+\end{center}
+
+\begin{figure}
+  \includegraphics[scale=0.5]{metric-plots-seed-0-vanilla.png}
+  \caption{Training metrics of reward objective during training for 
+  per episode importance samples.}
+\end{figure}
+
+\begin{figure}
+  \includegraphics[scale=0.5]{metric-plots-seed-0-per-dec.png}
+  \caption{Training metrics of reward objective during training for 
+  per decision importance samples.}
+\end{figure}
+
+\begin{figure}[H]
+  \includegraphics[scale=0.5]{graph_stats_hist_kde_plots-per-dec.png}
+  \caption{Plot of distributions of topology statistics 
+  per decision importance samples.}
+\end{figure}
+
+% \begin{center}
+%   \begin{tabular}{|c|c|c|c|c|c|}
+%     Groups & min & median & max & mean & stddev\\
+%     irlpolicy_degrees_KS_pval [0.00010950899999120602, 0.14753370392165005, 0.9923790386881663, 0.28050787392338655, 0.29704204881992763]
+%     irlpolicy_degrees_target_KS_pval [7.309894046283682e-09, 0.010171011724596057, 0.5700520481478416, 0.11130969587258992, 0.1882764312802984]
+%     newpolicy_degrees_KS_pval [6.421922290617498e-06, 0.0056196698746558815, 0.0935112337096913, 0.02447586599457552, 0.034036576735393155]
+%   \end{tabular}
+% \end{center}
+
+% \begin{center}
+%   \begin{tabular}{|c|c|c|c|c|c|}
+%     irlpolicy_triangles_KS_pval [0.02759222298232904, 0.206678181243628, 0.891376035885765, 0.32836063977346813, 0.3259079281222754]
+%     irlpolicy_triangles_target_KS_pval [0.00010726575862055065, 0.10363960420417916, 0.732496713532312, 0.2129595823447513, 0.2411788841027539]
+%     newpolicy_triangles_KS_pval [0.00033293740631397384, 0.09800134394058164, 0.5700520481478416, 0.1751270581292168, 0.1966419089708146]
+%   \end{tabular}
+% \end{center}
+
 \section{Description of tests}
 \label{sec:test_description}
 The experimental suite consists of four tests.
@@ -1096,6 +1421,8 @@ prevents double-counting edges if they are proposed multiple times.
   \item  Run best config on Urban nets 10 times;
 \end{itemize}
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% NEW CHAPTER
 \chapter{Conclusion and Further work}\label{chap:conclusion}
 This work builds on prior research in inverse reinforcement learning 
 for graph domains. Our contributions are, firstly, the addition of the 
@@ -1124,7 +1451,7 @@ it actually is by providing an ``adversarial'' embedding that is
 mapped to a high reward from the reward MLP. Providing the reward 
 with its own graph encoder, helped avoid such situations.
 
-Finally, we showed that the UT trick also lead to more stable 
+Finally, we showed that the UT trick also leads to more stable 
 training of the algorithm as seen by the plots of the losses 
 and the returns recorded during evaluation.
 
@@ -1133,7 +1460,9 @@ a good strategy for generating expert samples for the IRL objective.
 Merely giving a random permutation of the edge set removes the possible 
 temporal component in building the graph. In many cases, such as 
 road-network planning, previously built connections can actually 
-be the main reason for new road segments. As a simple illustration 
+be the main reason for new road segments. 
+
+As a simple illustration 
 of this idea, the reader is directed to Figure \ref{fig:bad_rand_perm}.
 In contrast to most IRL scenarios where new demonstrations are generated, 
 we only work with a single demonstration, which we assume the temporal 
@@ -1141,6 +1470,17 @@ component has no effect, allowing us to treat any permutation of the
 edge set as a separate expert trajectory. As seen in the figure, this 
 could lead to very different demonstrations from the optimal control 
 demonstration and may result in learning poor policies.
+
+\begin{itemize}
+  \item MORE FURTHER WORK:
+  \item whether IRL reward can be used as a means of performing 
+  hyp. tests for similarity of objects; similar to 
+  lik-ration tests;
+  \item Interesting to see applications where the 
+  expert is actually accessible and we can generate expert traj like \citep{FinnGCL} 
+  and see how this compares to the current method;
+  \item Explore ways for learning to transfer topography, currently this might be a problem of the lost info when aggregating node features from the GNN;
+\end{itemize}
 
 \begin{figure}[H]
   \centering
