@@ -346,9 +346,10 @@ class GraphBuffer(BufferBase):
         # init lcr regularisation term and last two rewards;
         lcr_reg_term = 0.
         r1, r2 = None, None
+        rewards = []
         
         if self.per_decision_imp_sample:
-            log_weights, rewards = [], []
+            log_weights = []
         else:
             log_imp_weight, return_val = 0, 0
         
@@ -539,17 +540,17 @@ class GraphBuffer(BufferBase):
                             policy_dists.entropy().sum(-1)[[i, j]].detach().numpy())
 
                 # rewards and log_weights
+                rewards.append(curr_rewards)
                 if self.per_decision_imp_sample:
-                    rewards.append(curr_rewards)
                     log_weights.append((curr_rewards - log_probs - self.log_offset).detach())
                 else:
                     log_imp_weight += (
                         (curr_rewards - log_probs - self.log_offset).sum().detach()
                     )
-                    return_val += curr_rewards.sum()
-                    if self.verbose:
-                        print(f"step: {steps} of sampling, vanilla sum of log weights: {log_imp_weight}",
-                            f"vanilla return: {return_val}\n", end='\n\n')
+                    # return_val += curr_rewards.sum()
+                    # if self.verbose:
+                        # print(f"step: {steps} of sampling, vanilla sum of log weights: {log_imp_weight}",
+                            # f"vanilla return: {return_val}\n", end='\n\n')
 
                 # reset batch list and action idxs list;
                 if self.state_reward:
@@ -577,7 +578,7 @@ class GraphBuffer(BufferBase):
                     print(f"steps done: {steps}, code: {code}")
                 if self.per_decision_imp_sample:
                     return self._process_rewards_log_weights(rewards, log_weights, code) + (lcr_reg_term, obs, rrs_this_episode, reward_on_path, temp_mse)
-                return return_val, log_imp_weight, code, env.steps_done, lcr_reg_term, obs, rrs_this_episode, reward_on_path, temp_mse
+                return torch.cat(rewards, -1), log_imp_weight, code, env.steps_done, lcr_reg_term, obs, rrs_this_episode, reward_on_path, temp_mse
 
         assert steps == env.steps_done - env.num_edges_start_from
         if self.verbose:
@@ -586,7 +587,7 @@ class GraphBuffer(BufferBase):
             # in the per dicision case, need to cumsum the log_weights
             # until the current time point;
             return self._process_rewards_log_weights(rewards, log_weights, 2) + (lcr_reg_term, obs, rrs_this_episode, reward_on_path, temp_mse)
-        return return_val, log_imp_weight, 2, env.steps_done, lcr_reg_term, obs, rrs_this_episode, reward_on_path, temp_mse
+        return torch.cat(rewards, -1), log_imp_weight, 2, env.steps_done, lcr_reg_term, obs, rrs_this_episode, reward_on_path, temp_mse
 
     def collect_path(
         self,

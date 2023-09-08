@@ -70,13 +70,13 @@ params_func_config = dict(
     embed_dim=8,
     final_tanh=True,
     action_is_index=True,
-    do_dfs_expert_paths=True,
+    do_dfs_expert_paths=False,
     UT_trick=False,
     per_decision_imp_sample=True,
     weight_scaling_type='abs_max',
     n_cols_append=None,
     n_extra_cols_append=None,
-    ortho_init=True,
+    ortho_init=False,
     seed=0,
     transform_=None,
     clip_grads=False,
@@ -101,6 +101,8 @@ params_func_config = dict(
     with_lcr=True,
     with_mono=True,
     zero_interm_rew=False,
+    quad_reward_penalty_coef=None,
+    reward_l2_coef=None,
 )
 
 
@@ -121,13 +123,13 @@ def get_params(
     embed_dim: int=8,
     final_tanh=True,
     action_is_index=True,
-    do_dfs_expert_paths=True,
+    do_dfs_expert_paths=False,
     UT_trick=False,
     per_decision_imp_sample=True,
     weight_scaling_type='abs_max',
     n_cols_append=None,
     n_extra_cols_append=None,
-    ortho_init=True,
+    ortho_init=False,
     seed=0,
     transform_=None,
     clip_grads=False,
@@ -152,6 +154,8 @@ def get_params(
     with_lcr=True,
     with_mono=True,
     zero_interm_rew=False,
+    quad_reward_penalty_coef=None,
+    reward_l2_coef=None,
 ):
     knn_edge_index = None
     if with_knn_msgs:
@@ -417,6 +421,8 @@ def get_params(
         ortho_init=ortho_init,
         do_graphopt=do_graphopt,
         zero_interm_rew=zero_interm_rew,
+        quad_reward_penalty=quad_reward_penalty_coef,
+        reward_l2_coef=reward_l2_coef,
     )
     return agent_kwargs, config, reward_fn, irl_trainer_config
 
@@ -447,6 +453,10 @@ def arg_parser(settable_params, argv):
                 print(f"{n} not a valid argument")
     print('\n')
     return settable_params
+
+
+def unif_init(n_nodes, n_dim=2):
+    return torch.distributions.Uniform(0., 1.).sample((n_nodes, n_dim))
 
 
 def get_ba_graph(num_nodes, num_edges, node_feat_init_fn=None):

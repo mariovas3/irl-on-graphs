@@ -46,7 +46,11 @@ class IRLGraphTrainer:
         ortho_init=True,
         do_graphopt=False,
         zero_interm_rew=False,
+        quad_reward_penalty=None,
+        reward_l2_coef=None,
     ):
+        self.reward_l2_coef = reward_l2_coef
+        self.quad_reward_penalty = quad_reward_penalty
         self.zero_interm_rew = zero_interm_rew
         self.do_graphopt = do_graphopt
         self.verbose = verbose
@@ -113,6 +117,9 @@ class IRLGraphTrainer:
         self.lcr_sampled_losses = []
         self.gradients = []
         self.mtt_losses = []
+        self.quad_expert_losses = []
+        self.quad_sampled_losses = []
+        self.reward_l2_losses = []
 
     def train_policy_k_epochs(self, k, **kwargs):
         self.agent.train_k_epochs(k, **kwargs)
@@ -155,6 +162,7 @@ class IRLGraphTrainer:
     def do_reward_grad_step(self):
         self.reward_optim.zero_grad()
         mono_loss, lcr_loss1 = 0.0, 0.0
+        quad_expert = 0.
 
         if self.zero_interm_rew:
             expert_avg_returns, expert_rewards, tot_mse1, tot_len1 = self.get_source_graph_reward()
@@ -185,16 +193,26 @@ class IRLGraphTrainer:
         # lcr loss for the expert examples;
         if not self.zero_interm_rew and self.lcr_regularisation_coef is not None:
             lcr_loss1 = self._get_lcr_loss(expert_rewards)
-
+        
         # get imp_sampled generated returns with stop grad on the weights;
-        imp_sampled_gen_rewards, lcr_loss2, tot_mse2, tot_len2 = self.get_avg_generated_returns()
+        imp_sampled_gen_rewards, lcr_loss2, tot_mse2, tot_len2, quad_sampled = self.get_avg_generated_returns()
 
+        if not self.zero_interm_rew and self.quad_reward_penalty is not None:
+            quad_expert = (expert_rewards ** 2).sum(-1).mean() * self.quad_reward_penalty
+            quad_sampled = quad_sampled * self.quad_reward_penalty
+        
+        l2_loss = 0.
+        if self.reward_l2_coef is not None:
+            l2_loss = self.reward_l2_coef * (torch.cat([p.view(-1) for p in self.reward_fn.net[-1].parameters()]) ** 2).sum(-1)
         # get loss;
         loss = (
             -(expert_avg_returns - imp_sampled_gen_rewards)
             + mono_loss
             + lcr_loss1
             + lcr_loss2
+            + quad_expert
+            + quad_sampled 
+            + l2_loss
         )
 
         # get grads;
@@ -216,6 +234,11 @@ class IRLGraphTrainer:
         if self.lcr_regularisation_coef is not None:
             self.lcr_expert_losses.append(lcr_loss1.item())
             self.lcr_sampled_losses.append(lcr_loss2.item())
+        if self.quad_reward_penalty is not None:
+            self.quad_expert_losses.append(quad_expert.item())
+            self.quad_sampled_losses.append(quad_sampled.item())
+        if self.reward_l2_coef is not None:
+            self.reward_l2_losses.append(l2_loss.item())
 
         print(f"expert avg rewards: {expert_avg_returns.item()}")
         print(f"imp sampled rewards: {imp_sampled_gen_rewards.item()}")
@@ -224,7 +247,21 @@ class IRLGraphTrainer:
         if self.lcr_regularisation_coef is not None:
             print(f"lcr_expert_loss: {lcr_loss1.item()}")
             print(f"lcr_sampled_loss: {lcr_loss2.item()}")
+        if self.quad_reward_penalty is not None:
+            print(f"quad_expert reward loss: {quad_expert.item()}")
+            print(f"quad_sampled reward loss: {quad_sampled.item()}")
+        if self.reward_l2_coef is not None:
+            print(f"reward last layer square l2 loss: {l2_loss.item()}")
         print(f"overall reward loss: {loss.item()}")
+        
+        # see if reward grads need clipping;
+        if self.reward_grad_clip:
+            nn.utils.clip_grad_norm_(
+                self.reward_fn.parameters(), 
+                max_norm=1.0, 
+                error_if_nonfinite=True
+            )
+
         if self.verbose:
             curr_grads = []
             for p in self.reward_fn.parameters():
@@ -235,15 +272,7 @@ class IRLGraphTrainer:
                     f"l2 norm of grad of params: "
                     f"{this_grad}")
             self.gradients.append(curr_grads)
-            print('\n')
-        
-        # see if reward grads need clipping;
-        if self.reward_grad_clip:
-            nn.utils.clip_grad_norm_(
-                self.reward_fn.parameters(), 
-                max_norm=1.0, 
-                error_if_nonfinite=True
-            )
+            print('\n')        
 
         # do grad step;
         self.reward_optim.step()
@@ -273,6 +302,9 @@ class IRLGraphTrainer:
 
         # together with rewards from that episode;
         rewards = []
+
+        # this is for getting avg sum of sq rewards over num episodes;
+        quad_rewards = 0.
         
         # avg lcr reularisation over episodes;
         avg_lcr_reg_term, n_episodes = 0.0, 0
@@ -305,6 +337,10 @@ class IRLGraphTrainer:
                 + temp_mse * (steps / (tot_len + steps))
             )
             tot_len += steps
+
+            # update avg sum of squares;
+            if self.quad_reward_penalty is not None:
+                quad_rewards = quad_rewards + ((r ** 2).sum(-1) - quad_rewards) / (n_episodes + 1)
             
             assert len(log_w) == len(r)
             assert len(log_w) >= self.agent.env.min_steps_to_do
@@ -345,7 +381,7 @@ class IRLGraphTrainer:
 
         # set back to old value of verbose
         self.agent.buffer.verbose = curr_buffer_verbose
-        return (weights[:, :longest] * rewards[:, :longest]).sum(), avg_lcr_reg_term, tot_mse, tot_len
+        return (weights[:, :longest] * rewards[:, :longest]).sum(), avg_lcr_reg_term, tot_mse, tot_len, quad_rewards
 
     def _get_vanilla_imp_sampled_returns(self):
         assert not self.per_decision_imp_sample
@@ -357,11 +393,14 @@ class IRLGraphTrainer:
         flag = True
         curr_buffer_verbose = self.agent.buffer.verbose
         curr_irl_verbose = self.verbose
+        quad_rewards = 0.
 
         tot_mse, tot_len = 0., 0
 
         # sample steps;
         while n_steps_done < n_steps_to_sample:
+            # r is a tensor of rewards over the episode now;
+            # before it was return;
             (
                 r,
                 log_w,
@@ -386,6 +425,11 @@ class IRLGraphTrainer:
             tot_len += steps
 
             assert r.requires_grad and not log_w.requires_grad
+            if self.quad_reward_penalty is not None:
+                quad_rewards = quad_rewards + ((r ** 2).sum(-1).mean() - quad_rewards) / (n_episodes + 1)
+            
+            # make r undiscounted return again;
+            r = r.sum()
             if self.verbose:
                 print(f"single ep sampled undiscounted return: {r.item()}\n")
             
@@ -414,7 +458,7 @@ class IRLGraphTrainer:
         self.verbose = curr_irl_verbose
         # if self.verbose:
             # print("actual weights vanilla", weights, sep='\n')
-        return returns @ weights, avg_lcr_reg_term, tot_mse, tot_len
+        return returns @ weights, avg_lcr_reg_term, tot_mse, tot_len, quad_rewards
 
     def get_avg_expert_returns(self) -> Tuple[float, torch.Tensor]:
         """
@@ -621,6 +665,9 @@ class IRLGraphTrainer:
                 'mono_losses',
                 'lcr_expert_losses',
                 'lcr_sampled_losses',
+                'quad_expert_losses',
+                'quad_sampled_losses',
+                'reward_l2_losses',
                 'l2_norm_gradients',
                 'mtt_losses',
             ]
@@ -630,6 +677,9 @@ class IRLGraphTrainer:
             self.mono_losses,
             self.lcr_expert_losses,
             self.lcr_sampled_losses,
+            self.quad_expert_losses,
+            self.quad_sampled_losses,
+            self.reward_l2_losses,
             self.gradients,
             self.mtt_losses,
         ]

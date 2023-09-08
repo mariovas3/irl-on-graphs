@@ -301,10 +301,11 @@ class SACAgentGO(SACAgentGraph):
                 self,
                 reward_encoder=self.old_encoder
             )
-            if self.buffer.per_decision_imp_sample:
-                r = r.sum().item()
-            else:
-                r = r.item()
+            r = r.sum().item()
+            # if self.buffer.per_decision_imp_sample:
+                # r = r.sum().item()
+            # else:
+                # r = r.item()
             self.eval_path_returns.append(r)
             assert ep_len == obs.edge_index.shape[-1] // 2 - self.env.num_edges_start_from
             self.eval_path_lens.append(ep_len)
