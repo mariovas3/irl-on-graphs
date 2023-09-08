@@ -917,26 +917,34 @@ fact in Equation \ref{eq:dropPrevRews}.
   \left(
     \sum_{k=1}^{t-1}\gamma^{k-1}r(s_k, a_k)
   \right)\notag\\
-  &=\sum_{\tau_{1:t-1}}p_\theta(\tau_{:t-1})\left(
+  &=\sum_{\tau_{:t}}p_\theta(\tau_{:t})\left(
     \sum_{k=1}^{t-1}\gamma^{k-1}r(s_k, a_k)
-  \right)\sum_{a_t\in\mathcal{A}}\pi_\theta(a_t|s_t)\nabla \log \pi(a_t|s_t)\sum_{\tau_{t:}}p_\theta(\tau_{t:})\notag\\
-  &=\sum_{\tau_{1:t-1}}p_\theta(\tau_{:t-1})\left(
+  \right)\sum_{a_t\in\mathcal{A}}\pi_\theta(a_t|s_t)
+  \nabla \log \pi(a_t|s_t)\sum_{\tau_{t+1:}}p_\theta(\tau_{t+1:})\notag\\
+  &=\sum_{\tau_{:t}}p_\theta(\tau_{:t})\left(
     \sum_{k=1}^{t-1}\gamma^{k-1}r(s_k, a_k)
-  \right)\sum_{a_t\in\mathcal{A}}\pi_\theta(a_t|s_t)\nabla \log \pi(a_t|s_t)\notag\\
-  &=\sum_{\tau_{1:t-1}}p_\theta(\tau_{:t-1})\left(
+  \right)\sum_{a_t\in\mathcal{A}}\pi_\theta(a_t|s_t)
+  \nabla \log \pi(a_t|s_t)\notag\\
+  &=\sum_{\tau_{:t}}p_\theta(\tau_{:t})\left(
     \sum_{k=1}^{t-1}\gamma^{k-1}r(s_k, a_k)
   \right)\sum_{a_t\in\mathcal{A}}\pi_\theta(a_t|s_t)\frac{\nabla\pi(a_t|s_t)}{\pi_\theta(a_t|s_t)}\notag\\
-  &=\sum_{\tau_{1:t-1}}p_\theta(\tau_{:t-1})\left(
+  &=\sum_{\tau_{:t}}p_\theta(\tau_{:t})\left(
     \sum_{k=1}^{t-1}\gamma^{k-1}r(s_k, a_k)
   \right)\nabla\sum_{a_t\in\mathcal{A}}\pi_\theta(a_t|s_t)\notag\\
-  &=\sum_{\tau_{1:t-1}}p_\theta(\tau_{:t-1})\left(
+  &=\sum_{\tau_{:t}}p_\theta(\tau_{:t})\left(
     \sum_{k=1}^{t-1}\gamma^{k-1}r(s_k, a_k)
   \right)\times 0\notag\\
   &=0.
 \end{align}
 
+Where in the above we used the short-hand notation:
+\begin{align*}
+  \sum_{\tau_{:t}}p_\theta(\tau_{:t})&=\sum_{s_1,a_1,\ldots,s_t}p(s_1)\prod_{k=1}^{t-1}\pi_\theta(a_k|s_k)p(s_{k+1}|s_k,a_k),\notag\\
+  \sum_{\tau_{t+1:}}p_\theta(\tau_{t+1:})&=\sum_{s_{t+1}, a_{t+1},\ldots,s_{\text{len}(\tau)}}p(s_{t+1}|s_t,a_t)\prod_{k=t+1}^{\text{len}(\tau)-1}\pi(a_k|s_k)p(s_{k+1}|s_k,a_k).
+\end{align*}
+
 Taking a closer look at Equation \ref{eq:PGDerive}, we see that 
-if we sample it we get Equation \ref{eq:sampledPG}.
+if we sample it, we get Equation \ref{eq:sampledPG}.
 \begin{equation}\label{eq:sampledPG}
   \sum_{n=1}^N
     \sum_{t=1}^{\text{len}(\tau^{(n)})}\nabla \log \pi_\theta(a_t^{(n)}|s_t^{(n)})
@@ -946,16 +954,88 @@ if we sample it we get Equation \ref{eq:sampledPG}.
 This is very similar to maximum likelihood estimation of $\theta$ 
 given trajectories sampled according to $p_\theta$, however, 
 also weighted by a discounted return $\gamma^{t-1}G_t(\tau_{t:}^{(n)})$.
-Intuitively, we prioritise optimising in the direction of actions that 
-led to greater returns.
+Intuitively, we wish to maximise the likelihood of trajectories 
+that resulted in greater returns.
 
-\begin{itemize}
-  \item Derive policy grad;
-  \item Show that adding a baseline that does not depend on 
-  an action, still keeps the update unbiased;
-  \item Substitute the baseline for the state-value function 
-  and motivate Actor-Critic;
-\end{itemize}
+\section{Actor-Critics}
+In Section \ref{sec:PolicyGrads} we derived the policy gradient 
+update rule and gave an intuitive relation to maximum likelihood 
+where we wish to increase the likelihood of episodes resulting 
+in greater returns. This makes the policy gradients dependent of 
+the form of the returns. Suppose the high returns are zeros and 
+the low returns are negative. If the high returns are zeros, then 
+the update associated with them will vanish. This makes the policy 
+gradients dependent on the type of reward function of the environment 
+and can cause policy gradients to be very noisy in finite samples.
+
+Actor Critics \citep{Tsitsiklis} are a way to aleviate this issue 
+by introducing a baseline function, to which the returns are compared.
+Returns who score higher than the baseline are associated with 
+beneficial behaviour and we wish to increase the likelihood 
+of actions leading to such behaviour/returns.
+
+To make this concrete, consider the baseline $b(s_t)$, that depends 
+on $s_t$.
+
+\begin{theorem}\label{thm:baselineThm}
+  \begin{equation*}
+    \mathbb{E}_{\tau\sim p_\theta(\tau)}\left[\nabla \log \pi_\theta(a_t|s_t)
+    b(s_t)\right]=0.  
+  \end{equation*}
+\end{theorem}
+
+\begin{proof}
+  \begin{align}
+    \mathbb{E}_{\tau\sim p_\theta(\tau)}\left[\nabla \log \pi_\theta(a_t|s_t)
+    b(s_t)\right]&= \sum_{\tau}p_\theta(\tau)\nabla \log\pi_\theta(a_t|s_t)b(s_t)\notag\\
+    &=\sum_{\tau_{:t}}p_\theta(\tau_{:t})b(s_t)\sum_{a_t\in\mathcal{A}}\pi_\theta(a_t|s_t)\nabla \log\pi_\theta(a_t|s_t) \sum_{\tau_{t+1:}}p_\theta(\tau_{t+1:})\notag\\
+    &=\sum_{\tau_{:t}}p_\theta(\tau_{:t})b(s_t)\sum_{a_t\in\mathcal{A}}\pi_\theta(a_t|s_t)\nabla \log\pi_\theta(a_t|s_t)\notag\\
+    &=\sum_{\tau_{:t}}p_\theta(\tau_{:t})b(s_t)\times 0\notag\\
+    &=0,
+  \end{align}
+  where, similarly to in the policy gradient derivation, we used the fact that 
+  \begin{equation*}
+    \sum_{a_t\in\mathcal{A}}\pi_\theta(a_t|s_t)\nabla \log\pi_\theta(a_t|s_t)=0. 
+  \end{equation*}
+\end{proof}
+
+Based on Theorem \ref{thm:baselineThm} we have that:
+\begin{theorem}\label{thm:unbiasedBaseline}
+  Given a baseline, $b(s_t)$, that does not depend on the actions,\\
+  $\mathbb{E}_{\tau\sim p_\theta(\tau)}\left[\sum_{t=1}^{\text{len}(\tau)}\nabla \log \pi_\theta(a_t|s_t)
+  \gamma^{t-1}\left(Q^{\pi}(s_t, a_t)-b(s_t)\right)\right]$ is unbiased with respect 
+  to the policy gradient update in Equation \ref{eq:PGDerive}.
+\end{theorem}
+Due to Theorem \ref{thm:baselineThm}, we can pick any function 
+$b(\cdot)$ that does not depend on the actions as a baseline and 
+get an unbiased policy gradient update. In the case of Actor-Critics, 
+$b(s_t)=V^{\pi}(s_t)$, or an approximation thereof, $V_{\phi}$.
+
+The Actor-Critic update is then given in Equation \ref{eq:ActorCritic}.
+\begin{equation}\label{eq:ActorCritic}
+  \mathbb{E}_{\tau\sim p_\theta(\tau)}\left[\sum_{t=1}^{\text{len}(\tau)}\nabla \log \pi_\theta(a_t|s_t)
+  \gamma^{t-1}\left(Q^{\pi}(s_t, a_t)-V^{\pi}(s_t)\right)\right].
+\end{equation}
+
+The term $Q^{\pi}(s_t,a_t)-V^{\pi}(s_t)$ is sometimes called the 
+advantage due to taking action $a_t$ at state $s_t$. This is 
+due to the Bellman Expectation equation for the state-value function 
+as given in Equation \ref{eq:bellmanv}. Since $V^{\pi}$ is the 
+expected Q-function, integrating over the actions, there are 
+actions for which the Q-function is greater than or equal to the 
+state-value function. Such actions are advantageous, since they are 
+likely to lead us to trajectories that yield high returns (since the 
+Q-function is itself the expected future return given start at 
+the relevant state and action). The Actor-Critic aims to 
+increase the likelihood of advantageous actions, therefore.
+
+In practice, $V^{\pi}$ is approximated by e.g., a parameterised 
+state-value function $V_\psi$, which is learned by some policy 
+evaluation method. The Q-function, $Q^{\pi}$ is often also approximated 
+either by the relevant Monte Carlo return as given in Equation 
+\ref{eq:MCReturn} or approximated by bootstrapping as in the 
+case of SARSA.
+
 \section{Maximum Entropy Reinforcement Learning}\label{sec:MaxEntRL}
 \begin{itemize}
   \item Draw pgm based on \citep{LevineRLasInf};
