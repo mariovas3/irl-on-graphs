@@ -1031,12 +1031,222 @@ increase the likelihood of advantageous actions, therefore.
 
 In practice, $V^{\pi}$ is approximated by e.g., a parameterised 
 state-value function $V_\psi$, which is learned by some policy 
-evaluation method. The Q-function, $Q^{\pi}$ is often also approximated 
+evaluation method. Such methods can be as simple as just 
+substituting the Q-function for the state-value function 
+in the Equation for SARSA \ref{eq:sarsa}, which results in 
+a method called TD(0) \citep{SuttonTD}. 
+The Q-function, $Q^{\pi}$ is often also approximated 
 either by the relevant Monte Carlo return as given in Equation 
-\ref{eq:MCReturn} or approximated by bootstrapping as in the 
+\ref{eq:MCReturn} or by bootstrapping as in the 
 case of SARSA.
 
 \section{Maximum Entropy Reinforcement Learning}\label{sec:MaxEntRL}
+Maximum Entropy Reinforcement Learning (MaxEntRL) is most commonly 
+motivated by observing the behaviour of biological systems, assuming 
+they are rational agents and that they act the way they do in order to achieve 
+a certain goal. The crucial point here is that although all 
+demonstrations are assumed to achieve the goal of the agent, 
+they are allowed to deviate from one-another in ways that 
+do not impact their successful outcome. That being said, 
+some demonstrations may be more desirable than others, e.g., 
+because they make fewer unnecessary steps to achieve the goal.
+
+This definition makes 
+traditional optimal control theory inappropriate for modelling 
+this behaviour and understanding why we observed the different 
+paths. This is because, it can be shown that under the objective 
+introduced in Section \ref{sec:RLGoalMaths}, given full observability 
+(Markov states), there exists an optimal policy that is deterministic.
+This cannot help us explain the variability in the agent's demonstrations,
+therefore.
+
+In order to be able to learn a good behaviour, we still 
+need to somehow differentiate between demonstrations and tell 
+which ones are more desirable to emulate. 
+In his paper \cite{Ziebart2008} aims to create an ordering among 
+observed demonstrations by weighting the trajectories 
+by the exponential of the sum of rewards (the return) along 
+the given trajectory. In this way, ``more optimal'' demonstrations 
+will be exponentialy more desirable than others. A simple illustration 
+of the soft-optimality idea is portrayed in Figure \ref{fig:softopt}. 
+In this figure, we see the optimal control behaviour, and the 
+soft-optimal demonstrations alongside it.
+
+
+\begin{figure}[H]
+  \begin{center}
+    \includegraphics[scale=0.5]{optControlVsSoftOpt.png}
+  \end{center}
+  \caption{\label{fig:softopt}Simple illustration of Optimal Control vs Soft optimal 
+  Control. The blue solid line represents the deterministic optimal 
+  control to reach from the red ``X'' on the left to the 
+  red ``X'' on the right. The remaining lines 
+  are noisy perturbations of the intermediate points 
+  between the starting and ending ``X'' - demonstrating 
+  soft optimality.}
+\end{figure}
+
+A very illustrative way to understand soft-optimal control (SOC) 
+is provided in \cite{LevineRLasInf}, where the associated 
+pgm is a Directed Acyclic Graph (DAG) such as the one 
+seen in Figure \ref{fig:SOCGraph}.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[-latex ,auto ,node distance =1 cm and 1cm ,
+      on grid , inner sep=0pt, minimum size=7mm,
+      semithick, state/.style={circle, draw}]
+      % s1, a1, s2;
+      \node[state](s_1) at(0,0) {$s_1$};
+      \node[state](a_1) at(1,1) {$a_1$};                                                                                                       
+      % \path (s_1) edge (a_1);
+      \node[state](xi_1) at(0, 2) {$\xi_1$};
+      \node[state](s_2) at(3,0) {$s_2$};
+      \path (s_1) edge (s_2);
+      \path (a_1) edge (s_2);
+      \path (s_1) edge (xi_1);
+      \path (a_1) edge (xi_1);
+      % s2, a2, s3
+      \node[state] (a_2) at(4,1) {$a_2$};
+      % \path (s_2) edge (a_2);
+      \node[state] (xi_2) at(3, 2) {$\xi_2$};
+      \node[state] (s_3) at(6,0){$s_3$};
+      \path (s_2) edge (s_3);
+      \path (a_2) edge (s_3);
+      \path (s_2) edge (xi_2);
+      \path (a_2) edge (xi_2);
+      % dots;
+      \node (dots) at(7.5,0) {$\ldots$};
+      \path (s_3) edge (dots);
+  \end{tikzpicture}
+  \caption{\label{fig:SOCGraph} Graph of Soft-Optimal model. 
+  The $\xi$ variables are binary optimality variables, equal to 
+  $1$ with probability proportional to $\exp(r(s_t, a_t))$.}
+\end{figure}
+
+Outside of the usual RL variables - states and actions - here, 
+we also have binary ``optimality'' variables, $\xi_t\sim \text{Ber}(\exp(r(s_t, a_t)))$.
+Where $\text{Ber}(\cdot)$ denotes the Bernoulli distribution. 
+This means that we require the reward to be non-positive, which 
+is easily achieved (in the case of bounded rewards) by subtracting 
+the maximum reward.
+
+It is worth noting that 
+in \cite{Ziebart2008}, the graph is a Markov Random Field (MRF) 
+where the states and actions share a potential function given 
+by $\exp(r(s_t, a_t))$. This allows
+the rewards to be positive.
+
+We have chosen the formulation in \cite{LevineRLasInf} 
+since it allows us to more 
+easily convey the motivations behind SOC and later describe the 
+algorithm used in the inner loop of the IRL problem \citep{SAC2}.
+
+Based on the model defined by the pgm in Figure \ref{fig:SOCGraph}, 
+we wish to estimate the policy of the agent, $p(a_t|s_t, \xi_{1:T}=1)$, 
+assuming $\xi_t=1\;\forall t$, 
+i.e., that the demonstrations are ``softly'' optimal.
+
+To this end, we employ the technique of message passing, and perform 
+computations very similar to the ones performed in Hidden Markov Models 
+(HHM).
+
+We first define short-hand notation in Equation \ref{eq:messages}, 
+where $\beta$ are backward messages and $\alpha$ are forward messages.
+\begin{align}\label{eq:messages}
+  \beta_t(s_t, a_t)&:=p(\xi_{t:T}=1|s_t, a_t)\notag\\
+  \beta_t(s_t)&:=p(\xi_{t:T}=1|s_t)\notag\\
+  \alpha_t(s_t)&:=p(s_t, \xi_{1:t-1}=1).
+\end{align}
+
+The derivation of the message passing procedure can be seen 
+in Equations \ref{eq:SOCQmessage}, \ref{eq:SOCVmessage} and 
+\ref{eq:SOCforwardMessage}. Note that for brevity, we will use 
+$\xi_{t:T}$ to mean $\xi_{t:T}=1$, i.e., that all optimality variables 
+are equal to one.
+
+\begin{align}\label{eq:SOCQmessage}
+  \beta_t(s_t, a_t)&:=p(\xi_{t:T}=1|s_t, a_t)\notag\\
+  &=p(\xi_t|s_t, a_t)p(\xi_{t+1:T}|s_t, a_t)\notag\\
+  &=p(\xi_t|s_t, a_t)\int_{\mathcal{S}}p(\xi_{t+1:T}, s_{t+1}|s_t,a_t)ds_{t+1}\notag\\
+  &=p(\xi_t|s_t, a_t)\int_{\mathcal{S}}p(\xi_{t+1:T}|s_{t+1})p(s_{t+1}|s_t,a_t)ds_{t+1}\notag\\
+  &=p(\xi_t|s_t, a_t)\mathbb{E}_{s_{t+1}\sim p(s_{t+1}|s_t, a_t)}[\beta_t(s_{t+1})]\notag\\
+  &=\exp(r(s_t, a_t))\mathbb{E}_{s_{t+1}\sim p(s_{t+1}|s_t, a_t)}[\beta_t(s_{t+1})].
+\end{align}
+
+\begin{align}\label{eq:SOCVmessage}
+  \beta_t(s_t)&:=p(\xi_{t:T}|s_t)\notag\\
+  &=\int_{\mathcal{A}}p(\xi_{t:T},a_t|s_t)da_t\notag\\
+  &=\int_{\mathcal{A}}p(\xi_{t:T}|a_t, s_t)p(a_t|s_t)\notag\\
+  &=\mathbb{E}_{a_t\sim p(a_t|s_t)}[\beta_t(s_t, a_t)].
+\end{align}
+
+\begin{align}\label{eq:SOCforwardMessage}
+  \alpha_t(s_t)&:=p(s_t, \xi_{1:t-1}=1)\notag\\
+  &=\int_{\mathcal{S}}\int_{\mathcal{A}}p(s_t, s_{t-1},a_{t-1},\xi_{1:t-1})da_{t-1}ds_{t-1}\notag\\
+  &=\int_{\mathcal{S}}\int_{\mathcal{A}}p(s_t|s_{t-1}a_{t-1})p(\xi_{t-1}|s_{t-1},a_{t-1})p(a_{t-1}|s_{t-1})p(s_{t-1}, \xi_{1:t-2})da_{t-1}ds_{t-1}\notag\\
+  &=\int_{\mathcal{S}}\int_{\mathcal{A}}p(s_t|s_{t-1}a_{t-1})p(\xi_{t-1}|s_{t-1},a_{t-1})p(a_{t-1}|s_{t-1})\alpha_{t-1}(s_{t-1})da_{t-1}ds_{t-1}.
+\end{align}
+
+In the above, $p(a_t|s_t)$ is not to be confused for the policy, 
+$p(a_t|s_t, \xi_{1:T}=1)$. The interpretation of $p(a_t|s_t)$ 
+is merely as a prior belief about possible actions given the state. 
+Note that $p(a_t|s_t)$ is not conditioned on optimality variables, 
+$\xi$, so it makes sense to substitute it for a uniform prior 
+(since no particualr behaviour is assumed of the agent). Later 
+we will discuss how it is possible to specify a non-trivial prior.
+
+
+
+First, let us focus our attention on the backward messages, 
+$\beta_t(s_t, a_t)$ and $\beta_t(s_t)$. 
+Based on the backward messages we can calculate the policy as 
+shown in Equation \ref{eq:policyMessage}.
+\begin{align}\label{eq:policyMessage}
+  p(a_t|s_t,\xi_{1:T})&=p(a_t|s_t,\xi_{t:T})\notag\\
+  &=\frac{p(\xi_{t:T},s_t,a_t)}{p(s_t,\xi_{t:T})}\notag\\
+  &=\frac{p(\xi_{t:T}|s_t, a_t)p(a_t|s_t)p(s_t)}{p(\xi_{t:T}|s_t)p(s_t)}\notag\\
+  &=\frac{\beta(s_t, a_t)p(a_t|s_t)}{\beta(s_t)}.
+\end{align}
+
+Now, let us define some 
+suggestive notation based on the backward messages as shown 
+in Equation \ref{eq:backMsgsAsVals}.
+\begin{align}\label{eq:backMsgsAsVals}
+  Q(s_t, a_t)&=\log \beta(s_t, a_t)\notag\\
+  V(s_t)&=\log \beta(s_t).
+\end{align}
+
+If we think of the backward messages as the exponentiated 
+value functions, based on Equation \ref{eq:SOCQmessage} and 
+\ref{eq:SOCVmessage}, we see that:
+\begin{align}
+  Q(s_t, a_t)&=\log p(\xi_t|s_t, a_t) + \log\mathbb{E}_{s_{t+1}\sim p(s_{t+1}|s_t, a_t)}[\exp (V(s_{t+1}))]\notag\\
+  &=r(s_t, a_t) + \log\mathbb{E}_{s_{t+1}\sim p(s_{t+1}|s_t, a_t)}[\exp (V(s_{t+1}))]\notag\\
+  V(s_t)&=\log \int_{\mathcal{A}}\exp (Q(s_t, a_t))p(a_t|s_t)da_t.
+\end{align}
+
+It turns out that if we wish to give some prior for the actions, 
+other than uniform, we can just augment the reward function 
+by adding $\log p(a_t|s_t)$ to it and still treat $p(a_t|s_t)$ 
+as if it is uniform. This is shown in equation 
+\ref{eq:priorMsgs}.
+\begin{align}\label{eq:priorMsgs}
+  V(s_t)&=\log \int_{\mathcal{A}}\exp (Q(s_t, a_t) + \log p(a_t|s_t))da_t\notag\\
+  V(s_t)&=\log \int_{\mathcal{A}}\exp (\hat{Q}(s_t, a_t))da_t.
+\end{align}
+
+In which case, the policy equation becomes just the ratio 
+of the two messages as shown in Equation \ref{eq:policyMessageNoPrior}.
+
+\begin{equation}\label{eq:policyMessageNoPrior}
+  p(a_t|s_t, \xi_{1:T}=1)=\frac{\beta(s_t, a_t)}{\beta(s_t)},
+\end{equation}
+where we have augmented the reward $\hat{r}(s_t, a_t)=r(s_t,a_t) + \log p(a_t|s_t)$.
+
+
+
+
 \begin{itemize}
   \item Draw pgm based on \citep{LevineRLasInf};
   \item Mention it can also be given as MRF with $\exp(r(s, a))$ 
