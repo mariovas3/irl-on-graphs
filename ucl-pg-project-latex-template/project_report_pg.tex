@@ -2126,14 +2126,16 @@ In Equation \ref{eq:LeakyReLU}, $\eta$ is usually set to $0.01$.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - OUR CONTRIBUTION;
-\chapter{Methods}\label{chap:contribution}
+\chapter{Methods}\label{chap:methods}
 In this section we present the different methods used 
 for learning a reward function for a graph construction process. 
-In all cases this is done via MaxEnt IRL together with. 
+In all cases this is done via MaxEnt IRL as introduced in 
+Section \ref{sec:IRL}.
 First we summarise GraphOpt \citep{GraphOpt}, 
 the method that we use as a baseline. Then we expand on the 
 further design choices we have made in efforts to improve 
-on the baseline. 
+on the baseline. Finally, we discuss technical aspects that 
+concern the implementation of the algorithms.
 
 \section{GraphOpt}\label{sec:GraphOpt}
 GraphOpt is a method that tackles the graph construction 
@@ -2260,46 +2262,141 @@ A pictorial illustration of the GraphOpt architecture can
 be seen in Figure \ref{fig:GraphOpt}.
 
 \begin{figure}[H]
-  \includegraphics[scale=0.5]{GO_schematic.png}
-  \caption{\label{fig:GraphOpt} The schematic of the GraphOpt 
-  architecture based on the paper \cite{GraphOpt}.}
+  \begin{center}
+    \includegraphics[scale=0.5]{GO_architecture.png}
+    \caption{\label{fig:GraphOpt} The schematic of the GraphOpt 
+    architecture based on the paper \cite{GraphOpt}. 
+    In the implementation of the buffer 
+    we store a termination indicator with 
+    each experience tuple, to see if $s_{t+1}$ is terminal. 
+    This is omitted from the figure for brevity.}
+  \end{center}
 \end{figure}
 
 
 Finally, it is worth noting that after initially trying with a 
 Gaussian policy, I would somtimes get exploding variances (high 
 entropy) and sometimes the experiment would crash after prolonged 
-training. To this end I employed the technique proposed 
+training. To this end, I employed the technique proposed 
 in the original SAC paper \citep{SAC2}, where they apply a 
 hyperbolic tangent, $tanh(\cdot)$ on the Gaussian action and 
-have the actions in the range $(-1, 1)$. To make this work 
+have the actions in the range $(-1, 1)^{d}$. To make this work 
 with GraphOpt I also used a final layer hyperbolic tangent 
 activation in the GNN so that my node embeddings will have 
 all components in $(-1, 1)$, i.e., $z_v\in (-1, 1)^{d}$ 
 $\forall v\in\mathcal{V}$. The motivation for this trick in the 
-original paper was due to working with the MuJoCo environment 
+original paper was due to working with environments 
+from the MuJoCo physics simulator 
 \citep{MuJoCo}, which acepts action vectors with all components 
 in $(-1, 1)$. After applying this trick I also ended up getting 
 more sensible results and stable training.
 
 \section{Our Variant}
+In this section I descuss the differences between the architecture 
+proposed by us and GraphOpt.
+
+First, note that in the paper \cite{GraphOpt}, they report 
+results from an experiment where 
+CoraML \citep{Cora} is used as a source graph 
+and CiteSeer \citep{CiteSeer} as a target graph. If 
+one was to inspect their node input features, one could 
+immediately tell that they are of different dimensionality.
+This points to the fact that when transferring the reward 
+function in GraphOpt, they only transfer the MLP, while they 
+retrain a new GNN as they train the new policy. Conceptually, 
+this is not the same as taking the reward function, learned on 
+the source graph, ``freezing its parameters'' and directly 
+using it as the reward signal on the target task. In contrast,
+this is more similar to some Natural Language Processing (NLP) 
+applications, where deep model is pretrained on some task, and 
+then when applied on a target task, only part of its layers are 
+allowed to change, resulting in fine-tuning.
+
+In our application, we propose using a separate GNN encoder for 
+the reward altogether. In this approach, after we are done with 
+the IRL task as shown in Algorithm \ref{alg:IRL}, we directly 
+take the reward GNN \textit{together} with the MLP part of the 
+reward and transfer these (frozen) directly to the target task. 
+This prevents from the possibility of a newly trained 
+GNN to create embeddings of bad states that look good to the 
+reward MLP.
+
+Secondly, instead of per-episode importance sampling as 
+shown in Equation \ref{eq:irlEpisodicImpSamples}, we tried 
+using per-decision importance samples as in 
+Equation \ref{eq:perDecObj} in the hopes of decreasing the 
+variance during training of the reward function.
+
+An illustration of our architecture can be seen in 
+Figure \ref{fig:OurModel}.
+
+\begin{figure}[H]
+  \begin{center}
+    \includegraphics[scale=0.5]{my_model_architecture.png}
+    \caption{\label{fig:OurModel} Our model architecture. In contrast 
+    to GraphOpt, we allow the reward to have its own GNN. 
+    In the implementation of the buffer we store a 
+    termination indicator with 
+    each experience tuple, to see if $s_{t+1}$ is terminal. 
+    This is omitted from the figure for brevity.}
+  \end{center}
+\end{figure}
 
 
+%%%%%%%%%%%%%%%%%%%%%%%%
+% NEW SECTION - IMPLEMENTATION DETAILS;
+\section{Implementation details}
+Inspecting the basic IRL Algorithm presented in \ref{alg:IRL}, 
+we see that we alternate between a reward update and a policy 
+update. Then inspecting the Figures \ref{fig:GraphOpt} and 
+\ref{fig:OurModel}, we see that the replay buffer stores 
+a tuple $(s_t, a_t, r_{t+1}, s_{t+1})$. It is immediately 
+obvious that if we were to implement this naively, we would 
+have to empty the replay buffer after each reward update. 
+This is wasteful, since it will clear all the experience 
+we had collected during the previous policy learning 
+phases. In order to mitigate this problem, I do not 
+cache the rewards in the buffer, but instead calculate 
+them at batch sampling time while training SAC. 
+This means that at the batch sampling step in Algorithm 
+\ref{alg:SAC}, we only sample the tuple $(s_t, a_t, s_{t+1})$.
+For our variant of the algorithm where the reward has its own 
+GNN, we treat the GNN and MLP as one whole that we only update 
+in a reward update step in Algorithm \ref{alg:IRL}. 
 
-\begin{itemize}
-  \item Describe GraphOpt;
-  \item Describe our spin on it:
-  \begin{itemize}
-    \item Separate reward func encoder;
-    \item Per-dec imp samples;
-    \item UT trick if results are good;
-  \end{itemize}
-  \item Maybe also give some notes on technical 
-  implementation for efficiency with the replay buffer 
-  where we only save state-action data and eval rewards 
-  at batch sampling time; that way we don't have to clear the 
-  buffer after reward update every time;
-\end{itemize}
+
+In the GraphOpt case, due to using a single GNN, 
+trained together with the policy, we assume the naive implementation 
+will result in a different GNN for the reward 
+after the gradient steps in the inner-most loop of Algorithm 
+\ref{alg:SAC} are done. That way we effectively have a different 
+reward each time we have to sample experience to cache in the 
+buffer at the beginning of the pass of the second inner-most 
+loop of Algorithm \ref{alg:SAC}. To this end,
+we introduce a GNN tracker, 
+that copies the parameters of the policy GNN after the innermost 
+for loop in Algorithm \ref{alg:SAC} is done, i.e., after all 
+gradient steps within an iteration is done. That way we keep the 
+interpretation of having a different GNN for the reward each 
+time we sample and cache new experience in the buffer. Due to 
+these changes, we no longer have to clear the buffer after each 
+reward update in the IRL algorithm, since rewards are computed 
+at batch-sampling time and only state and actions (and a termination 
+indicator for end of episode) are stored 
+to the buffer.
+
+Another technical detail is the calculation of the weights 
+for the importance sampling in Equation \ref{eq:irlEpisodicImpSampledObj} 
+and \ref{eq:perDecObj}, where first we work in log-space, and 
+second, we work with unnormalised policies as this seems to work 
+better with numerical stability. By unnormalised policies, we 
+usually mean reataining only the Gaussian kernel part of the 
+density when calculating the $w_m$ or $w_{m,t}$ weights given 
+in Section \ref{sec:IRL}. The intuition why this might be better 
+for numerical stability is that the numerator of the $w_m$ 
+or the $w_{m,t}$ weights is also an unnormalised density, so 
+we aim to compare like-to-like objects if we also use an 
+unnormalised version of the denominator.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - EXPERIMENTS;
