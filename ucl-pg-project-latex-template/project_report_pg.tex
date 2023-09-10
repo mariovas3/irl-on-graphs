@@ -1056,7 +1056,8 @@ traditional optimal control theory inappropriate for modelling
 this behaviour and understanding why we observed the different 
 paths. This is because, it can be shown that under the objective 
 introduced in Section \ref{sec:RLGoalMaths}, given full observability 
-(Markov states), there exists an optimal policy that is deterministic.
+(Markov states), there exists an optimal policy that 
+is deterministic \citep{Sutton1998}.
 This cannot help us explain the variability in the agent's demonstrations,
 therefore.
 
@@ -1191,7 +1192,8 @@ are equal to one.
 
 In the above, $p(a_t|s_t)$ is not to be confused for the policy, 
 $p(a_t|s_t, \xi_{1:T}=1)$. The interpretation of $p(a_t|s_t)$ 
-is merely as a prior belief about possible actions given the state. 
+is merely as a prior belief about what actions are 
+possible given the state. 
 Note that $p(a_t|s_t)$ is not conditioned on optimality variables, 
 $\xi$, so it makes sense to substitute it for a uniform prior 
 (since no particualr behaviour is assumed of the agent). Later 
@@ -1247,7 +1249,8 @@ of the two messages as shown in Equation \ref{eq:policyMessageNoPrior}.
 where we have augmented the reward $\hat{r}(s_t, a_t)=r(s_t,a_t) + \log p(a_t|s_t)$.
 Observe that the expression for $p(a_t|s_t,\xi_{1:T}=1)$ in Equation 
 \ref{eq:policyMessageNoPrior} is an advantage-like function based on 
-the current message-based value functions.
+the current message-based value functions. This form will prove 
+important in the later sections.
 
 Turning our attention back to Equation \ref{eq:badVals}, however, 
 we observe that the current definition of the Q-function is 
@@ -1265,20 +1268,24 @@ via this message-passing procedure can be gained by writing
 out the likelihood of a soft-optimal path, $p(\tau|\xi_{1:T}=1)$. 
 Observing Equation \ref{eq:changedDynamics}, we see that due to 
 assuming soft-optimal trajectories, we have changed the dynamics 
-of the MDP from $p(s_{t+1}|s_t, a_t)$ to $p(s_{t+1}| s_t,a_t,\xi_{t:T}=1)$.
+of the MDP from $p(s_{t+1}|s_t, a_t)$ to 
+$p(s_{t+1}| s_t,a_t,\xi_{t:T}=1)$.
 
 \begin{align}\label{eq:changedDynamics}
   p(\tau|\xi_{1:T}=1)&=p(s_1|\xi_{1:T}=1)\prod_{t=1}^Tp(a_t|s_t,\xi_{t:T}=1)p(s_{t+1}|s_t, a_t, \xi_{t:T}=1).
 \end{align}
 
-Now we need to come up with a way to keep the dynamics of the MDP. 
+Now we need to come up with a way to keep the dynamics of the MDP 
+while still being able to compute a policy. 
 We can achieve this by Variational Inference. Before we continue, 
-we derive a general form for an optimal distribution based on 
+we derive a general form for an optimal distribution using 
 the Calculus of Variations. This can be seen in Theorem \ref{thm:OptDist}.
 
 \begin{theorem}\label{thm:OptDist}
   The distribution, $q(\cdot)$ that maximises the expression 
-  $\int q(x)f(x)dx + \mathcal{H}[q]$, where $\mathcal{H}[q]=-\int q(x)\log q(x)dx$, 
+  $\int q(x)f(x)dx + \mathcal{H}[q]$, where $\mathcal{H}[q]=-\int q(x)\log q(x)dx$
+  is the entropy 
+  and $f(x)$ is an integrable function on the domain of $q(x)$, 
   is proportional to $\exp (f(x))$.
 \end{theorem}
 
@@ -1343,7 +1350,7 @@ Theorem \ref{thm:OptDist} and then establishing a recursive
 relation which is solvable by dynamic programming.
 
 Starting with the final time step, w.l.o.g. call it $T$, and 
-use Theorem \ref{thm:OptDist} we get the result in Equation 
+using Theorem \ref{thm:OptDist} we get the result in Equation 
 \ref{eq:FirstqEq}
 \begin{align}\label{eq:FirstqEq}
   q_T^*(a_T|s_T)&=\arg \max_{q(a_T|s_T)} \mathbb{E}_{a_T\sim q(a_T|s_T)}\left[
@@ -1353,11 +1360,11 @@ use Theorem \ref{thm:OptDist} we get the result in Equation
   &\implies q_T^*(a_T|s_T)=\frac{\exp(r(s_T,a_T))}{\int_{\mathcal{A}}\exp(r(s_T,a_T))da_T}.
 \end{align}
 
-Let $Q^{proper}(s_T,a_T)=r(s_T,a_T)$ and 
-$V^{soft}(s_T)=\log\int_{\mathcal{A}}\exp(Q^{proper}(s_T,a_T))da_T$. 
+Let $Q^{proper}_T(s_T,a_T)=r(s_T,a_T)$ and 
+$V^{soft}_T(s_T)=\log\int_{\mathcal{A}}\exp(Q^{proper}_T(s_T,a_T))da_T$. 
 Then: 
 \begin{eqnarray*}
-  q_T^*(a_T|s_T)=\exp(Q^{proper}(s_T,a_T)-V^{soft}(s_T)). 
+  q_T^*(a_T|s_T)=\exp(Q^{proper}_T(s_T,a_T)-V^{soft}_T(s_T)). 
 \end{eqnarray*}
 
 Substituting the optimal $q^*_T(a_T|s_T)$:
@@ -1369,9 +1376,9 @@ Substituting the optimal $q^*_T(a_T|s_T)$:
   \right\}&=\mathbb{E}_{s_T\sim q(s_T)}\left\{
     \mathbb{E}_{a_T\sim q(a_T|s_T)}\left[
     r(s_T, a_T)
-   -\log q^*(a_T|s_T)\right]\right\}\notag\\
+   -\log q^*_T(a_T|s_T)\right]\right\}\notag\\
    &=\mathbb{E}_{s_T\sim q(s_T)}\left\{
-    V^{soft}(s_T)\right\}.
+    V^{soft}_T(s_T)\right\}.
 \end{align*}
 
 Now consider finding the optimal $q_{T-1}(a_{T-1}|s_{T-1})$, 
@@ -1401,17 +1408,17 @@ Substituting for $q^*_T(a_T|s_T)$ we get:
   \left[
     r(s_{T-1},a_{T-1}) + \mathbb{E}_{s_T\sim p(s_{T}|s_{T-1},a_{T-1})}[V^{soft}(s_T)]
   \right] + \mathcal{H}(q(a_{T-1}|s_{T-1}))\notag\\
-  &\propto \exp(r(s_{T-1},a_{T-1}) + \mathbb{E}_{s_T\sim p(s_{T}|s_{T-1},a_{T-1})}[V^{soft}(s_T)])\notag\\
-  &=:\exp(Q^{proper}(s_{T-1}, a_{T-1}))\notag\\
-  &\implies q^*_{T-1}(a_{T-1}|s_{T-1})=\frac{\exp(Q^{proper}(s_{T-1}, a_{T-1}))}{\int \exp(Q^{proper}(s_{T-1}, a_{T-1}))da_{T-1}}\notag\\
-  &=:\exp(Q^{proper}(s_{T-1},a_{T-1})-V^{soft}(s_{T-1})),
+  &\propto \exp\left(r(s_{T-1},a_{T-1}) + \mathbb{E}_{s_T\sim p(s_{T}|s_{T-1},a_{T-1})}[V^{soft}(s_T)]\right)\notag\\
+  &=:\exp(Q^{proper}_{T-1}(s_{T-1}, a_{T-1}))\notag\\
+  &\implies q^*_{T-1}(a_{T-1}|s_{T-1})=\frac{\exp(Q^{proper}_{T-1}(s_{T-1}, a_{T-1}))}{\int \exp(Q^{proper}_{T-1}(s_{T-1}, a_{T-1}))da_{T-1}}\notag\\
+  &=:\exp(Q^{proper}_{T-1}(s_{T-1},a_{T-1})-V^{soft}_{T-1}(s_{T-1})),
 \end{align*}
 which is of the same form as $q^*_T$.
 
 We have verified that the general 
 form of the policy at a given time step is 
 \begin{equation}\label{eq:generalqForm}
-  q^*_t(a_t|s_t)=\exp(Q^{proper}(s_t,a_t)-V^{soft}(s_t)). 
+  q^*_t(a_t|s_t)=\exp(Q^{proper}_{t}(s_t,a_t)-V^{soft}_{t}(s_t)). 
 \end{equation}
 
 The full algorithm for estimating the policy is given in Algorithm 
@@ -1423,15 +1430,15 @@ The full algorithm for estimating the policy is given in Algorithm
   \begin{algorithmic}
     \State $V^{soft}(s_{T+1})=0$
     \For{$t=T\ldots 1$}
-    \State $Q^{proper}(s_t, a_t)=r(s_t, a_t) + \mathbb{E}_{s_{t+1}\sim p(s_{t+1}|s_t,a_t)}[V^{soft}(s_{t+1})]$
-    \State $V^{soft}(s_t)=\log\int_{\mathcal{A}}\exp(Q^{proper}(s_t,a_t))da_t$
-    \State $q_t^*(a_t|s_t)=\exp(Q^{proper}(s_t,a_t)-V^{soft}(s_t))$
+    \State $Q^{proper}_t(s_t, a_t)=r(s_t, a_t) + \mathbb{E}_{s_{t+1}\sim p(s_{t+1}|s_t,a_t)}[V^{soft}_{t+1}(s_{t+1})]$
+    \State $V^{soft}_t(s_t)=\log\int_{\mathcal{A}}\exp(Q^{proper}_t(s_t,a_t))da_t$
+    \State $q_t^*(a_t|s_t)=\exp(Q^{proper}_t(s_t,a_t)-V^{soft}_t(s_t))$
     \EndFor
   \end{algorithmic}
 \end{algorithm}
 
 Now we have ``fixed'' the overestimation issue we had with the 
-pseudo Q-function in Equation \ref{eq:OverestimatedQ}. the update 
+pseudo Q-function in Equation \ref{eq:OverestimatedQ}. The update 
 as seen in Algorithm \ref{alg:SOC} now corresponds to the 
 bellman expectation/prediction equation we introduced
 in Equation \ref{eq:bellmanq}, given the soft state-value function 
@@ -1439,10 +1446,10 @@ $V^{soft}$. The reason why the state-value function is called a
 soft state value function is because it is the logarithm 
 of the integral of exponentiated Q-functions. As the values 
 of the Q-functions grow, the integral will be dominated by 
-the value of the Q-function with the greedy action. In this 
+the value of the Q-function associated with the greedy action. In this 
 case, instead of deterministically picking the greedy action 
 for our state-value function update as in Equation \ref{eq:bellmanOptV}, 
-we do a type soft-maximum operation (not to be confused with softmax 
+we do a type of soft-maximum operation (not to be confused with softmax 
 used in multiclass-classification problems in supervised learning).
 
 Inspecting the general form of $q^*_t$ in Equation \ref{eq:generalqForm}
@@ -1450,7 +1457,7 @@ more closely, we see that it weights the actions based on the
 exponential of their advantage. This is very similar to the 
 Actor-Critic update in Equation \ref{eq:ActorCritic}, where 
 we increase the 
-likelihood of actions based on their advantage.
+likelihood of actions with high advantage.
 
 Before we move on to the Soft Actor-Critic (SAC) \citep{SAC2} 
 algorithm, it is worth noting that there are different variants of 
@@ -1458,7 +1465,7 @@ the updates proposed in Algorithm \ref{alg:SOC}, where
 we can control how greedy we wish our policy to be by 
 introducing a temperature term, $\alpha$ such that 
 \begin{equation*}
-  q(a_t|s_t)=\exp(\frac{1}{\alpha}(Q^{proper}(s_t,a_t)-V^{soft}(s_t))).  
+  q(a_t|s_t)=\exp(\frac{1}{\alpha}(Q^{proper}_t(s_t,a_t)-V^{soft}_t(s_t))).  
 \end{equation*}
 
 As $\alpha\rightarrow 0$, we make the policy greedier, giving 
@@ -1469,7 +1476,7 @@ update as seen in Algorithm \ref{alg:SOC}, look more like the
 usual Bellman Optimality equation as seen in Equation \ref{eq:bellmanOptV}.
 This is done as shown in Equation \ref{eq:greedifyV}.
 \begin{equation}\label{eq:greedifyV}
-  V^{soft}(s_t)=\alpha\log \int \exp(\frac{1}{\alpha}Q^{proper}(s_t,a_t))da_t.
+  V^{soft}_t(s_t)=\log \int \exp(\frac{1}{\alpha}Q^{proper}_t(s_t,a_t))da_t.
 \end{equation}
 As the temperature tends to zero, the state-value function update 
 tends to the greedy update.
@@ -1477,7 +1484,7 @@ tends to the greedy update.
 Another variant of the updates given in Algorithm \ref{alg:SOC}, 
 is to add a discount factor $\gamma$, such that:
 \begin{equation*}
-  Q^{proper}(s_t,a_t)=r(s_t,a_t) + \gamma \mathbb{E}_{s_{t+1}|s_t,a_t}[V^{soft}(s_{t+1})].
+  Q^{proper}_t(s_t,a_t)=r(s_t,a_t) + \gamma \mathbb{E}_{s_{t+1}|s_t,a_t}[V^{soft}_{t+1}(s_{t+1})].
 \end{equation*}
 Adding the discount factor can be interpreted as adding a ``death'' 
 state that occurs with probability $1-\gamma$. This is because 
@@ -1503,7 +1510,11 @@ which is the same as the general form of the policy $q^*$ from
 the previous section. This is the case since, the Kulback Leibler 
 divergence is non-negative and equals zero exactly when the 
 two distributions match. Alternatively, one can use the 
-calculus of variations and reach the same result. 
+calculus of variations and reach the same result. In 
+the practical implementation of the algorithm, \cite{SAC2} use 
+a policy parameterised by $\phi$, resulting in a policy-search 
+in a more constrained space, where we no longer necessarily recover 
+the optimal policy as in $q^*$.
 
 The temperature, $\alpha$, is added to the objective in 
 \ref{eq:SACPolicyLoss} to control how greedy we want our policy 
@@ -1532,8 +1543,8 @@ too quickly can yield to unstable and sometimes divergent learning.
 This is especially something to be aware of when using 
 off-policy training, bootstrapping and function approximation.
 In \cite{Sutton1998}, these three modes of RL are referred to 
-as ``the deadly triad'' exactly because of their difficult 
-to predict impact on training. A common choice for updating the 
+as ``the deadly triad'' exactly because of the difficulty  
+to predict their impact on training. A common choice for updating the 
 target networks is either to copy the networks being trained 
 after every $k$ gradient steps, or to use Polyak averaging 
 \citep{PolyakAvg}.
@@ -1541,8 +1552,9 @@ after every $k$ gradient steps, or to use Polyak averaging
 The relevant Q-function update involves off-policy training 
 where we wish to evaluate the current policy while behaving 
 according to past experience which is sampled from a replay buffer. 
-A ``replay buffer'' is just another word for past experience 
-storage. The loss for the Q-function is given in Equation 
+A ``replay buffer'' is just another word for a container that 
+stores past experience. 
+The loss for the Q-function is given in Equation 
 \ref{eq:SACQfuncLoss}.
 
 \begin{equation}\label{eq:SACQfuncLoss}
@@ -1558,9 +1570,8 @@ Where
 \end{equation*}
 and $a_{t+1}$ is sampled from the current policy, $\pi_\phi$, rather 
 than the replay buffer, $\mathcal{D}$. This is the source of off-policy 
-training, (c.f. Q-learning \ref{sec:Qlearning}).
-
-In the above, $\hat{\theta}$ denotes the parameters of a target 
+training, (c.f. Q-learning \ref{sec:Qlearning}). In the above, 
+$\hat{\theta}$ denotes the parameters of a target 
 network. The intuition for this loss is again based on the 
 general form of the policy from SOC, $q^*$, this time also using 
 a temperature:
@@ -1578,7 +1589,8 @@ The final loss in the SAC algorithm is for the temperature.
 The authors formulate a dual formulation of the optimisation 
 problem which allows to automatically ``tune''/optimise for 
 the temperature. The dual formulation comes from constraining 
-the policy to have entropy higher than a specified lower bound.
+the policy to have entropy greater than a specified lower 
+bound, $\bar{\mathcal{H}}$.
 The loss is then given in Equation \ref{eq:SACTempLoss}.
 
 \begin{equation}\label{eq:SACTempLoss}
@@ -1588,7 +1600,7 @@ The loss is then given in Equation \ref{eq:SACTempLoss}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW SECTION - IRL THEORY;
-\chapter{Inverse Reinforcement Learning}\label{chap:IRL}
+\section{Inverse Reinforcement Learning}\label{sec:IRL}
 Inverse Reinforcement Learning (IRL) is a method of estimating 
 a reward function given expert trajectories/demonstrations 
 from performing a given task. Estimating the reward function can be 
@@ -1614,78 +1626,170 @@ function.
 
 As shown in \cite{NgIRL}, however, it turns out there are many 
 reward functions that explain a given behaviour/policy. Among 
-them are degenerate solutions such as reward being zero everywhere, 
+them are degenerate solutions such as the 
+reward being zero everywhere, 
 and indeed the constant reward function that assigns equal reward 
-regardless of the action taken. - \textbf{Not sure if I should give a short proof}
+regardless of the action taken.
 
-In what follows, we describe ways in which to select ``feasible'' 
-reward functions that are not degenerate. 
+In their work \cite{NgIRL} employ heuristics very similar to the 
+literature on Support Vector Machines \citep{SVMs}, where we 
+wish to learn a reward (or weights in which the reward is linear) 
+that separates the observed policy (or demonstrations of 
+the full policy is not availbale) from any other policy by the 
+greatest margin. In cases where the the current configuration 
+of the reward values a different policy more than the demonstrated 
+one, they increase the penalty, similarly to the non-separable 
+case of SVMs where we introduce slack variables.
 
-We cover two such approaches to regularising the reward 
-search space. - \textbf{I think I'm fine mentioning the Ng 
-approach with SVM heuristic and not go into too much detail 
-since I end up using the MaxEnt IRL approach}
+In what follows, we focus our attention on the Maximum Entropy 
+approach to IRL \citep{Ziebart2008} since, 
+as argued in the previous section, it can provide a principled 
+way for understanding soft-optimal behaviour. 
+Moreover, by learning a Maximum Entropy policy in the 
+inner loop of the the IRL procedure, this results in a reward 
+that puts great value in demonstrated behaviour without 
+maximally penalising unobserved behaviour (unlike 
+in \cite{NgIRL}).
 
+As mentioned in the beginning of this section, \cite{Ziebart2008} 
+uses the exponentiated return along demonstrated trajectories 
+to induce an ordering among demonstrations. Then, given 
+a parameterised reward function $r_\psi(\cdot)$, 
+we aim to do maximum likelihood learning for the 
+parameters, $\psi$, of the reward. Based on the pgm 
+\ref{fig:SOCGraph} introduced in the previous section, we can 
+write the likelihood of a single trajectory 
+as in Equation \ref{eq:irlLikelihood}.
 
-The first approach is heuristic-based \citep{NgIRL} and 
-aims to find 
-a reward function according to which the observed expert behaviour 
-is maximally optimal/different relative to any other behaviour. The 
-authors of \cite{NgIRL} formulate this problem as a linear problem, 
-very similar to the problem setting of Support Vector Machines 
-(SVMs) \citep{SVMs}, where the goal is to find a hyperplane that 
-best separates the expert behaviour/policy from any other policy. 
-In the continuous state space setting, the reward in \cite{NgIRL} 
-is linear in its parameters who have similar constraints to 
-the hyperplane in SVMs.
+\begin{align}\label{eq:irlLikelihood}
+  p(\tau|\xi_{1:T},\psi)&=\frac{1}{Z(\psi)}p(\tau)\exp\left(\sum_{t}r_\psi(s_t,a_t)\right)\notag\\
+  &=:\frac{1}{Z(\psi)}p(\tau)\exp\left(r_\psi(\tau)\right)\notag\\
+  Z(\psi)&:=\int p(\tau)\exp\left(
+    r_\psi (\tau)
+  \right)d\tau.
+\end{align}
 
-\textbf{TODO: GIVE THE MATHS}
-The second approach, is the Maximum-Entropy IRL approach 
-\citep{Ziebart2008}, that aims to find a reward that induces 
-a policy who apart from matching the features of 
-states along the paths of the expert demonstrations (feature 
-matching), has 
-to act as randomly as possible (maximum entropy). To do this, 
-\cite{Ziebart2008} effectively do maximum likelihood learning 
-for the parameters of the reward function in the setting of 
-Maximum Entropy RL \ref{sec:MaxEntRL}. Due to using a linear 
-function approximation for the reward in \cite{Ziebart2008}, 
-we get a familiar equation for parameter estimation, reducing 
-to matching expected sufficient statistics of an exponential 
-family distribution over trajectories. 
+In Equation \ref{eq:irlLikelihood} we have used the fact that 
+\begin{align*}
+  p(\tau|\xi_{1:T}=1,\psi)&\propto p(\tau,\xi_{1:T}=1,\psi)\notag\\
+  &=p(\xi_{1:T}=1|\tau,\psi)p(\tau)\notag\\
+  &=\exp\left(
+    \sum_t r_\psi(s_t, a_t)
+  \right)p(\tau),
+\end{align*}
+and have introduced $Z(\psi)$ as the normaliser.
 
+Assuming we have $N$ demonstrated trajectories, we can write their 
+log-likelihood as in Equation \ref{eq:irlLogLik}.
+\begin{align}\label{eq:irlLogLik}
+  J(\psi)&:=\frac{1}{N}\sum_{n=1}^N \log p(\tau_n|\xi_{1:T}=1,\psi)\notag\\
+  &=\frac{1}{N}\sum_{n=1}^N \log p(\tau_n) + r_\psi (\tau_n) - \log Z(\psi).
+\end{align}
 
-% \begin{itemize}
-  % \item model known and complete policy is given;
-  % \begin{itemize}
-    % \item discrete state space - linear programming;
-    % \item continuous state space - linear func approx;
-  % \end{itemize}
-  % \item many rewards possible based on policy (ill posedness);
-  % \begin{itemize}
-    % \item use svm heuristic - solve with linear prog in discrete state case;
-    % \item for cont cases again solvable by linear progs;
-  % \end{itemize}
-  % \item if expert policy only trough finite num of traj, 
-  % solve with iterative algo;
-% \end{itemize}
+Taking gradients of $J(\psi)$ with respect to $\psi$ we get the 
+result in Equation \ref{eq:irlLogLikGrad}.
 
-\begin{itemize}
-  \item State the goal of IRL - estimate an objective function
-    that when optimised should yield a behaviour similar to the 
-    one in the demos by the expert.
-  \item Argue the point about the ill-posedness of IRL, which makes 
-    classic optimal control not suitable for the job.
-  \item Talk about the max-margin approach (Ng) to IRL.
-    State drawbacks;
-  \item Give the update equation for the rewards in the 
-  continuous state space setting - rewards on expert traj 
-  vs rewards with imp-weights due to sampling;
-\end{itemize}
+\begin{align}\label{eq:irlLogLikGrad}
+  \nabla J(\psi)&=\frac{1}{N}\sum_{n=1}^N \nabla r_\psi(\tau_n) - \frac{1}{Z(\psi)}\int p(\tau)\exp(r_\psi(\tau))\nabla r_\psi(\tau)d\tau\notag\\
+  &=\frac{1}{N}\sum_{n=1}^N \nabla r_\psi(\tau_n) - \mathbb{E}_{\tau\sim p(\tau|\xi_{1:T}=1,\psi)}[\nabla r_\psi(\tau)].
+\end{align}
+
+As $N\rightarrow \infty$, Equation \ref{eq:irlLogLikGrad} reduces 
+to 
+\begin{equation*}
+  \nabla J(\psi)=\mathbb{E}_{\tau\sim \pi^*}[\nabla r_\psi(\tau_n)] - \mathbb{E}_{\tau\sim p(\tau|\xi_{1:T}=1,\psi)}[\nabla r_\psi(\tau)],
+\end{equation*}
+and we see that if $r_\psi(\tau)=\psi^Tf(\tau)$, is a linear function 
+with features $f(\tau)$, setting $\nabla J(\psi)=0$ results in doing 
+expected sufficient statistics matching, a common procedure 
+when working with distributions from the Exponential Family. 
+In the above we wish to match the expected gradients under 
+the expert policy, $\pi^*$, to that of the policy, soft-optimal for 
+the current setting of the reward function $r_\psi$, defined by 
+the parameters $\psi$.
+
+While we can sample the expected gradients under the expert 
+policy, using a finite number of expert trajectories, calculating 
+the expected gradients under the policy soft-optimal for the current 
+setting of the reward function requires solving the forward 
+problem of MaxEntRL - estimate a policy given a reward - in the 
+inner loop of the IRL problem for the current setting of the 
+reward function parameters.
+
+Suppose we had access to policy, $\pi^\psi$, soft-optimal for the 
+current setting of the reward function.
+Then we could sample $M$ trajectories following $\pi^\psi$ 
+and approximate the expected gradients leading to the 
+objective in Equation \ref{eq:irlSampledObj}.
+
+\begin{equation}\label{eq:irlSampledObj}
+  \nabla J(\psi):=\frac{1}{N} \sum_{n=1}^N \nabla r_\psi(\tau_n)
+  - \frac{1}{M}\sum_{m=1}^M \nabla r_\psi(\tau_m).
+\end{equation}
+
+One problem with this setting is that we assume access to $\pi^\psi$, 
+which requires solving the forward MaxEntRL problem in the 
+inner loop of the IRL procedure. This can be very costly, so 
+\cite{FinnGCL} propose we only train the current policy that 
+we have, $\pi^{curr}$ only for a few gradient steps by e.g., 
+using SAC (in their paper they use a different MaxEnt algorithm 
+since SAC was not invented yet), and then use importance sampling 
+to correct for the bias of the trajectories sampled from $\pi^{curr}$.
+
+Ideally, we would like importance sampling weights such as 
+$w^*=\frac{p(\tau|\xi_{1:T}=1,\psi)}{p^{\pi^{curr}}(\tau)}$. 
+This is not feasible due to having to compute the normaliser 
+$Z(\psi)$, which in general is intractable for non-linear reward 
+functions. This is why we first 
+define the unnormalised episodic weights $w_m$ 
+in Equation \ref{eq:irlEpisodicImpSamples}, and then 
+we use them to rewrite our importance sampled objective 
+in Equation \ref{eq:irlEpisodicImpSampledObj}.
+
+\begin{align}\label{eq:irlEpisodicImpSamples}
+  w_m&=\frac{p(\tau,\xi_{1:T}=1,\psi)}{p^{\pi^{curr}}}(\tau)\notag\\
+  &=\frac{\exp\left(
+      \sum_t r_\psi(s_t,a_t)
+    \right)p(\tau)
+  }{
+    p^{\pi^{curr}}(\tau)
+  }\notag\\
+  &=\frac{
+    p(s_1)\prod_t p(s_{t+1}|s_t,a_t)\exp(r_\psi(s_t,a_t))
+  }{
+    p(s_1)\prod_t p(s_{t+1}|s_t,a_t)\pi^{curr}(a_t|s_t)
+  }\notag\\
+  &=\prod_t\frac{\exp(r_\psi(s_t,a_t))}{\pi^{curr}(a_t|s_t)},
+\end{align}
+where we have used the trick of absorbing the $p(a_t|s_t)$ in 
+the reward, or alternatively treating it as uniform.
+Given the unnormalised episodic weights, $w_m$, we can now 
+rewrite the objective as shown in \ref{eq:irlSampledObj}.
+
+\begin{equation}\label{eq:irlEpisodicImpSampledObj}
+  \nabla J(\psi):=\frac{1}{N} \sum_{n=1}^N \nabla r_\psi(\tau_n)
+  - \frac{1}{\sum_{m=1}^M w_m}\sum_{m=1}^M w_m\nabla r_\psi(\tau_m).
+\end{equation}
+
+The way \cite{FinnGCL} have built on \cite{Ziebart2008}'s work is 
+by using a Deep Neural Network to parameterise the reward, and 
+by using importance sampling to approximate the expected 
+gradients of the reward. In contrast, \cite{Ziebart2008} use 
+a linear function approximation for the reward, leading to the 
+expected sufficient statistics matching interpretation, and 
+they also use the forward and backward messages as calculated 
+in Equations \ref{eq:SOCforwardMessage}, \ref{eq:SOCQmessage} 
+and \ref{eq:SOCVmessage}.
+
+In our work, we propose per-decision importance sampling, which 
+aims to decrease the variance of the estimates of the expected 
+gradients from the generated trajectories under $\pi^{curr}$. 
+This technique has generally yielded stable results in the 
+policy gradients literature, motivating their use in our case.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - GRAPH REPRESENTATIONS;
-\chapter{Graph representations}\label{chap:GNNs}
+\section{Graph representations}\label{sec:GNNs}
 \begin{itemize}
   \item the current stuff might be a bit verbose and talks 
   a bit too much about general DL; 
