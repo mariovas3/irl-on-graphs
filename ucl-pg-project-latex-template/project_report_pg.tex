@@ -296,19 +296,19 @@ more stable (less variance) learning of the reward function.
 
 \section*{Structure of the Report}\label{sec:structureOfReport}
 The remainder of the report is organised as follows:
-in chapter \ref{chap:RL} we introduce the necessary background 
+in Chapter \ref{chap:RL} we introduce the necessary background 
 of Reinforcement Learning to understand the policy learning 
-algorithm in the inner loop of the IRL algorithm. In chapter 
+algorithm in the inner loop of the IRL algorithm. In Chapter 
 \ref{chap:IRL} we review the two main approaches to IRL, 
 \citep{NgIRL,Ziebart2008}, and communicate key findings that 
-make the task of IRL difficult. In chapter \ref{chap:GNNs} 
+make the task of IRL difficult. In Chapter \ref{chap:GNNs} 
 we provide a brief overview of current Graph Neural Network 
 architectures, since this is what we use as our graph encoder.
-In chapter \ref{chap:contribution} we describe the architecture 
+In Chapter \ref{chap:contribution} we describe the architecture 
 of the baseline model, GraphOpt \citep{GraphOpt}, and we 
-discuss our contribution. In chapter \ref{chap:experiments} we 
+discuss our contribution. In Chapter \ref{chap:experiments} we 
 provide experimental results and a description of the testing 
-suite. In chapter \ref{chap:conclusion} we conclude the 
+suite. In Chapter \ref{chap:conclusion} we conclude the 
 report by briefly summarising our findings and suggest avenues 
 for further research.
 
@@ -489,7 +489,7 @@ and only bases its reward signal on the current configuration/state and
 the action that is selected by the agent.
 
 As we 
-can read off of the pgm in figure \ref{fig:POMDP}, we see that given 
+can read off of the pgm in Figure \ref{fig:POMDP}, we see that given 
 $s_t$ and $a_t$, $s_{t+1}$ is still independent of 
 $o_{1:t}$, $s_{1:t-1}$ and $a_{1:t-1}$ by D-separation.
 The observations, however, are not Markovian in general 
@@ -528,7 +528,7 @@ D-separation).
 \end{figure}
 
 The associated factorisation based on the pgm in 
-figure \ref{fig:POMDP} is:
+Figure \ref{fig:POMDP} is:
 \begin{equation}
   p^{\pi}(\tau)=p(s_1)\prod_{t=1}^T p(o_t|s_t)\pi(a_t|o_t)p(s_{t+1}|s_t, a_t).
 \end{equation}
@@ -554,28 +554,29 @@ can be the sensor mapping the state to the observation).
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % SECTION - FORMULATING EPISODIC AND CONTINUAL SETTING REWARD;
 \section{Formulating objective functions}\label{sec:RLGoalMaths}
-In section \ref{sec:RLGoal} we explained the goal of RL in words. 
+In Section \ref{sec:RLGoal} we explained the goal of RL in words. 
 In this section we will give a more formal mathematical definition. 
 To that end we will first define the finite/episodic case objective, 
 and then define the continual setting objective.
 
-First, recall the Monte Carlo return \ref{eq:MCReturn}. The episodic 
+First, recall the Monte Carlo return Equation \ref{eq:MCReturn}. The episodic 
 objective is to find a behaviour/policy, $\pi(\cdot)$, that maximises 
 the expected Monte Carlo return over the distribution of finite 
-trajectories, induced by the policy. This is summarised by equation \ref{eq:ep_objective}.
+trajectories, induced by the policy. 
+This is summarised by Equation \ref{eq:ep_objective}.
 \begin{align}
   \label{eq:ep_objective}
   \pi^*&=\arg \max_{\pi}\; \mathbb{E}_{\tau\sim p^{\pi}(\tau)}[G_0(\tau)]\notag\\
   &=\arg \max_{\pi}\; \mathbb{E}_{\tau\sim p^{\pi}(\tau)}\left[\sum_{t=1}^{len(\tau)}\gamma^{t-1}r(a_{t}, s_{t})\right].
 \end{align}
-In \ref{eq:ep_objective}, $len(\tau)$ denotes the length of the episode.
+In Equation \ref{eq:ep_objective}, $len(\tau)$ denotes the length of the episode.
 
 Before we tackle the continual setting, observe that the MDP in 
-figure \ref{fig:MDP} can be seen as a Markov chain where we define 
+Figure \ref{fig:MDP} can be seen as a Markov chain where we define 
 the new state $z_t:=(s_t, a_t)$. Based on this formulation we also 
 get a new transition operator 
 $p(a_{t+1},s_{t+1}|a_t,s_t)=\pi(a_{t+1}|s_{t+1})p(s_{t+1}|a_t,s_t)$ and 
-the corresponding pgm can be observed in figure \ref{fig:MCz}.
+the corresponding pgm can be observed in Figure \ref{fig:MCz}.
 
 \begin{figure}[H]
   \centering
@@ -610,7 +611,8 @@ Observe that we could also rewrite the episodic definition as:
 \end{align}
 where $maxlen(\tau)$ is the maximum length of a trajectory possible under $\pi$. 
 In the continual setting, $maxlen(\tau)\rightarrow\infty$, and provided the 
-equilibrium distribution for the Markov Chain in \ref{fig:MCz} exists, 
+equilibrium distribution for the Markov Chain in Figure 
+\ref{fig:MCz} exists, 
 after some time (burn-in), $p^{\pi}\rightarrow \mu^{\pi}$. Intuitively,
  due to the division by $maxlen(\tau)$, 
 the first finite number of steps from $p^{\pi}$ 
@@ -621,7 +623,7 @@ continual objective known as expected long-term reward:
   \arg \max_{\pi}\; {E}_{s, a\sim \mu^{\pi}(s, a)}[r(s, a)],
 \end{equation}
 where $\mu^{\pi}$ is the limiting distribution of the Markov chain 
-induced by $\pi$ \ref{fig:MCz}.
+induced by $\pi$ as seen in Figure \ref{fig:MCz}.
 
 
 
@@ -634,7 +636,7 @@ expected future return, given the current state or state-action pair.
 We shall derive those quantities from the RL objective functions 
 defined in the previous section.
 
-Starting from the episodic objective \ref{eq:ep_objective},
+Starting from the episodic objective Equation \ref{eq:ep_objective},
 \begin{align}\label{eq:valFuncDef}
   \mathbb{E}_{\tau\sim p^{\pi}(\tau)}\left[\sum_{t=1}^{len(\tau)}r(s_t, a_t)\gamma^{t-1}\right]
   &=\mathbb{E}_{s_1\sim p(s_1)}\left[\mathbb{E}_{\tau\sim p^{\pi}(\tau|s_1)}\left[\sum_{t=1}^{len(\tau)}r(s_t, a_t)\gamma^{t-1}|s_1\right]\right]\notag\\
@@ -655,14 +657,14 @@ where $Q^{\pi}(s_1,a_1):=\mathbb{E}[G_0(\tau)|s_1, a_1, \pi]$ is the state-actio
 sometimes referred to as the Q-function, and $V^{\pi}:=\mathbb{E}_{a_1\sim\pi(\cdot)}[Q^{\pi}(s_1, a_1)|s_1]$ is the state-value 
 function.
 
-In \ref{eq:valFuncDef} we already used a form of the Bellman expectation/prediction 
+In Equation \ref{eq:valFuncDef} we already used a form of the Bellman expectation/prediction 
 equation:
 \begin{align}\label{eq:bellmanv}
   V^{\pi}(s)&=\mathbb{E}_{a\sim \pi(\cdot|s)}[Q^{\pi}(s, a)|s]\notag\\
   &=\mathbb{E}_{a\sim \pi(\cdot|s)}\left[r(s, a) + \gamma \sum_{s'\in \mathcal{S}}p(s'|s,a)V^{\pi}(s')|s\right].
 \end{align}
 
-The same for the Q-function is given by equation \ref{eq:bellmanq}.
+The same for the Q-function is given by Equation \ref{eq:bellmanq}.
 \begin{align}\label{eq:bellmanq}
   Q^{\pi}(s, a)&=r(s, a) + \gamma \sum_{s'\in \mathcal{S}}p(s'|s, a)V^{\pi}(s')\notag\\
   &= r(s,a) + \gamma \sum_{s'\in \mathcal{S}}p(s'|s, a)\sum_{a'\in \mathcal{A}}\pi(a'|s')Q^{\pi}(s', a').
@@ -680,7 +682,7 @@ equations and enforce a consistency criterion for optimal policies.
 \end{align}
 
 It can be shown that there always exists at least one optimal 
-policy \citep{Sutton1998}, and the Bellman optimality equations 
+policy \citep{Sutton1998}, and the Bellman optimality Equations 
 in \ref{eq:bellmanOptV} and \ref{eq:bellmanOptQ} can be viewed 
 as consistency equations for an optimal policy $\pi^*$.
 
@@ -695,7 +697,8 @@ Given a policy one might be interested in understanding how good
 it is - evalueate it. Another question, given a current policy, 
 might be whether we can improve it. In the tabular case, where 
 we can enumarate all state-action pairs, it can be shown that 
-for $\gamma\in[0, 1)$, the updates given in \ref{eq:policyEval} correspond to operators 
+for $\gamma\in[0, 1)$, the updates given in Equation 
+\ref{eq:policyEval} correspond to operators 
 leading to a convergent sequence, whose stationary point is the 
 value of the policy $\pi$.
 \begin{align}\label{eq:policyEval}
@@ -704,26 +707,27 @@ value of the policy $\pi$.
   + \gamma\mathbb{E}[q_{k}(s_{t+1}, a_{t+1})|s_t,a_t].
 \end{align}
 
-We can iterate the equations in \ref{eq:policyEval} until $v_{k+1}(s)=v_k(s)$ 
+We can iterate the Equations in \ref{eq:policyEval} until $v_{k+1}(s)=v_k(s)$ 
 $\forall s\in \mathcal{S}$ at which point we get $v_k\approx v^{\pi}$ 
 (and similarly for $q$).
 
 
 For the policy improvement step, it can be shown \citep{Sutton1998} 
 that after the 
-policy evaluation \ref{eq:policyEval} converges, updating the policy 
+policy evaluation converges, updating the policy 
 to be greedy with respect to the action value $q^{\pi}$ of the 
 current policy, improves the policy.
 \begin{equation}\label{eq:policyImp}
   \pi'(s)=\arg \max_a q^{\pi}(s, a).
 \end{equation}
 
-Together, policy evaluation \ref{eq:policyEval} and \ref{eq:policyImp} 
+Together, the Equations for policy evaluation \ref{eq:policyEval} 
+and policy improvement \ref{eq:policyImp} 
 can be iterated one after another until we reach an optimal policy 
 given an MDP.
 
 It is worth noting, that instead of waiting for policy evaluation 
-\ref{eq:policyEval} to converge, we can instead do just one sweep 
+to converge, we can instead do just one sweep 
 of updates (single iteration) and then immediately do a policy 
 improvement step. This procedure is known as value iteration and 
 can also be shown to converge to the value functions of an 
@@ -772,7 +776,7 @@ The technique for using $Q_{k}(s_{t+1}, a_{t+1})$ instead
 of $Q^{\pi}(s_{t+1}, a_{t+1})$ is known as bootstrapping and needs to be 
 handled with care since it is not 
 necessarily a good estimate of $Q^{\pi}(s_{t+1}, a_{t+1})$ (it is biased). 
-To this end, take note of the learning rate, $\alpha$ in equation 
+To this end, take note of the learning rate, $\alpha$ in Equation 
 \ref{eq:sarsa} which is there to account for the noise introduced 
 by bootstrapping.
 
@@ -796,14 +800,14 @@ to evaluate the greedy policy given the current estimate $Q_{k}$,
 while following another policy, $\mu$, known as the behaviour. 
 This is why Q-learning is an off-policy method.
 
-The associated update (for tabular Q-learning) is given in equation 
+The associated update (for tabular Q-learning) is given in Equation 
 \ref{eq:qlearning}
 \begin{equation}\label{eq:qlearning}
   Q_{k+1}(s_t, a_t) = Q_{k}(s_t, a_t) + \alpha \left(r_{t+1} + \gamma \max_{a'\in\mathcal{A}}\;Q_{k}(s_{t+1}, a') - Q_{k}(s_t, a_t)\right).
 \end{equation}
 
 The reader may have noticed that the update for Q-learning is like 
-a sampled version of the value iteration update \ref{eq:valueIter} 
+a sampled version of the value iteration Equation \ref{eq:valueIter} 
 for the Q-function. Both SARSA and Q-learning can be shown to 
 converge given appropriately decaying learning rates $\alpha$ 
 that satisfy the Robbins-Monro conditions given in Equation 
@@ -909,7 +913,7 @@ of the policy is derived in Equation \ref{eq:PGDerive}.
   \gamma^{t-1}Q^{\pi}(s_t, a_t)\right].
 \end{align}
 
-In the derivation in \ref{eq:PGDerive} we have used the 
+While deriving Equation \ref{eq:PGDerive} we have used the 
 fact in Equation \ref{eq:dropPrevRews}.
 
 \begin{align}\label{eq:dropPrevRews}
@@ -1220,7 +1224,7 @@ in Equation \ref{eq:backMsgsAsVals}.
 \end{align}
 
 If we think of the backward messages as the exponentiated 
-value functions, based on Equation \ref{eq:SOCQmessage} and 
+value functions, based on Equations \ref{eq:SOCQmessage} and 
 \ref{eq:SOCVmessage}, we see that:
 \begin{align}\label{eq:badVals}
   Q(s_t, a_t)&=\log p(\xi_t|s_t, a_t) + \log\mathbb{E}_{s_{t+1}\sim p(s_{t+1}|s_t, a_t)}[\exp (V(s_{t+1}))]\notag\\
@@ -1231,7 +1235,7 @@ value functions, based on Equation \ref{eq:SOCQmessage} and
 It turns out that if we wish to give some prior for the actions, 
 other than uniform, we can just augment the reward function 
 by adding $\log p(a_t|s_t)$ to it and still treat $p(a_t|s_t)$ 
-as if it is uniform and ignore it. This is shown in equation 
+as if it is uniform and ignore it. This is shown in Equation 
 \ref{eq:priorMsgs}.
 \begin{align}\label{eq:priorMsgs}
   V(s_t)&=\log \int_{\mathcal{A}}\exp (Q(s_t, a_t) + \log p(a_t|s_t))da_t\notag\\
@@ -1383,7 +1387,7 @@ Substituting the optimal $q^*_T(a_T|s_T)$:
 
 Now consider finding the optimal $q_{T-1}(a_{T-1}|s_{T-1})$, 
 given $q_T^*(a_T|s_T)$. The recursive relation is given 
-in equation \ref{eq:SecondqEq}.
+in Equation \ref{eq:SecondqEq}.
 
 \begin{align}\label{eq:SecondqEq}
   q_{T-1}^*&=\arg \max_{q(a_{T-1}|s_{T-1})}\; \mathbb{E}_{s_{T-1}\sim q(s_{T-1})}\{\notag\\
@@ -1516,7 +1520,7 @@ a policy parameterised by $\phi$, resulting in a policy-search
 in a more constrained space, where we no longer necessarily recover 
 the optimal policy as in $q^*$.
 
-The temperature, $\alpha$, is added to the objective in 
+The temperature, $\alpha$, is added to the objective in Equation
 \ref{eq:SACPolicyLoss} to control how greedy we want our policy 
 to be. In this case it can be shown that the optimal policy 
 will be $\pi(a_t|s_t)\propto\exp\left(\frac{1}{\alpha}Q(s_t,a_t)\right)$.
@@ -1570,7 +1574,7 @@ Where
 \end{equation*}
 and $a_{t+1}$ is sampled from the current policy, $\pi_\phi$, rather 
 than the replay buffer, $\mathcal{D}$. This is the source of off-policy 
-training, (c.f. Q-learning \ref{sec:Qlearning}). In the above, 
+training, (c.f. Q-learning in Section \ref{sec:Qlearning}). In the above, 
 $\hat{\theta}$ denotes the parameters of a target 
 network. The intuition for this loss is again based on the 
 general form of the policy from SOC, $q^*$, this time also using 
@@ -1656,7 +1660,7 @@ uses the exponentiated return along demonstrated trajectories
 to induce an ordering among demonstrations. Then, given 
 a parameterised reward function $r_\psi(\cdot)$, 
 we aim to do maximum likelihood learning for the 
-parameters, $\psi$, of the reward. Based on the pgm 
+parameters, $\psi$, of the reward. Based on the pgm in Figure
 \ref{fig:SOCGraph} introduced in the previous section, we can 
 write the likelihood of a single trajectory 
 as in Equation \ref{eq:irlLikelihood}.
@@ -1764,7 +1768,7 @@ in Equation \ref{eq:irlEpisodicImpSampledObj}.
 where we have used the trick of absorbing the $p(a_t|s_t)$ in 
 the reward, or alternatively treating it as uniform.
 Given the unnormalised episodic weights, $w_m$, we can now 
-rewrite the objective as shown in \ref{eq:irlSampledObj}.
+rewrite the objective as shown in Equation \ref{eq:irlSampledObj}.
 
 \begin{equation}\label{eq:irlEpisodicImpSampledObj}
   \nabla J(\psi):=\frac{1}{N} \sum_{n=1}^N \nabla r_\psi(\tau_n)
@@ -1781,11 +1785,123 @@ they also use the forward and backward messages as calculated
 in Equations \ref{eq:SOCforwardMessage}, \ref{eq:SOCQmessage} 
 and \ref{eq:SOCVmessage}.
 
-In our work, we propose per-decision importance sampling, which 
+In our work, we propose using 
+per-decision importance sampling \citep{perDecision}, which 
 aims to decrease the variance of the estimates of the expected 
 gradients from the generated trajectories under $\pi^{curr}$. 
 This technique has generally yielded stable results in the 
 policy gradients literature, motivating their use in our case.
+
+The unnormalised weights for the $t^{th}$ step of the $m^{th}$ 
+trajectory is given in Equation \ref{eq:perDecUnnorm}
+
+\begin{equation}\label{eq:perDecUnnorm}
+  w_{m,t}:=\prod_{k=1}^t \frac{\exp(r_\psi(s_k,a_t))}{\pi^{curr}(a_k|s_k)}.
+\end{equation}
+
+We normalise $w_{m,t}$ over the sampled trajectories:
+\begin{equation*}
+  \tilde{w}_{m,t}=\frac{w_{m,t}}{\sum_{m=1}^M w_{m,t}},
+\end{equation*}
+and then rewrite the objective as shown in Equation \ref{eq:perDecObj}.
+
+\begin{equation}\label{eq:perDecObj}
+  \nabla J(\psi):=\frac{1}{N} \sum_{n=1}^N \nabla r_\psi(\tau_n)
+  - \sum_{m=1}^M \sum_{t=1}^T\tilde{w}_{m,t}\nabla r_\psi(s_t^{(m)},a_t^{(m)}).
+\end{equation}
+
+The choice of these samples can be motivated by first supposing 
+that we have a target policy $\pi$ and a behaviour policy 
+$\mu$, then let 
+\begin{equation*}
+  \frac{\pi(\tau)}{\mu(\tau)}=\prod_{t=1}^T{\frac{\pi(a_t|s_t)}{\mu(a_t|s_t)}},
+\end{equation*}
+
+be per episode 
+importance weights for the trajectory $\tau$. The 
+undiscounted importance sampled return is:
+\begin{equation*}
+  \hat{G}(\tau)=\frac{\pi(\tau)}{\mu(\tau)}r_\psi(\tau).
+\end{equation*}
+
+Taking expectation with respect to our behaviour we get
+\begin{align*}
+  \sum_{\tau}p_\mu(\tau)\frac{\pi(\tau)}{\mu(\tau)}\sum_{k=1}^Tr_\psi(s_k,a_k)
+  &=\sum_{\tau}p_\mu(\tau)\sum_{k=1}^T\left(
+    \prod_{t=1}^T \frac{\pi(a_t|s_t)}{\mu(a_t|s_t)}
+  \right)r_\psi(s_k,a_k).
+\end{align*}
+
+Now focusing on the general $k^{th}$ term
+
+\begin{align*}
+  \sum_{\tau}p_\mu(\tau)\left(
+    \prod_{t=1}^T \frac{\pi(a_t|s_t)}{\mu(a_t|s_t)}
+  \right)r(s_k,a_k)
+  &=\sum_{\tau_{:k}}p_\mu(\tau_{:k})\mu(a_k|s_k)\left(
+    \prod_{t=1}^k \frac{\pi(a_t|s_t)}{\mu(a_t|s_t)}
+  \right)r(s_k,a_k)\sum_{\tau_{k+1:}}p_\mu(\tau_{k+1:})\left(
+    \prod_{t=k+1}^T \frac{\pi(a_t|s_t)}{\mu(a_t|s_t)}
+  \right)\notag\\
+  &=\sum_{\tau_{:k}}p_\mu(\tau_{:k})\mu(a_k|s_k)
+    \frac{\pi(\tau_{:k})}{
+      \mu(\tau_{:k})
+      }
+  r_\psi(s_k,a_k)\notag\\
+  &\qquad\times\sum_{\tau_{k+1:}}
+    \prod_{i=k+1}^{T}p(s_{i}|s_{i-1},a_{i-1})\mu(a_i|s_i)\left(
+    \prod_{j=k+1}^T\frac{
+      p(s_{j}|s_{j-1},a_{j-1})\pi(a_j|s_j)}{
+      p(s_{j}|s_{j-1},a_{j-1})\mu(a_j|s_j)
+      }
+  \right)\notag\\
+  &=\sum_{\tau_{:k}}p_\mu(\tau_{:k})\mu(a_k|s_k)
+    \frac{\pi(\tau_{:k})}{
+      \mu(\tau_{:k})
+      }
+  r_\psi(s_k,a_k)\times\sum_{\tau_{k+1:}}\prod_{j=k+1}^T
+      p(s_{j}|s_{j-1},a_{j-1})\pi(a_j|s_j)\notag\\
+  &=\sum_{\tau_{:k}}p_\mu(\tau_{:k})\mu(a_k|s_k)
+    \frac{\pi(\tau_{:k})}{
+      \mu(\tau_{:k})
+      }
+  r_\psi(s_k,a_k)\notag\\
+  % &=\sum_{\tau_{:k}}p(s_1)\prod_{i=1}^{k}p(s_{i}|s_{i-1},a_{i-1})\mu(a_i|s_i)\left(
+  %   \frac{p(s_1)}{p(s_1)}\prod_{j=1}^k\frac{
+  %     p(s_{j}|s_{j-1},a_{j-1})\pi(a_j|s_j)}{
+  %     p(s_{j}|s_{j-1},a_{j-1})\mu(a_j|s_j)
+  %     }
+  % \right)r_\psi(s_k,a_k)\notag\\
+  % &=\sum_{\tau_{:k}}p_\mu(\tau_{:k})\left(
+  %   \prod_{j=1}^k\frac{\pi(\tau_{:k})}{\mu(\tau_{:k})}
+  % \right)r_\psi(s_k,a_k)\notag\\
+  &=\mathbb{E}_{\tau\sim p_\mu(\tau)}\left[\left(
+    \prod_{j=1}^k\frac{\pi(a_j|s_j)}{\mu(a_j|s_j)}
+  \right)r_\psi(s_k,a_k)\right]\notag\\
+  % &=\mathbb{E}_{\tau\sim p_\mu(\tau)}\left[
+    % \frac{\pi(\tau_{:k})}{\mu(\tau_{:k})}r_\psi(s_k,a_k)
+  % \right]\notag\\
+  &=\mathbb{E}_{\tau\sim p_\pi}[r_\psi(s_k,a_k)].
+\end{align*}
+
+where in the last line we used $\frac{\pi(\tau)}{\mu(\tau)}=\frac{p_\pi(\tau)}{p_\mu(\tau)}$.
+Intuitively, this result conveys the fact that the rewards 
+do not depend on the future actions. This is most easily 
+seen due to D-separation in Figure \ref{fig:MDPRew}.
+In our per-decision importance sampling scheme, we sample 
+many trajectories, calculate the $w_{m,t}$ for each 
+trajectory and time step and then normalise over trajectories.
+This way we also do a fairer attribution to the rewards, since 
+it is possible to sample a very likely trajectory up to 
+the $k^{th}$ step and have high importance weights up until then, 
+but then sample very unlikely trajectories until the end of the episode 
+which will result in an overall lower 
+per-episode importance weight for all rewards on the episode. 
+In contrast, if we use per-decision weights, we would 
+correctly weight the rewards 
+$\left(r_\psi(s_j^{(m)}, a_j^{(m)})\right)_{j=1}^k$ 
+with higher weight values. 
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - GRAPH REPRESENTATIONS;
@@ -1858,13 +1974,85 @@ have motivated the invention of Graph Neural Networks (GNN) \citep{ScarselliGNN}
 These models have found applications in areas such as 
 Quantum Chemistry \citep{MPNNs}, where 
 a general form of the Message Passing Neural Net (MPNN) was 
-introduced.
+introduced. This general form aims to resemble the message passing 
+procedure often done in pgms using Belief Propagation. Instead 
+of the usual integration/marginalisation/variable elimination, 
+we use MLPs to encode the nodes of the neighbours of the current 
+node and then apply a permutation invariant aggregation to 
+these embeddings, collapsing them to the dimension of the node 
+embeddings of the current node.
+
+More formally, given node embeddings $(x_i^{(k)})_{i=1}^{|\mathcal{V}|}$, 
+from the $k^{th}$ layer, the edge set, $\mathcal{E}$, embeding 
+functions (like MLPs), $\phi^{(k+1)}$ and $\gamma^{(k+1)}$, 
+a permutation invariant 
+aggregation $AGG(\cdot)$ (like sum, min, max), the update to 
+the node embeddings of the current node are given in Equation 
+\ref{eq:MPNN}.
+\begin{equation}\label{eq:MPNN}
+  x_i^{(k+1)}\gets \gamma^{(k+1)}\left(
+    x_i^{(k)}, 
+    AGG_{j\in\mathcal{N}(i)}\left(
+      \phi^{(k+1)}\left(x_i^{(k)}, x_j^{(k)}\right)\right)
+  \right).
+\end{equation}
+Where $\mathcal{N}(i)$ contains the indexes of the neighbouring nodes 
+to the $i^{th}$ node. Applying this operation $k$ times, let's 
+each node receive ``information'' passed from nodes up to 
+$k$ edges away. As the final output of a GNN, we receive 
+new node embeddings, based on $L$ applications of the neural 
+message passing procedure defined in Equation \ref{eq:MPNN}.
+
+As with general Deep Learning, there are many different architectures 
+for GNNs. The one we are using in our applications is called ``GATv2'' 
+\citep{GATv2}, 
+which stands for the second version of the Graph Attention Network 
+(GAT) \citep{GAT}. As the name suggests, 
+this architecture is heavily influenced by the Transforemer 
+architecture \citep{transformers}, which computes weights called 
+attention weights. These attention weights 
+usually induce a distribution over a subset of entities (e.g. nodes). 
+The formation of the distribution is usually based on 
+a softmax as seen in Equation \ref{eq:softmax}, over some 
+intermediate representation $z_i$.
+\begin{equation}\label{eq:softmax}
+  \text{softmax}(z_i) = \frac{\exp(z_i)}{\sum_{n=1}^N \exp(z_n)}.
+\end{equation}
+In the GATv2 architecture messages are passed as given in 
+Equation \ref{eq:GATv2MP} and the calculation of the attention 
+weights is given in Equation \ref{eq:GATv2Att}.
+
+\begin{equation}\label{eq:GATv2MP}
+  x_i^{(k+1)}=\sigma(\alpha_{i,i}^{(k+1)}W^{(k+1)}x_i^{(k)} 
+  + \sum_{j\in\mathcal{N}(i)}\alpha^{(k+1)}_{i,j}W^{(k+1)}x_j^{(k)}).
+\end{equation}
+
+In Equation \ref{eq:GATv2MP}, $\sigma(\cdot)$ is a 
+nonlinearity such as 
+$\text{ReLU}(x):=\text{max}(0, x)$.
+
+\begin{equation}\label{eq:GATv2Att}
+  \alpha_{i,j}^{(k+1)}=\frac{
+    \exp((\beta^{(k+1)})^TLeakyReLU([W^{(k+1)}||W^{(k+1)}] [x_i^{(k)}||x_j^{(k)}] + b^{(k+1)}))
+  }{\sum_{j\in\mathcal{N}(i)}\exp((\beta^{(k+1)})^TLeakyReLU([W^{(k+1)}||W^{(k+1)}] [x_i^{(k)}||x_j^{(k)}] + b^{(k+1)}))}.
+\end{equation}
+In Equation \ref{eq:GATv2Att}, the $||$ operator denotes concatenation 
+so e.g., if $x\in\reals^{n}$, $[x||x]\in\reals^{2n}$ and similarly 
+if $W\in\reals^{m\times n}$, $[W||W]\in\reals^{m\times 2n}$.
+The learnable parameters of the GATv2 layer are, $\beta^{(k)}\in\reals^{d'}$, 
+$b^{(k)}\in\reals^{d'}$, $W^{(k)}\in\reals^{d'\times d}$. 
+The $\text{LeakyReLU}$ function is defined in 
+Equation \ref{eq:LeakyReLU}.
+\begin{equation}\label{eq:LeakyReLU}
+  \text{LeakyReLU}(x)=\text{max}(0,x) + \eta\times \text{min}(0,x).
+\end{equation}
+In Equation \ref{eq:LeakyReLU}, $\eta$ is usually set to $0.01$.
 
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - OUR CONTRIBUTION;
-\chapter{The baseline model and our contribution}\label{chap:contribution}
+\chapter{Methods}\label{chap:contribution}
 % In practice, learning a graph generative mechanism is challenging 
 % since, most of the time, we are not provided with (multiple) demonstrations 
 % of the graph building process. Instead, we are only given the 
