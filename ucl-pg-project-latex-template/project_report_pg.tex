@@ -315,8 +315,9 @@ for further research.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - RL BACKGROUND;
-\chapter{Reinforcement Learning Background}
-\label{chap:RL}
+\chapter{Background}\label{chap:Background}
+\section{Reinforcement Learning}
+\label{sec:RL}
 In this section I cover the necessary background from Reinforcement 
 Learning (RL) to follow the 
 rest of the work. The main algorithm in the inner 
@@ -330,7 +331,7 @@ off-policy learning, Actor-Critics \citep{Tsitsiklis} and
 the maximum entropy approach to RL.
 
 % SECTION - THE GOAL OF RL;
-\section{The Goal of Reinforcement Learning}
+\subsection{The Goal of Reinforcement Learning}
 \label{sec:RLGoal}
 
 The goal of Reinforcement learning is to learn a behaviour that 
@@ -372,7 +373,7 @@ see the shortest path out of the maze and take the necessary actions
 that yield the greatest accumulated reward (or return).
 
 % SECTION - MDPs
-\section{Markov Decision Processes (MDP)}
+\subsection{Markov Decision Processes (MDP)}
 \label{sec:RLMDP}
 Suppose the robot from the previous example has access to the 
 environment state (sees the whole map). Then, given the 
@@ -553,7 +554,7 @@ can be the sensor mapping the state to the observation).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % SECTION - FORMULATING EPISODIC AND CONTINUAL SETTING REWARD;
-\section{Formulating objective functions}\label{sec:RLGoalMaths}
+\subsection{Formulating objective functions}\label{sec:RLGoalMaths}
 In Section \ref{sec:RLGoal} we explained the goal of RL in words. 
 In this section we will give a more formal mathematical definition. 
 To that end we will first define the finite/episodic case objective, 
@@ -629,7 +630,7 @@ induced by $\pi$ as seen in Figure \ref{fig:MCz}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW SECTION - VALUE FUNCS;
-\section{Value functions}\label{sec:valueFuncs}
+\subsection{Value functions}\label{sec:valueFuncs}
 A key quantity in our application and of much of modern Reinforcement Learning 
 are the value functions. These quantities aim to estimate the 
 expected future return, given the current state or state-action pair. 
@@ -687,7 +688,7 @@ in \ref{eq:bellmanOptV} and \ref{eq:bellmanOptQ} can be viewed
 as consistency equations for an optimal policy $\pi^*$.
 
 % SECTION - improving the policy;
-\section{Policy iteration}
+\subsection{Policy iteration}
 Based on the Value functions, $Q^{\pi}$ and $V^{\pi}$ introduced in the 
 previous section, there exists a powerful paradigm that allows 
 us to arrive at an optimal policy. This paradim is called Generalised 
@@ -743,7 +744,7 @@ are shown in \ref{eq:valueIter}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW SECTION - Q-learning;
-\section{Q-learning}\label{sec:Qlearning}
+\subsection{Q-learning}\label{sec:Qlearning}
 In this section we use Q-learning \citep{QlearningWatkins1992} 
 as a motivating example 
 for single-step off-policy methods. These are methods 
@@ -821,7 +822,7 @@ sufficiently often (needed for Q-learning).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%5
 % NEW SECTION;
-\section{Policy Gradients}\label{sec:PolicyGrads}
+\subsection{Policy Gradients}\label{sec:PolicyGrads}
 In the previous sections we have focused on ways to estimate 
 value functions, which we can then use to derive a policy implicitly. 
 
@@ -961,7 +962,7 @@ also weighted by a discounted return $\gamma^{t-1}G_t(\tau_{t:}^{(n)})$.
 Intuitively, we wish to maximise the likelihood of trajectories 
 that resulted in greater returns.
 
-\section{Actor-Critics}
+\subsection{Actor-Critics}
 In Section \ref{sec:PolicyGrads} we derived the policy gradient 
 update rule and gave an intuitive relation to maximum likelihood 
 where we wish to increase the likelihood of episodes resulting 
@@ -1044,7 +1045,7 @@ either by the relevant Monte Carlo return as given in Equation
 \ref{eq:MCReturn} or by bootstrapping as in the 
 case of SARSA.
 
-\section{Maximum Entropy Reinforcement Learning}\label{sec:MaxEntRL}
+\subsection{Maximum Entropy Reinforcement Learning}\label{sec:MaxEntRL}
 Maximum Entropy Reinforcement Learning (MaxEntRL) is most commonly 
 motivated by observing the behaviour of biological systems, assuming 
 they are rational agents and that they act the way they do in order to achieve 
@@ -1497,7 +1498,7 @@ them sum to $\gamma$.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW SECTION - SAC;
-\section{Soft Actor Critic}
+\subsection{Soft Actor Critic}\label{sec:SAC}
 Soft Actor Critic (SAC), is a MaxEntRL method that maintains 
 a Q-function, a policy and a temperature. The policy 
 is trained by minimising the loss given in Equation \ref{eq:SACPolicyLoss}.
@@ -1522,8 +1523,43 @@ the optimal policy as in $q^*$.
 
 The temperature, $\alpha$, is added to the objective in Equation
 \ref{eq:SACPolicyLoss} to control how greedy we want our policy 
-to be. In this case it can be shown that the optimal policy 
+to be. In this case it can be shown that the unconstrained 
+optimal policy 
 will be $\pi(a_t|s_t)\propto\exp\left(\frac{1}{\alpha}Q(s_t,a_t)\right)$.
+
+In order to evaluate the expression in Equation \ref{eq:SACPolicyLoss}, 
+the authors sample the state, $s_t\sim\mathcal{D}$ from the 
+replay buffer, and then perform the reparameterisation trick. 
+In the case of a policy that outputs the mean vector, $\mu_\phi$ and 
+the vector of standard deviations, $\log\sigma_\phi$ 
+associated to a Gaussian vector 
+with independent components, the reparameterisation trick constitutes 
+sampling a random variate from a standard Gaussian, 
+$\epsilon\sim\mathcal{N}(0, I)$, and then mapping it to the action space 
+using equation \ref{eq:reparamTrick}.
+\begin{equation}\label{eq:reparamTrick}
+  a_\phi=\epsilon \odot \sigma_\phi + \mu_\phi.
+\end{equation}
+
+The loss in \ref{eq:SACPolicyLoss} can then be written as in 
+Equation \ref{eq:SACPolicyLossSampled}.
+
+\begin{equation}\label{eq:SACPolicyLossSampled}
+  J_\pi(\phi)=\alpha \log \pi_\phi(a_\phi|s_t) - Q_\theta(s_t, a_\phi).
+\end{equation}
+
+The gradient of Equation \ref{eq:SACPolicyLossSampled} 
+due to the reparameterisation trick is shown in Equation 
+\ref{eq:SACPolicyLossGrad}.
+
+\begin{equation}\label{eq:SACPolicyLossGrad}
+  \nabla J_\pi(\phi)=\alpha \nabla_\phi \log\pi_\phi(a_\phi)
+  + \nabla_\phi a_\phi\left(\alpha\frac{\partial}{\partial a_\phi}
+  \log \pi_\phi(a_\phi|s_t)
+  + \frac{\partial}{\partial a_\phi}Q(a_\phi, s_t)\right).
+\end{equation}
+
+
 
 The Q-function training procedure is a bit more involved 
 since SAC uses two Q-functions \citep{HasseltDoubleQlearning} 
@@ -1587,7 +1623,17 @@ a temperature:
 \end{align}
 
 Substituting $q^*_t$ for $\pi_\phi$ we get the expression in the 
-loss.
+loss. The gradient for the loss of the Q-function is given in 
+Equation \ref{eq:SACQgrad}.
+
+\begin{equation}\label{eq:SACQgrad}
+  \nabla J_Q(\theta)=-2\left(
+    r(s_t,a_t) + \gamma(
+      Q_{\hat{\theta}}(s_{t+1},a_{t+1}) - \alpha \log \pi_\phi(a_{t+1}|s_{t+1})
+    )
+    - Q_\theta(s_t, a_t)
+  \right)\nabla Q_\theta(s_t, a_t).
+\end{equation}
 
 The final loss in the SAC algorithm is for the temperature. 
 The authors formulate a dual formulation of the optimisation 
@@ -1601,10 +1647,35 @@ The loss is then given in Equation \ref{eq:SACTempLoss}.
   J(\alpha)=\mathbb{E}_{a_t\sim \pi_\phi}[-\alpha \log \pi_\phi(a_t|s_t) - \alpha \bar{\mathcal{H}}].
 \end{equation}
 
+An algorithmic description of SAC can be found in Algorithm 
+\ref{alg:SAC}.
+
+\begin{algorithm}
+  \caption{SAC algorithm}
+  \label{alg:SAC}
+  \begin{algorithmic}
+    \For {$t_1=1\ldots \text{num-epochs}$}
+      \For {$t_2=1\ldots \text{num-iters}$}
+        \State Sample trajectories and save them in $\mathcal{D}$
+        \For{$t_3=1\ldots \text{num-grad-steps}$}
+          \State $Batch(s_t, a_t, r_{t+1}, s_{t+1})\sim\mathcal{D}$
+          \State Compute policy loss according to \ref{eq:SACPolicyLoss}
+          \State Compute temperature loss according to \ref{eq:SACTempLoss}
+          \State Compute Q-function loss according to \ref{eq:SACQfuncLoss}
+          \State Do gradient step on all computed losses
+          \State Track parameters of target networks e.g., by Polyak averaging.
+        \EndFor
+      \EndFor
+    \EndFor
+    \State Receive policy $\pi^*$
+  \end{algorithmic}
+\end{algorithm}
+
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW SECTION - IRL THEORY;
-\section{Inverse Reinforcement Learning}\label{sec:IRL}
+\subsection{Inverse Reinforcement Learning}\label{sec:IRL}
 Inverse Reinforcement Learning (IRL) is a method of estimating 
 a reward function given expert trajectories/demonstrations 
 from performing a given task. Estimating the reward function can be 
@@ -1904,7 +1975,7 @@ with higher weight values.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% NEW CHAPTER - GRAPH REPRESENTATIONS;
+% NEW SECTION - GRAPH REPRESENTATIONS;
 \section{Graph representations}\label{sec:GNNs}
 \begin{itemize}
   \item the current stuff might be a bit verbose and talks 
@@ -2048,15 +2119,173 @@ Equation \ref{eq:LeakyReLU}.
 \end{equation}
 In Equation \ref{eq:LeakyReLU}, $\eta$ is usually set to $0.01$.
 
+%%%%%%%%%%%%%%%%%%%%%%%%
+% NEW SECTION - RELATED WORK;
+\section{Related Work}\label{sec:RelatedWork}
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - OUR CONTRIBUTION;
 \chapter{Methods}\label{chap:contribution}
-% In practice, learning a graph generative mechanism is challenging 
-% since, most of the time, we are not provided with (multiple) demonstrations 
-% of the graph building process. Instead, we are only given the 
-% final constructed graph.
+In this section we present the different methods used 
+for learning a reward function for a graph construction process. 
+In all cases this is done via MaxEnt IRL together with. 
+First we summarise GraphOpt \citep{GraphOpt}, 
+the method that we use as a baseline. Then we expand on the 
+further design choices we have made in efforts to improve 
+on the baseline. 
+
+\section{GraphOpt}\label{sec:GraphOpt}
+GraphOpt is a method that tackles the graph construction 
+problem from the angle of optimisation. It is a method that 
+operates on a single graph. In their paper, 
+\cite{GraphOpt} aim to recover the objective function 
+that could be used as an explanation for the graph construction 
+process that lead to the observed graph. As a by-product 
+of the IRL procedure, we also receive a policy. This policy 
+should be able to construct graphs with similar topological 
+properties to those of the source graph. The authors of \cite{GraphOpt} 
+also test for the transferability of the learned reward, by 
+training a new policy on a target graph with the estimated 
+reward, and comparing the 
+topological properties of the graph constructions from the 
+new policy to those of the target graph. The 
+topology characteristics used as 
+benchmarks are the triangle count, the node clustering coefficient 
+and the node degree distributions.
+
+The process of graph construction can be summarised as follows: 
+``given the full vertex set of a graph, start from 
+an empty edge set and add edges so as to maximise 
+a given reward signal''.
+Based on the description above, the MDP always begins 
+with the vertex set of the source graph $|\mathcal{V}|$, 
+and an empty edge set, $\mathcal{E}_0$. The initial state is 
+therefore the 2-tuple - $s_0=(\mathcal{V}, \mathcal{E}_0)$.
+
+The environment in \cite{GraphOpt} is formulated as 
+an MDP with deterministic transitions to the next state given the 
+current state-action pair. 
+
+
+% The state at time $t$, $s_t$, 
+% is the Graph, 
+% $\mathcal{G}=(\mathcal{V},\mathcal{E}_t)$, whose vertex set 
+% is the same as the vertex set of the source graph, while the 
+% edge set, $\mathcal{E}_t$
+
+% as defined by 
+% the vertex set, and the number of edges constructed by time 
+% $t$. The initial state of the MDP is always the same and is 
+% initialised to a graph with no edges and 
+% the same vertex set as that of the source graph.
+
+% More formally:
+% \begin{align*}
+%   s_0=(\mathcal{V},\mathcal{E}_0=\{\}).
+% \end{align*}
+
+In order to obtain actions, the state at time $t$ is first encoded
+using a GNN that outputs the matrix of node embeddings, $Z_t$, 
+as well as their 
+sum, after which that sum is input to an MLP whose outputs are 
+interpreted as the mean vector and the log standard deviations 
+of a vector of independent univariate Gaussian distributions.
+Based on these means and log standard deviations, 
+a single vector, $a\in \reals^{2d}$, is sampled whose size is 
+twice the size of the node embeddings, received from the GNN. 
+The vector, $a$, is then split into two parts, $a^{(1)}$ and 
+$a^{(2)}$, which are used to select the nodes in the vertex 
+set $\mathcal{V}$ to be connected. The selection of the nodes 
+is done based on equation \ref{eq:GOIdxSelect}.
+\begin{equation}\label{eq:GOIdxSelect}
+  v_i = \arg \max_{v\in\mathcal{V}} \sigma(\langle z^{(v)}, a_i\rangle)\qquad \text{for $i\in \{1,2\}$},
+\end{equation} 
+where $\sigma(\cdot)$ is the sigmoid function as defined in 
+Equation \ref{eq:sigmoid} and $\langle\cdot,\cdot\rangle$ is the 
+standard Euclidean inner product.
+\begin{equation}\label{eq:sigmoid}
+  \sigma(x)=\frac{1}{1 + e^{-x}}.
+\end{equation}
+
+All edges are allowed for selection, except these that imply 
+self-loops (a node connected to itself). The termination 
+conditions of an episode are when a maximum number of steps are 
+made or when a maximum number of repeated edges (an 
+edge that has been proposed before) are proposed.
+
+At this point it is worth noting that there is no 
+code available from any public online repositories directly linked 
+with the authors of \cite{GraphOpt}. I had to implement 
+the algorithm myself from scratch, therefore. 
+Due to having no code availble, there was no opportunity to 
+cross-check the validity of the implementation, so I had to make 
+some design choices based on my judgement and the observed 
+performance of the algorithm along the development phase.
+
+In my implementation I set the maximum allowed repeats 
+and the maximum path length to be 
+equal to the size of the edge set of the source graph. 
+
+Up to the selection of the node 
+indexes as per Equation \ref{eq:GOIdxSelect}, the entire policy 
+is differentiable and the authors claim they train it end-to-end 
+together with the GNN encoder.
+
+In order to estimate a reward function and train the policy, 
+the authors have used the reward loss function as introduced in 
+Equation \ref{eq:irlEpisodicImpSampledObj}, motivated by the 
+work of \cite{FinnGCL}, and the SAC algorithm \citep{SAC2} 
+as introduced in Section \ref{sec:SAC} respectively. Based on 
+the description of the algorithm, the authors of \cite{GraphOpt} 
+use a single GNN encoder trained jointly with the policy, but 
+whose embeddings serve as inputs to both the Q-functions in the 
+SAC algorithm, as well as the MLP-based reward function, $r_\psi(\cdot)$.
+
+The basic IRL Algorithm as in GraphOpt is shown in Algorithm \ref{alg:IRL}.
+
+\begin{algorithm}
+  \caption{Basic IRL algorithm}
+  \label{alg:IRL}
+  \begin{algorithmic}
+    \For{$t=1\ldots \text{num-irl-iters}$}
+      \State Update reward using Equation \ref{eq:irlEpisodicImpSampledObj}
+      \State Train policy using current reward and Algorithm \ref{alg:SAC}
+    \EndFor
+    \State Receive reward and policy.
+  \end{algorithmic}
+\end{algorithm}
+
+A pictorial illustration of the GraphOpt architecture can 
+be seen in Figure \ref{fig:GraphOpt}.
+
+\begin{figure}[H]
+  \includegraphics[scale=0.5]{GO_schematic.png}
+  \caption{\label{fig:GraphOpt} The schematic of the GraphOpt 
+  architecture based on the paper \cite{GraphOpt}.}
+\end{figure}
+
+
+Finally, it is worth noting that after initially trying with a 
+Gaussian policy, I would somtimes get exploding variances (high 
+entropy) and sometimes the experiment would crash after prolonged 
+training. To this end I employed the technique proposed 
+in the original SAC paper \citep{SAC2}, where they apply a 
+hyperbolic tangent, $tanh(\cdot)$ on the Gaussian action and 
+have the actions in the range $(-1, 1)$. To make this work 
+with GraphOpt I also used a final layer hyperbolic tangent 
+activation in the GNN so that my node embeddings will have 
+all components in $(-1, 1)$, i.e., $z_v\in (-1, 1)^{d}$ 
+$\forall v\in\mathcal{V}$. The motivation for this trick in the 
+original paper was due to working with the MuJoCo environment 
+\citep{MuJoCo}, which acepts action vectors with all components 
+in $(-1, 1)$. After applying this trick I also ended up getting 
+more sensible results and stable training.
+
+\section{Our Variant}
+
+
+
 \begin{itemize}
   \item Describe GraphOpt;
   \item Describe our spin on it:
