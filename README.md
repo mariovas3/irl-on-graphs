@@ -1,4 +1,62 @@
 # Inverse Reinforcement Learning of Graph Objective Functions:
+This work investigates the effect of per-decision importance 
+samples on the reward function-learning objective as compared 
+to the default per-episode importance samples. 
+As a baseline, this method was compared to GraphOpt 
+[GraphOpt](https://arxiv.org/abs/2007.03619).
+
+I also test 
+the addition of a separate GNN for the reward, rahter than using 
+only a single GNN, jointly trained with the policy, as done in 
+GraphOpt. The addition of the reward-specific GNN allows to do 
+full reward function transfer rather than only transferring the 
+MLP part of the reward. Based on experiments, it appears 
+this addition helps to learn new policy that constructs graphs
+more similar in topology to the target graph compared to our 
+implementation of GraphOpt.
+
+Disclaimer: at the time of this work I could not find any implementation of GraphOpt in any online publicly-available 
+repository related to the authors of
+[GraphOpt](https://arxiv.org/abs/2007.03619). To that end, I 
+implemented my own version based on the description in their paper.
+
+
+## IRL procedure is based on [Guided Cost Learning - C. Finn paper](https://arxiv.org/abs/1603.00448); and [GraphOpt](https://arxiv.org/abs/2007.03619);
+* The contribution is the addition of per-decision importance 
+samples rather than per-episode ones. 
+    * That way each reward 
+is weighted by the importance sample from the 
+path up to that point in 
+time, rather than the entire path.
+    * Intuitively, we may have a very likely path up to time $t$, 
+    but then a very unlikely continuation up to time $T$. If 
+    a per-episode importance weight is used, all rewards (even 
+    from the part where we had a likely path) get downgraded 
+    weights because of the unlikely trajectory sapmled after 
+    time $t$.
+    * On the other hand, per-decision samples, more accurately 
+    attribute weights based on the path up to observing the 
+    current reward.
+* The sampling of the paths is done from a policy trained with 
+the current configuration of the reward $r_\psi$, using the 
+Soft Actor-Critic algorithm (MaxEnt RL algo), [SAC-paper](https://arxiv.org/abs/1812.05905).
+
+## Model Architectures;
+
+### GraphOpt:
+![alt text](https://github.com/mariovas3/urban-nets-style-transfer/blob/master/ucl-pg-project-latex-template/GO_architecture.png)
+
+### Mine:
+![alt text](https://github.com/mariovas3/urban-nets-style-transfer/blob/master/ucl-pg-project-latex-template/my_model_architecture.png)
+
+## Side docs for mujoco - used to test policy learners:
+* `pip install -U portalocker`
+* `pip install -U lockfile`
+* `export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/<your_name>/.mujoco/mjpro150/bin  # put this in the ~/.bashrc and source the file;`
+* `sudo apt-get install libosmesa6-dev  # fix the missing GL/osmesa.h file error;`
+* `sudo apt-get install patchelf  # fix no such file patchelf error;`
+* Provided you have downloaded mjpro150 and have an access key the following should install `mujoco-py`:
+    `pip install -U 'mujoco-py<1.50.2,>=1.50.1'`
 
 ## Experiments recipes:
 ### Barabasi graphs:
@@ -19,32 +77,3 @@ any improvement when using UT trick.
 * After the relevant output from the above scripts was saved, 
 the results were analysed by the `experiments_analysis.ipynb` 
 notebook in the `notebooks` directory.
-
-## IRL procedure is based on [Guided Cost Learning - C. Finn paper](https://arxiv.org/abs/1603.00448);
-* The contribution is the addition of per-decision importance 
-samples rather than per-episode ones. 
-    * That way each reward 
-is weighted by the importance sample from the 
-path up to that point in 
-time, rather than the entire path.
-    * Intuitively, we may have a very likely path up to time $t$, 
-    but then a very unlikely continuation up to time $T$. If 
-    a per-episode importance weight is used, all rewards (even 
-    from the part where we had a likely path) get downgraded 
-    weights because of the unlikely trajectory sapmled after 
-    time $t$.
-    * On the other hand, per-decision samples, more accurately 
-    attribute weights based on the path up to observing the 
-    current reward.
-* The sampling of the paths is done from a policy trained with 
-the current configuration of the reward $r_\psi$, using the 
-Soft Actor-Critic algorithm (MaxEnt RL algo), [SAC-paper](https://arxiv.org/abs/1812.05905).
-
-## Side docs for mujoco - used to test policy learners:
-* `pip install -U portalocker`
-* `pip install -U lockfile`
-* `export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/<your_name>/.mujoco/mjpro150/bin  # put this in the ~/.bashrc and source the file;`
-* `sudo apt-get install libosmesa6-dev  # fix the missing GL/osmesa.h file error;`
-* `sudo apt-get install patchelf  # fix no such file patchelf error;`
-* Provided you have downloaded mjpro150 and have an access key the following should install `mujoco-py`:
-    `pip install -U 'mujoco-py<1.50.2,>=1.50.1'`

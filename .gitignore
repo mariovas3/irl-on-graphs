@@ -1,7 +1,5 @@
 test_output/*
 data/*
-*.png
 *.pkl
-*.png
 *env
 __pycache__
