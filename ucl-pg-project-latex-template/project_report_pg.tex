@@ -5,6 +5,9 @@
 
 % my extra package imports;
 \usepackage{caption}
+\usepackage{booktabs}
+\usepackage{array}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
 \usepackage{algpseudocode}
 \usepackage{algorithm}
 \usepackage{float}
@@ -63,7 +66,7 @@ $\Box$ \end{quotation}}
 % COVER PAGE;
 \title{
   { \includegraphics[scale=.5]{ucl_logo.png}}\\
-  {{\Huge Graph style transfer using Inverse Reinforcement Learning}}\\
+  {{\Huge Inverse Reinforcement Learning of Graph objective functions}}\\
   % {\large An application to subway networks}\\
 }
 
@@ -97,7 +100,6 @@ $\Box$ \end{quotation}}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % ABSTRACT;
 \begin{abstract}
-  \textbf{I THINK THIS IS DONE}
 
 
   In this report we investigate methods for learning a graph 
@@ -109,12 +111,11 @@ $\Box$ \end{quotation}}
   
   After learning a reward function, we use it as an 
   objective on a different graph and learn a 
-  new policy to perform style-transfer.  
-  The style-transfer constitutes transferring the topological 
-  propoerties of the source graph to the target graph, while 
-  preserving the vertex set attributes of the target graph.
+  new policy in efforts to construct graphs with similar properties.  
+  We further investigate this by examining the topological 
+  properties of the constructed graphs.
   
-  We investigate different ways to achieve this and 
+  We explore different ways to achieve this and 
   propose improvements over current methods with respect 
   to decreasing the variance during training of the IRL procedure. 
   These improvements are inspired by the 
@@ -122,8 +123,7 @@ $\Box$ \end{quotation}}
   in Reinforcement Learning, exploiting conditional independence 
   properties of rewards given states and actions.
   
-  In our experiments, we test two ways to achieve style-transfer 
-  on graphs. First, we try  
+  In our experiments, we try  
   directly deploying the 
   jointly learned (together with the reward)  
   policy from IRL based on the source graph, 
@@ -131,7 +131,9 @@ $\Box$ \end{quotation}}
   we train 
   a new policy on the target graph using the learned reward 
   function from IRL and then sample trajectories from it. 
-  In all experiments, we use GraphOpt as our baseline. 
+  In all experiments, we use GraphOpt as our baseline. This 
+  is a current algorithm that learns a reward function based 
+  on a single graph example.
 \end{abstract}
 \tableofcontents
 \setcounter{page}{1}
@@ -139,7 +141,6 @@ $\Box$ \end{quotation}}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - INTRODUCTION;
 \chapter{Introduction and Related Work}\label{chap:intro}
-\textbf{I THINK THIS IS DONE;}
 
 As more and more graph data become available, researchers in 
 areas such as biology \citep{VGAEDisease}, quantum chemistry 
@@ -209,10 +210,10 @@ still frame graph construction as a
 sequential decision making problem, 
 they use simplified molecular-input line-entry system (SMILES) to 
 encode molecules (the graph domain in their application). 
-This is in contrast to the works of \citet{Darvariu,GCNPolicyGraphGen,GraphOpt},
+This is in contrast to the works of \citet{GCNPolicyGraphGen,GraphOpt},
 where the graphs are the states and embeddings are obtained 
 from a GNN 
-encoder. The work of \citet{Darvariu,GCNPolicyGraphGen,GraphOpt} 
+encoder. The work of \citet{GCNPolicyGraphGen,GraphOpt} 
 is therefore, more relevant to our application. 
 
 In their application for generating edges in urban-networks, 
@@ -238,8 +239,8 @@ they argue, constrains the generated molecules to resemble the
 molecules observed in a given dataset without harming the 
 policy's ability to explore. This prior knowledge is 
 summarised in the loss function of a Discriminator network trained 
-jointly with a Generator on a given dataset. Similarly to \cite{Darvariu}, 
-graph embeddings are obtained using a GNN encoder taking a graph 
+jointly with a Generator on a given dataset. Graph embeddings 
+are obtained using a GNN encoder taking a graph 
 object as input. This is argued to additionally stabilise the 
 performance of the algorithm, as opposed to using 
 simplified molecular-input line-entry system (SMILES) as 
@@ -260,7 +261,8 @@ in both \cite{Darvariu} and \cite{GCNPolicyGraphGen}. While
 \cite{Darvariu} have only used hand-designed rewards, 
 \cite{GCNPolicyGraphGen} acknowledge the difficulty to 
 design a suitable reward signal for complex problems 
-such as molecular graph generation. To this end, \cite{GCNPolicyGraphGen} resort to learning part 
+such as molecular graph generation. To this end, 
+\cite{GCNPolicyGraphGen} resort to learning part 
 of their reward via GAN training given a dataset of molecular 
 graphs. The hope is that the Discriminator network should be 
 able to ``look'' for desirable properties in proposed-graph 
@@ -292,19 +294,22 @@ the reward function. This is done by exploiting the conditional
 independencies induced by the probabilistic graphical 
 model (pgm) of the MDP. Through our experiments, we demonstrate 
 that our method leads to 
-more stable (less variance) learning of the reward function.
+more stable (less variance) learning of the reward function 
+which can be used for learning to construct graphs with 
+similar topological properties as the source graph.
 
 \section*{Structure of the Report}\label{sec:structureOfReport}
 The remainder of the report is organised as follows:
-in Chapter \ref{chap:RL} we introduce the necessary background 
+in Chapter \ref{chap:Background} we introduce 
+the necessary background 
 of Reinforcement Learning to understand the policy learning 
-algorithm in the inner loop of the IRL algorithm. In Chapter 
-\ref{chap:IRL} we review the two main approaches to IRL, 
+algorithm in the inner loop of the IRL algorithm. In Section 
+\ref{sec:IRL} we review the two main approaches to IRL, 
 \citep{NgIRL,Ziebart2008}, and communicate key findings that 
-make the task of IRL difficult. In Chapter \ref{chap:GNNs} 
+make the task of IRL difficult. In Section \ref{sec:GNNs} 
 we provide a brief overview of current Graph Neural Network 
 architectures, since this is what we use as our graph encoder.
-In Chapter \ref{chap:contribution} we describe the architecture 
+In Chapter \ref{chap:methods} we describe the architecture 
 of the baseline model, GraphOpt \citep{GraphOpt}, and we 
 discuss our contribution. In Chapter \ref{chap:experiments} we 
 provide experimental results and a description of the testing 
@@ -1977,21 +1982,6 @@ with higher weight values.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW SECTION - GRAPH REPRESENTATIONS;
 \section{Graph representations}\label{sec:GNNs}
-\begin{itemize}
-  \item the current stuff might be a bit verbose and talks 
-  a bit too much about general DL; 
-  \item I am thinking, just start directly with \cite{ScarselliGNN};
-  \item Mention a few prominent works such as \cite{MPNNs,GCN};
-  \item Give the relevant equations for a general neural message 
-  passing procedure;
-  \item finish off with the GATv2 \citep{GATv2} architecture, 
-  since this is what I am using.
-  \item Give the equations for GATv2 and connect it to the 
-  attention mechanism \citep{transformers}.
-  \item State drawbacks and potential reasons, why it is difficult 
-    to work with graph topography rather than topology when using 
-    GNNs - perm inv agg over nodes loses info.
-\end{itemize}
 Currently, Deep Learning (DL) is among the most prominent paradigms 
 for representation learning. Although the advent of the 
 Multilayered Perceptron (MLP) dates back to 
@@ -2118,10 +2108,6 @@ Equation \ref{eq:LeakyReLU}.
   \text{LeakyReLU}(x)=\text{max}(0,x) + \eta\times \text{min}(0,x).
 \end{equation}
 In Equation \ref{eq:LeakyReLU}, $\eta$ is usually set to $0.01$.
-
-%%%%%%%%%%%%%%%%%%%%%%%%
-% NEW SECTION - RELATED WORK;
-\section{Related Work}\label{sec:RelatedWork}
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -2398,53 +2384,52 @@ or the $w_{m,t}$ weights is also an unnormalised density, so
 we aim to compare like-to-like objects if we also use an 
 unnormalised version of the denominator.
 
+Furthermore, since we (and GraphOpt) do not allow repeated edges 
+and self-loops as actions, 
+when doing the reparameterisation trick for computing 
+the policy loss in SAC, we also implemented the reparameterisation 
+trick to sample $k$ action proposals, and take the first among 
+them that does not result in a self-loop or a repeated edge. 
+In practice it is extremely rare, to go beyond the very first 
+proposal, however, it happens every several thousand updates 
+and having the validation flag set to True, seems to lead to 
+slightly better performance.
+
+Finally, it is not clear based on the description in the GraphOpt 
+paper how the actions are stored in the buffer. If they are stored 
+as vectors, then they should be stored together with the node 
+embeddings from the encoder, since actions operate in node embedding 
+space. If we do not store action vectors with the relevant 
+node embeddings, then we risk the situation where the same 
+action vectors lead to different node indexes being picked 
+depending on the current setting of the graph encoder. On the 
+other hand, if we do store node embeddings together with action 
+vectors, then it is not clear how the GNN's parameters get updated, 
+since the states will already be in embedding space when sampled 
+from the buffer and there is no need to do a forward 
+pass with the GNN. This is problematic since one usually needs 
+to make a forward pass, and then do 
+backpropagation \citep{backprop} to calculate gradients. In light 
+of these issues, as actions we store the node indexes to 
+be connected, while we store states as the Raw Graphs, 
+defined by the  
+vertex set of the source graph $\mathcal{V}$, and the relevant 
+edge set, $\mathcal{E}_t$ at time step $t$. This is an efficient 
+implementation due to the vertex set not always staying the same, 
+thereby being passed by reference and creating no extra memory 
+overhead, while the storage of variable edge indexes costs 
+memory of the order $\mathcal{O}(|\mathcal{D}|\times |\mathcal{E}|)$ 
+where $|\mathcal{D}|$ is the size of the replay buffer, and 
+$|\mathcal{E}|$ is the size of the edge index of the source graph 
+(edge sets are stored as PyTorch COO tensors, so no memory is 
+wasted for non-existing edges as would be the case with adjacency 
+matrices). 
+
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER - EXPERIMENTS;
 \chapter{Experiments}\label{chap:experiments}
 
-\begin{itemize}
-  \item TODO: MAKE THE TABLES FANCIER BY CAPTIONING;
-  \item TODO: THE PLOTS DISPLAYED BELOW ARE OVER SINGLE RUNS, 
-  MAKE THEM OVER MULTIPLE SEEDS AND MAKE THEM PRETIER;
-  \item TODO: ALSO WILL ADD PLOTS FOR REWARDS ALONG TRAJECTORIES;
-\end{itemize}
-
-In \ref{tab:tab1} we see five number summary of the pvalues 
-from a two sample Kolmogorov-Smirnov test over 10 seeds.
-The tests compare the distributions of the cluster coefficients 
-induced by the different policies. Higher is better since 
-less evidence the distributions are different.
-\begin{center}\label{tab:tab1}  
-  % \caption{Table summarising Kolmogorov-Smirnov test p values over 10 seeds.}
-  \begin{tabular}{|c|c|c|c|c|c|}
-    \hline
-    Groups & min & median & max & mean & stddev\\
-    irlpolicy clustcoefs vs source  & 0.00402 & 0.18364 & 0.96074 &  0.24467 & 0.27462\\
-    irlpolicy clustcoefs vs target  & 0.00203 & 0.19918 & 0.67856 & 0.23484 & 0.22424\\
-    newpolicy clustcoefs vs target & 8.9445e-06 & 0.44585 & 0.94538 & 0.45086 & 0.31906\\
-    \hline
-    % \caption{Table summarising Kolmogorov-Smirnov test p values over 10 seeds.}
-  \end{tabular}
-  
-\end{center}
-
-\begin{figure}
-  \includegraphics[scale=0.5]{metric-plots-seed-0-vanilla.png}
-  \caption{Training metrics of reward objective during training for 
-  per episode importance samples.}
-\end{figure}
-
-\begin{figure}
-  \includegraphics[scale=0.5]{metric-plots-seed-0-per-dec.png}
-  \caption{Training metrics of reward objective during training for 
-  per decision importance samples.}
-\end{figure}
-
-\begin{figure}[H]
-  \includegraphics[scale=0.5]{graph_stats_hist_kde_plots-per-dec.png}
-  \caption{Plot of distributions of topology statistics 
-  per decision importance samples.}
-\end{figure}
 
 % \begin{center}
 %   \begin{tabular}{|c|c|c|c|c|c|}
@@ -2463,11 +2448,40 @@ less evidence the distributions are different.
 %   \end{tabular}
 % \end{center}
 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%5
+% NEW SECTION;
 \section{Description of tests}
 \label{sec:test_description}
-The experimental suite consists of four tests.
+In this section we describe the experimental methodology. 
+The experimental suite consists of two tests. The 
+first one we refer to as the Reward Transfer Test (RTT), the second 
+one we refer to as the In Distribution Generation Test (IDGT). 
+% and the third one we call the Edge Prediction Test (EPT). 
+
+The first test is described in Subsection \ref{sec:RTT} and the 
+second test is described in Subsection \ref{sec:IDGT}. 
+% and the 
+% third one is described in Subsection \ref{sec:EPT}. 
+
+\subsection{Reward Transfer Test}
+\label{sec:RTT}
+The RTT is designed to check whether we can learn to construct 
+graphs similar to the target graph, by directly deploying the 
+irlpolicy obtained from Algorithm \ref{alg:IRL}, or by training 
+a new policy using the learned reward function from the IRL procedure.
+
+As a measure of similarity, we have used the two sample Kolmogorov-Smirnov 
+test \citep{KStest3} on topological statistics of generated graphs 
+versus the same from the ground truth target graph. The topological 
+statistics we use are the same as in \cite{GraphOpt}, these are 
+per-node triangle count, per-node clustering coefficient, 
+and per-node degree.
+
+A summary of this test is given in Algorithm \ref{tests:test_reward_transfer}.
+
 \begin{algorithm}
-  \caption{Reward function transfer vs direct policy deployment}
+  \caption{Reward Transfer Test}
   \label{tests:test_reward_transfer}
   \begin{algorithmic}
     \State $irlreward,\; irlpolicy \gets irlalgorithm(sourcegraph)$
@@ -2482,36 +2496,29 @@ The experimental suite consists of four tests.
     \State $return\; (irlstats,\; newpolicystats)$
   \end{algorithmic}
 \end{algorithm}
-In Algorithm \ref{tests:test_reward_transfer}, by ``stats'', it is meant 
-graph topology statistics such as triangles, clustering coefficients, 
-degrees and rewards along generated paths associated with the 
-relevant policy. The \verb|collect_stats| function deploys the relevant 
+
+As mentioned earlier, in 
+Algorithm \ref{tests:test_reward_transfer}, 
+by ``stats'', we mean triangle counts, clustering coefficients, 
+and degrees on the node level. 
+The \verb|collect_stats| function deploys the relevant 
 policy on the vertex set of the relevant graph (starting with an 
-empty edge set). The termination condition is when we have build the same 
+empty edge set). The termination condition is when we 
+have build the same 
 number of edges as the original graph (passed to the \verb|collect_paths|
 function) or when along the process of graph building we propose 
 too many repeated edges (edges we had added earlier) or 
 self-loops (connects a node to itself).
 
-After these numbers are saved, we calculate summary 
-statistics such as \verb|min|, \verb|median|, \verb|max|, 
-\verb|mean|, \verb|standard_deviation| and 
-then report the average and the standard deviations of the five number 
-summaries ($k$ total) over the $k$ runs. For example, for each of the 
-$k$ passes of the for loop of algorithm \ref{tests:test_reward_transfer} 
-we get the degrees of all nodes, then take the \verb|median| degree for 
-that pass and append it to the medians of the other passes. This way 
-we obtain the median degree for each of the $k$ passes. We then average 
-the $k$ numbers and calculate the standard deviation. The final reported 
-value will then be the average median degree over $k$ passes, together 
-with its standard deviation.
-
 Based on the raw graph topology statistics (e.g., we concatenate the 
 degrees of the nodes over the $k$ passes), we report the 
-p-values from a two-sample Kolmogorov-Smirnov (KS) \citep{KSTest} 
+p-values from a two-sample Kolmogorov-Smirnov (KS) 
+\citep{KStest3} 
 test against the 
-graph topology statistics of the true graphs (source or target graph). 
-This way we usually compare the distribution of a sample of $k\times |\mathcal{V}|$ 
+graph topology statistics of the true graph
+(the target graph). 
+This way we usually compare the distribution of a 
+sample of $k\times |\mathcal{V}|$ 
 numbers versus the distribution of $|\mathcal{V}|$ numbers (the latter being the 
 true graph statistics), where $|\mathcal{V}|$ denotes the number 
 of nodes/vertices in the relevant graph.
@@ -2530,8 +2537,10 @@ criterion to guide the
 newpolicy in constructing graphs with similar topology to that 
 of the target graph.
 
+\subsection{In Distribution Generation Test}\label{sec:IDGT}
+
 \begin{algorithm}
-  \caption{Learning the source graph distribution}
+  \caption{In Distribution Generation Test}
   \label{tests:test_learn_source_graph_dist}
   \begin{algorithmic}
     \State $irlreward,\; irlpolicy \gets irlalgorithm(sourcegraph)$
@@ -2545,7 +2554,8 @@ of the target graph.
 \end{algorithm}
 The second test we employ, is used to determine if the trained 
 irlpolicy can be used 
-to build graphs similar to the source graph (in terms of topology). 
+to build graphs similar to the source graph (based on
+the same topological properties used in the RTT). 
 The pseudocode for this test is provided in Algorithm 
 \ref{tests:test_learn_source_graph_dist}.
 As in the previous test, the \verb|collect_irlstats| 
@@ -2553,113 +2563,451 @@ function deploys
 the policy on the vertex set, having emptied the edge set.
 
 Similarly to Algorithm \ref{tests:test_reward_transfer}, ``stats'' 
-refers to the graph topology statistics described above. We again 
-calculate averages and standard deviations of the summary statistics 
-over the $k$ runs, as well as p-values from the KS test.
+refers to the graph topology statistics described above. Here we 
+also use the two sample Kolmogorov-Smirnov test to test for 
+the similarity of the distributions of the topological 
+properties.
 
-Since the irlpolicy was trained on the source graph during IRL, 
-we should expect it to be able to reconstruct graphs with similar 
-topological properties. We judge how well the irlpolicy constructs 
-graphs that are topologically similar to the source graph 
-based on the p-values 
-from two-sample KS tests.
 
-\begin{algorithm}
-  \caption{Held-out edges prediction}
-  \label{tests:test_edge_prediction}
-  \begin{algorithmic}
-    \State $train\_edges,\; val\_edges \gets split(sourcegraph,\; proportion)$
-    \State $irlreward,\; irlpolicy \gets irlalgorithm(sourcegraph)$
-    \State $mrrs,\; prop\_guessed \gets [],\;[]$
-    \For{$t=1\ldots k$}
-      \State $ranks,\; flag \gets [],\; True$
-      \State $guesses\_dict=\{e:\; 0\; for\; e\; in\; val\_edges\}$
-      \State $s \gets env.start\_from\_train\_edges()$
-      \While{episode not finished}
-        \State $ps \gets irlpolicy(s, k\_proposals)$
-        \State $action\gets ps[0]$
-        \State $position=\infty$
-        \For{$i,\; a\; in\; enumerate(ps,\; start=1)$}
-          \If{$a$ is repeated or is self loop}
-            \State continue
-          \EndIf
-          \If{$flag$}
-            \State{$action\gets a$}
-            \State{$flag\gets False$}
-          \EndIf
-          \If{$a\in val\_edges$}
-            \State $position=i$
-            \State $guesses\_dict[a] = 1$
-            \State $break$
-          \EndIf
-        \EndFor
-        \State{$ranks.append(1/position)$}
-        \State{$s\gets env(action)$}
-      \EndWhile
-      \State{$mrrs.append(mean(rank))$}
-      \State{$prop\_guessed.append(sum(guesses\_dict.values())/len(val\_edges))$}
-    \EndFor
-    \State{$return\; summary(mrrs),\; summary(prop\_guessed)$}
-  \end{algorithmic}
-\end{algorithm}
+% \begin{algorithm}
+%   \caption{Held-out edges prediction}
+%   \label{tests:test_edge_prediction}
+%   \begin{algorithmic}
+%     \State $train\_edges,\; val\_edges \gets split(sourcegraph,\; proportion)$
+%     \State $irlreward,\; irlpolicy \gets irlalgorithm(sourcegraph)$
+%     \State $mrrs,\; prop\_guessed \gets [],\;[]$
+%     \For{$t=1\ldots k$}
+%       \State $ranks,\; flag \gets [],\; True$
+%       \State $guesses\_dict=\{e:\; 0\; for\; e\; in\; val\_edges\}$
+%       \State $s \gets env.start\_from\_train\_edges()$
+%       \While{episode not finished}
+%         \State $ps \gets irlpolicy(s, k\_proposals)$
+%         \State $action\gets ps[0]$
+%         \State $position=\infty$
+%         \For{$i,\; a\; in\; enumerate(ps,\; start=1)$}
+%           \If{$a$ is repeated or is self loop}
+%             \State continue
+%           \EndIf
+%           \If{$flag$}
+%             \State{$action\gets a$}
+%             \State{$flag\gets False$}
+%           \EndIf
+%           \If{$a\in val\_edges$}
+%             \State $position=i$
+%             \State $guesses\_dict[a] = 1$
+%             \State $break$
+%           \EndIf
+%         \EndFor
+%         \State{$ranks.append(1/position)$}
+%         \State{$s\gets env(action)$}
+%       \EndWhile
+%       \State{$mrrs.append(mean(rank))$}
+%       \State{$prop\_guessed.append(sum(guesses\_dict.values())/len(val\_edges))$}
+%     \EndFor
+%     \State{$return\; summary(mrrs),\; summary(prop\_guessed)$}
+%   \end{algorithmic}
+% \end{algorithm}
 
-The third test evaluates the learned irlpolicy on a task it was not 
-explicitly trained on - missing edge prediction. We judge how good 
-the irlpolicy is at predicting the missing edges by reporting summary 
-statistics of Mean Reciprocal Ranks (MRR) and proportions of held-out 
-edges that were guessed during the course of graph construction.
-These summaries are done over $k$ runs 
-of graph constructions starting with the vertex set of the source 
-graph, and edge set initialised with the edges that were 
-available for training (treated as expert demos wrt IRL). 
+% The third test evaluates the learned irlpolicy on a task it was not 
+% explicitly trained on - missing edge prediction. We judge how good 
+% the irlpolicy is at predicting the missing edges by reporting summary 
+% statistics of Mean Reciprocal Ranks (MRR) and proportions of held-out 
+% edges that were guessed during the course of graph construction.
+% These summaries are done over $k$ runs 
+% of graph constructions starting with the vertex set of the source 
+% graph, and edge set initialised with the edges that were 
+% available for training (treated as expert demos wrt IRL). 
 
-The MRR tells us the ``preference'' 
-of the policy for the held-out edges. As can be seen in Algorithm 
-\ref{tests:test_edge_prediction}, each rank is in the range $[0, 1]$. 
-If a held-out edge is at the $n^{th}$ position in the list of proposals 
-$ps$, then its reciprocal rank for that iteration is $1/n$. Alternatively, 
-if none of the proposed actions in $ps$ are in the held-out edge set, 
-the reciprocal rank is $1/\infty\rightarrow 0$. This shows, that the 
-best possible MRR score is $1$, corresponding to a held-out edge 
-always being the first proposed action in the list of proposals $ps$.
+% The MRR tells us the ``preference'' 
+% of the policy for the held-out edges. As can be seen in Algorithm 
+% \ref{tests:test_edge_prediction}, each rank is in the range $[0, 1]$. 
+% If a held-out edge is at the $n^{th}$ position in the list of proposals 
+% $ps$, then its reciprocal rank for that iteration is $1/n$. Alternatively, 
+% if none of the proposed actions in $ps$ are in the held-out edge set, 
+% the reciprocal rank is $1/\infty\rightarrow 0$. This shows, that the 
+% best possible MRR score is $1$, corresponding to a held-out edge 
+% always being the first proposed action in the list of proposals $ps$.
 
-The proportion of guessed edges tells us what proportion of the 
-hel-out edges were proposed during the graph construction process. 
-The python dictionary implementation in Algorithm \ref{tests:test_edge_prediction} 
-prevents double-counting edges if they are proposed multiple times.
+% The proportion of guessed edges tells us what proportion of the 
+% hel-out edges were proposed during the graph construction process. 
+% The python dictionary implementation in Algorithm \ref{tests:test_edge_prediction} 
+% prevents double-counting edges if they are proposed multiple times.
 
-\begin{enumerate}
-  \item Experimental Recipe:
-  \item Run IRL training on a source graph. Receive trained policy 
-  and reward function.
-\end{enumerate}
-\begin{itemize}
-  \item T1 is about transferring learned reward on target graph;
-  also compares learned policy directly on target, compared to 
-  training new policy on target with frozen reward;
-  \item T2 is about MRR - based on top 25 proposal edges;;
-  \item T3 is about running learned policy on source graph and 
-  seeing if we get similar graphs;
-  \item I also get rewards along paths.
-  \begin{itemize}
-    \item Compare convergence rate of eval returns over seeds
-      and comment on speed;
-  \end{itemize}
-  \item BA40 to BA80 - 10 seeds
-  \begin{itemize}
-    \item GOptEpWeights, GOptPerDec, 
-      GOptRewEncEpWeights, GOptRewEncPerDec,
-    \item THIS IS NOT APPLICABLE TO BA GRAPHS - ONLY TRY IT ON GRAPHS 
-      WITH MEANINGFUL TOPOGRAPHY!!! - Then take better of EpWeights and PerDec and do 
-      GOptMultitaskBetterWeight and GOptRewEncMultitaskBetterWeight,
-    \item also run UT trick with the better weight setting;
-  \end{itemize}
-    
-  \item T1 and T3 run together - this is $10\times 8=80$ experiments;
-  \item T2 runs alone - this is $10\times 8=80$ experiments;
-  \item total is 160 experiments;
-  \item  Run best config on Urban nets 10 times;
-\end{itemize}
+\subsection{Experimental protocol}
+In this section we provide the configuration of the models 
+used for carrying out the experiments.
+
+In all experiments we use the Barabasi-Albert (BA) synthetic graph 
+generation algorithm \citep{BAGraphs} to generate our source 
+graph and our target graph. The source graph has $40$ nodes 
+while the target graph has $80$ nodes. Following the BA 
+algorithm, we choose to add $3$ edges as a new node is added to the 
+graph. We also initialise the node features, such that each node 
+has a feature vector of length 2, both entries sampled independently 
+from a uniform distribution, $U(0, 1)$.
+We run experiments \ref{tests:test_learn_source_graph_dist} 
+and \ref{tests:test_reward_transfer} as a single test script 
+since we can immediately deploy the irlpolicy $k$ times on 
+the source graph to see if we can generate similar graphs, 
+after the IRL procedure is done. Then, we use the learned reward 
+to train a new policy on the target graph and we deploy the it 
+and the irlpolicy $k$ times on the target graph's vertex set, 
+always starting with an empty edge set. This protocol is 
+done over a total of 16 different seeds.
+
+In our experiments we test our model, who has a dedicated 
+GNN for the reward function, versus the GraphOpt \citep{GraphOpt}
+model who has only a single GNN trained jointly with the policy. 
+We compare the models in two experimental settings 
+for calculating the reward function/IRL objective. The first 
+is when we use per-decision importance sampling as discussed in 
+Equation \ref{eq:perDecObj}, while the second is when using 
+per-episode importance sampling as in Equation \ref{eq:irlEpisodicImpSampledObj}.
+
+To sum up, we run GraphOpt and our model over $16$ seeds each, for 
+per-decision sampling, and then another $16$ seeds each for 
+per-episode importance sampling. 
+
+The results of the experiments are shown in Section \ref{sec:results}.
+
+We also performed a moderate hyperparameter sweep where we chose 
+all MLPs as shown in illustrations \ref{fig:GraphOpt} and 
+\ref{fig:OurModel}, to have two hidden layers with $256$ hidden units. 
+As activation function we chose $ReLU$, and we did layer normalisation 
+after each activation. For the GNN encoders we chose a GATv2 architecture 
+\citep{GATv2} with 3 layers having $64,64,32$ hidden units respectively 
+and we again used a $ReLU$ activation function after each GNN layer. 
+All learning rates except for the reward function were set to $0.001$, 
+while for the reward function we chose $0.003$. All experiments 
+were run for $50$ iterations for the IRL algorithm as given in 
+Algorithm \ref{alg:IRL}, where each policy update step in the 
+IRL algorithm was done for 1 epoch, 10 \verb|num_iters|, and 10 \verb|num_grad_steps| 
+based on the description of Algorithm \ref{alg:SAC}. As mentioned, 
+we also chose a TanhGaussian Policy as defined in \cite{SAC2}, and 
+we also used a replay buffer of size $100000$ slots.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%5
+% NEW SECTION;
+\section{Results}\label{sec:results}
+
+\subsection{Reward Transfer Test}
+
+In this section we compare the distributions of traingle 
+counts, clusting coefficients and node degrees of 
+constructed graphs to the ground truth 
+target graph distributions. The constructed graphs 
+are obtained in two ways. The first way is by 
+directly deploying the 
+learned irlpolicy, from the IRL procedure learned 
+using a different source graph,
+on the target graph. The second way is by learning a new policy 
+on the target using the learned reward from the IRL 
+procedure as an objective and then 
+sampling graphs from that policy. In all cases when ``deploying'' 
+the policy, we start from the vertex set of the target graph 
+and an empty edge set. The goal is to see if we can construct 
+graphs who have similar topological properties to the 
+observed target graph.
+
+We have run the experimental description in Algorithm 
+\ref{tests:test_reward_transfer} for 16 seeds, 
+and computed the p-values 
+of a two sample Kolmogorov-Smirnov \citep{KStest3} test 
+with null hypothesis that the distributions are the same.
+We provide results based on a $\%5$ significance 
+level. In Table \ref{tab:KS5pPerDec}, 
+we compare our variant with a separate GNN encoder for 
+the reward against GraphOpt, where we have used per-decision 
+importance samples for the reward objective as shown in Equation 
+\ref{eq:perDecObj}. In Table \ref{tab:KS5pVanilla}, 
+we compare the same two models when 
+trained with per-edpisode importance weights as seen in 
+Equation \ref{eq:irlEpisodicImpSampledObj}.
+
+
+\begin{table}[!h]
+  \begin{center}
+    \caption{\label{tab:KS5pPerDec} 
+    Results of a $\%5$-significance level 
+    Kolmogorov-Smirnov 
+    test for similarity of distributions. 
+    The ground truth distributions are the ones 
+    from the target graph - 80 node Barabasi-Albert graph 
+    with $M=3$ edges built when a node is added. The 
+    reward was trained with per-decision importance samples.}
+    \begin{tabular}{|c|c|c|c|}
+      \hline
+      \textbf{Groups} & \textbf{count rejected} & \textbf{total number of tests} & \textbf{reject proportion}\\
+      \hline
+      Our newpolicy degrees & 3 & 16 & $\%\textbf{18.75}$\\
+      GraphOpt newpolicy degrees & 8 & 16 & $\%50$\\
+      \hline
+      Our newpolicy triangles & 4 & 16 & $\%\textbf{25}$\\
+      GraphOpt newpolicy triangles & 6 & 16 & $\%37.5$\\
+      \hline
+      Our newpolicy clustering coefficients & 13 & 16 & $\%\textbf{81.25}$\\
+      GraphOpt newpolicy clustering coefficients & 15 & 16 & $\%93.75$\\
+      \hline
+      Our irlpolicy degrees & 5 & 16 & $\%31.25$\\
+      GraphOpt irlpolicy degrees & 4 & 16 & $\%\textbf{25}$\\
+      \hline
+      Our irlpolicy triangles & 4 & 16 & $\%25$\\
+      GraphOpt irlpolicy triangles & 3 & 16 & $\%\textbf{18.75}$\\
+      \hline
+      Our irlpolicy clustering coefficients & 13 & 16 & $\%81.25$\\
+      GraphOpt irlpolicy clustering coefficients & 12 & 16 & $\%\textbf{75}$\\
+      \hline
+    \end{tabular}
+  \end{center}
+\end{table}
+
+\begin{table}[!h]
+  \begin{center}
+    \caption{\label{tab:KS5pVanilla} 
+    Results of a $\%5$-significance level 
+    Kolmogorov-Smirnov 
+    test for similarity of distributions. 
+    The ground truth distributions are the ones 
+    from the target graph - 80 node Barabasi-Albert graph 
+    with $M=3$ edges built when a node is added. The reward 
+    function was trained with per-episode importance samples.}
+    \begin{tabular}{|c|c|c|c|}
+      \hline
+      \textbf{Groups} & \textbf{count rejected} & \textbf{total number of tests} & \textbf{reject proportion}\\
+      \hline
+      Our newpolicy degrees & 4 & 16 & $\%\textbf{25}$\\
+      GraphOpt newpolicy degrees & 6 & 16 & $\%37.5$\\
+      \hline
+      Our newpolicy triangles & 7 & 16 & $\%43.75$\\
+      GraphOpt newpolicy triangles & 6 & 16 & $\%\textbf{37.5}$\\
+      \hline
+      Our newpolicy clustering coefficients & 14 & 16 & $\%87.5$\\
+      GraphOpt newpolicy clustering coefficients & 13 & 16 & $\%\textbf{81.25}$\\
+      \hline
+      Our irlpolicy degrees & 5 & 16 & $\%\textbf{31.25}$\\
+      GraphOpt irlpolicy degrees & 7 & 16 & $\%43.75$\\
+      \hline
+      Our irlpolicy triangles & 4 & 16 & $\%\textbf{25}$\\
+      GraphOpt irlpolicy triangles & 5 & 16 & $\%31.25$\\
+      \hline
+      Our irlpolicy clustering coefficients & 13 & 16 & $\%\textbf{81.25}$\\
+      GraphOpt irlpolicy clustering coefficients & 14 & 16 & $\%87.5$\\
+      \hline
+    \end{tabular}
+  \end{center}
+\end{table}
+
+Based on the results in tables \ref{tab:KS5pPerDec} and \ref{tab:KS5pVanilla} 
+it appears the degree distributions were easiest to learn 
+across experimental setups. In the Barabasi-Albert graph synthesis
+\citep{BAGraphs}, 
+the node degrees follow a power law, meaning the distribution 
+is positively skewed, making higher node degrees less likely. 
+This unimodal 
+structure should be easy to learn as demonstrated in the experiments.
+
+On the other hand, 
+it appears the clustering coefficient distributions were the most 
+difficult to reproduce in all experimental setups where we reject 
+the null at least three quarters of the time across the 16 seeds 
+in both experimental setups.
+
+Comparing the irlpolicy deployment between the per-decision 
+weights and the per-episode weights setups, we broadly see 
+a drop in performance for both models, however, GraphOpt 
+appears to be much more sensitive then our model. For GraphOpt,
+the 
+number of rejections for the degree distribution increased 
+from $\%25$ to $\%43.75$ when switching to per-episode 
+importance weights for the reward function objective.
+
+Another conclusion based on Table \ref{tab:KS5pPerDec}, is that 
+our model is able to learn a new policy on the target graph that 
+produces graphs more similar to the target graph, as compared to 
+GraphOpt when the per-decision importance samples are used.
+
+\begin{table}[!h]
+  \begin{center}
+    \caption{\label{tab:KS5pPerDec3} 
+    Results of a $\%5$-significance level 
+    Kolmogorov-Smirnov 
+    test for similarity of distributions. 
+    The ground truth distributions are the ones 
+    from the source graph - 40 node Barabasi-Albert graph 
+    with $M=3$ edges built when a node is added. The irlpolicy 
+    was deployed on the target graph. The reward 
+    function was trained with per-decision importance samples.}
+    \begin{tabular}{|c|c|c|c|}
+      \hline
+      \textbf{Groups} & \textbf{count rejected} & \textbf{total number of tests} & \textbf{reject proportion}\\
+      \hline
+      Our irlpolicy degrees & 1 & 16 & $\%6.25$\\
+      GraphOpt irlpolicy degrees & 0 & 16 & $\%\textbf{0}$\\
+      \hline
+      Our irlpolicy triangles & 4 & 16 & $\%\textbf{25}$\\
+      GraphOpt irlpolicy triangles & 6 & 16 & $\%37.5$\\
+      \hline
+      Our irlpolicy clustering coefficients & 13 & 16 & $\%81.25$\\
+      GraphOpt irlpolicy clustering coefficients & 12 & 16 & $\%\textbf{75}$\\
+      \hline
+    \end{tabular}
+  \end{center}
+\end{table}
+
+\begin{table}[!h]
+  \begin{center}
+    \caption{\label{tab:KS5pVanilla3} 
+    Results of a $\%5$-significance level 
+    Kolmogorov-Smirnov 
+    test for similarity of distributions. 
+    The ground truth distributions are the ones 
+    from the source graph - 40 node Barabasi-Albert graph 
+    with $M=3$ edges built when a node is added. The irlpolicy 
+    was deployed on the target graph. The reward 
+    function was trained with per-episode importance samples.}
+    \begin{tabular}{|c|c|c|c|}
+      \hline
+      \textbf{Groups} & \textbf{count rejected} & \textbf{total number of tests} & \textbf{reject proportion}\\
+      \hline
+      Our irlpolicy degrees & 0 & 16 & $\%0$\\
+      GraphOpt irlpolicy degrees & 0 & 16 & $\%0$\\
+      \hline
+      Our irlpolicy triangles & 7 & 16 & $\%43.75$\\
+      GraphOpt irlpolicy triangles & 7 & 16 & $\%43.75$\\
+      \hline
+      Our irlpolicy clustering coefficients & 14 & 16 & $\%87.5$\\
+      GraphOpt irlpolicy clustering coefficients & 13 & 16 & $\%\textbf{81.25}$\\
+      \hline
+    \end{tabular}
+  \end{center}
+\end{table}
+
+For completion, we also compare the topological properties 
+of the graphs constructed by the irlpolicy when deployed on 
+the target graph, to the topological properties of the source graph. 
+Intuitively, since the irlpolicy was trained during the IRL 
+procedure on the source graph, it should have learned how to 
+construct similar graphs (in topological properties) to the source 
+graph. So we wish to see whether the constructions based on a 
+new vertex set resemble the topology of the source graph.
+
+As can be seen in Tables \ref{tab:KS5pPerDec3} and \ref{tab:KS5pVanilla3}, 
+in both settings of importance sampling, both models GraphOpt and 
+our model did well in constructing graphs with degree distributions 
+very similar to the source graph. This implies some degree of 
+topological property transfer across graphs, similar to the 
+Neural Style Transfer in computer vision \citep{NSTGatys}.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%
+% NEW SUBSECTION;
+\subsection{In Distribution Generation Test}
+In this test we compare the graph constructions of the irlpolicy 
+when deployed on the source graph's vertex set with an empty 
+edge set, to the topological properties of the source graph.
+
+As we can see from the proportion of rejected null hypothesis in 
+Tables \ref{tab:KS5pPerDec2} and \ref{tab:KS5pVanilla2}, 
+both models were able to learn how to generate graphs with similar 
+topology to the source graph. It looks, however, that the models 
+performed better in the per-decision sampling mode in Table 
+\ref{tab:KS5pPerDec2} as compared to the per-episode mode in 
+Table \ref{tab:KS5pVanilla2}. This is based on the 
+great increase in rejected null hypotheses for the clustering 
+coefficient distributions when we use the per-episode mode.
+
+\begin{table}[!h]
+  \begin{center}
+    \caption{\label{tab:KS5pPerDec2} 
+    Results of a $\%5$-significance level 
+    Kolmogorov-Smirnov 
+    test for similarity of distributions. 
+    The ground truth distributions are the ones 
+    from the source graph - 40 node Barabasi-Albert graph 
+    with $M=3$ edges built when a node is added. The reward 
+    function was trained with per-decision importance samples.}
+    \begin{tabular}{|c|c|c|c|}
+      \hline
+      \textbf{Groups} & \textbf{count rejected} & \textbf{total number of tests} & \textbf{reject proportion}\\
+      \hline
+      Our irlpolicy degrees & 0 & 16 & $\%0$\\
+      GraphOpt irlpolicy degrees & 0 & 16 & $\%0$\\
+      \hline
+      Our irlpolicy triangles & 2 & 16 & $\%12.5$\\
+      GraphOpt irlpolicy triangles & 0 & 16 & $\%\textbf{0}$\\
+      \hline
+      Our irlpolicy clustering coefficients & 4 & 16 & $\%25$\\
+      GraphOpt irlpolicy clustering coefficients & 2 & 16 & $\%\textbf{12.5}$\\
+      \hline
+    \end{tabular}
+  \end{center}
+\end{table}
+
+\begin{table}[!h]
+  \begin{center}
+    \caption{\label{tab:KS5pVanilla2} 
+    Results of a $\%5$-significance level 
+    Kolmogorov-Smirnov 
+    test for similarity of distributions. 
+    The ground truth distributions are the ones 
+    from the source graph - 40 node Barabasi-Albert graph 
+    with $M=3$ edges built when a node is added. The reward 
+    function was trained with per-episode importance samples.}
+    \begin{tabular}{|c|c|c|c|}
+      \hline
+      \textbf{Groups} & \textbf{count rejected} & \textbf{total number of tests} & \textbf{reject proportion}\\
+      \hline
+      Our irlpolicy degrees & 0 & 16 & $\%0$\\
+      GraphOpt irlpolicy degrees & 0 & 16 & $\%0$\\
+      \hline
+      Our irlpolicy triangles & 0 & 16 & $\%\textbf{0}$\\
+      GraphOpt irlpolicy triangles & 1 & 16 & $\%6.25$\\
+      \hline
+      Our irlpolicy clustering coefficients & 7 & 16 & $\%43.75$\\
+      GraphOpt irlpolicy clustering coefficients & 4 & 16 & $\%\textbf{25}$\\
+      \hline
+    \end{tabular}
+  \end{center}
+\end{table}
+
+% \begin{table}[htbp]
+%   \caption{Table summarising the difference in distributions 
+%   among triangle counts, clustering coefficients and node 
+%   degrees. The ``difference'' is measured by applying a two 
+%   sample Kolmogorov-Smirnov test. The significance level is $\%5$.}
+%   \centering
+%   \begin{tabular}{@{}p{0.12\textwidth}*{4}{L{\dimexpr0.22\textwidth-2\tabcolsep\relax}}@{}}
+%     \toprule
+%     & \multicolumn{2}{c}{BCom} &
+%     \multicolumn{2}{c}{B.Bus.Sci} \\
+%     \cmidrule(r{4pt}){2-3} \cmidrule(l){4-5}
+%     & Number of bob required to pass & Cumulative Total of Courses & Number of courses &         Cumulative Total of Courses\\
+%     \midrule
+%     First year & 4 & 8 & 4 & 18 \\
+%     \bottomrule
+%   \end{tabular}
+%   \label{table:mr}
+% \end{table}
+
+% \section{Results}
+% \begin{table}[htbp]
+%   \caption{Table summarising the difference in distributions 
+%   among triangle counts, clustering coefficients and node 
+%   degrees. The ``difference'' is measured by applying a two 
+%   sample Kolmogorov-Smirnov test. The significance level is $\%5$.}
+%   \centering
+%   \begin{tabular}{@{}p{0.12\textwidth}*{4}{L{\dimexpr0.22\textwidth-2\tabcolsep\relax}}@{}}
+%     \toprule
+%     & \multicolumn{2}{c}{BCom} &
+%     \multicolumn{2}{c}{B.Bus.Sci} \\
+%     \cmidrule(r{4pt}){2-3} \cmidrule(l){4-5}
+%     & bobec & Number of bob required to pass & Cumulative Total of Courses & Number of courses &         Cumulative Total of Courses\\
+%     \midrule
+%     First year & 4 & 8 & 4 & 18 \\
+%     \bottomrule
+%   \end{tabular}
+%   \label{table:mr}
+% \end{table}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % NEW CHAPTER
@@ -2667,15 +3015,13 @@ prevents double-counting edges if they are proposed multiple times.
 This work builds on prior research in inverse reinforcement learning 
 for graph domains. Our contributions are, firstly, the addition of the 
 per-decision importance sampling for the IRL reward objective, 
-secondly, the addition of a graph encoder to the reward function, 
-and finally, an empirical comparison of applying the Unscented 
-Transform \citep{JulierUT} versus the reparameterisation trick 
-for approximating expectations.
+and 
+secondly, the addition of a graph encoder to the reward function.
 
 We have empirically shown that the per-decision importance 
 sampling increases
 the stability of the algorithm over multiple seeds as seen by 
-the plots of the returns during training.
+the the results in the Tables in Section \ref{sec:results}.
 
 Adding a graph encoder as part of the reward function, seems to 
 have helped learn appropriate embeddings, which were useful for 
@@ -2691,36 +3037,42 @@ it actually is by providing an ``adversarial'' embedding that is
 mapped to a high reward from the reward MLP. Providing the reward 
 with its own graph encoder, helped avoid such situations.
 
-Finally, we showed that the UT trick also leads to more stable 
-training of the algorithm as seen by the plots of the losses 
-and the returns recorded during evaluation.
-
 Despite the proposed improvements, it is still unclear what constitutes 
 a good strategy for generating expert samples for the IRL objective. 
-Merely giving a random permutation of the edge set removes the possible 
+Merely giving a random permutation of the edge set removes 
+the possible 
 temporal component in building the graph. In many cases, such as 
 road-network planning, previously built connections can actually 
 be the main reason for new road segments. 
 
 As a simple illustration 
-of this idea, the reader is directed to Figure \ref{fig:bad_rand_perm}.
-In contrast to most IRL scenarios where new demonstrations are generated, 
-we only work with a single demonstration, which we assume the temporal 
+of this idea, the reader is directed to 
+Figure \ref{fig:bad_rand_perm}.
+In contrast to most IRL scenarios where new demonstrations 
+are generated, 
+we only work with a single demonstration, for which we assume 
+the temporal 
 component has no effect, allowing us to treat any permutation of the 
 edge set as a separate expert trajectory. As seen in the figure, this 
 could lead to very different demonstrations from the optimal control 
 demonstration and may result in learning poor policies.
 
-\begin{itemize}
-  \item MORE FURTHER WORK:
-  \item whether IRL reward can be used as a means of performing 
-  hyp. tests for similarity of objects; similar to 
-  lik-ration tests;
-  \item Interesting to see applications where the 
-  expert is actually accessible and we can generate expert traj like \citep{FinnGCL} 
-  and see how this compares to the current method;
-  \item Explore ways for learning to transfer topography, currently this might be a problem of the lost info when aggregating node features from the GNN;
-\end{itemize}
+\section{Further Work}
+As directions for further we suggest 
+exploring whether the IRL reward can be used as a means of performing 
+hypothesis tests for similarity of objects, similarly to 
+likelihood ratio tests. Afterall, in this work the 
+reward is used for formulating the likelihood of trajectories, 
+\citep{Ziebart2008}.
+
+Another interesting venue to explore is whether 
+we can proposed Graph encoders that are able to extract 
+topographical information from the input graph. Currently, 
+due to the node-embedding collapsing in order to achieve 
+a single vector embedding of an entire graph, we posit 
+a significant amount of information is lost, preventing the 
+policy to pick up on topographical information.
+
 
 \begin{figure}[H]
   \centering
@@ -2738,6 +3090,16 @@ demonstration and may result in learning poor policies.
   the optimal control path.}
 \end{figure}
 
+\section{Acknowledgements}
+
+Finally, we wish to thank the contributors to 
+the online repository, \verb|https://github.com/rail-berkeley/rlkit| 
+for providing code for the implementation of the SAC algorithm. 
+Our implementation and code design was heavily inspired by the aforementioned
+repository. We also wish to thank the contributors to 
+\cite{PyTorch}, for maintaing a high performance, open source 
+automatic differentiation package, which we used in the 
+implementation of our algorithms.
 
 % \chapter{title of first chapter}
 % This is just a bare minimum to get started.  There is unlimited guidance on using latex, e.g. {\tt https://en.wikibooks.org/wiki/LaTeX}.   You are still responsible to check the detailed requirements of a project, including formatting instructions, see \\
