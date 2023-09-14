@@ -1,4 +1,39 @@
-# Urban Nets Style Transfer
+# Inverse Reinforcement Learning of Graph Objective Functions:
+
+## Experiments recipes:
+### Barabasi graphs:
+* GraphOpt with per-decision imporance samples:
+`python tests/test_irl_ba20.py net_hiddens=256,256 encoder_hiddens=64,64 embed_dim=32 max_size=100000 per_decision_imp_sample=1 quad_reward_penalty_coef=0.1 with_mlp_batch_norm=0 with_mlp_layer_norm=1 do_graphopt=1 no_q_encoder=1 with_mono=0 with_lcr=0 log_sigma_min=-20 log_sigma_max=2 reward_lr=3e-3 do_dfs_expert_paths=0 num_iters=10 num_grad_steps=10 ortho_init=0 unnorm_policy=1 use_valid_samples=1 seed=0`
+* GraphOpt using per-episode importance samples:
+`python tests/test_irl_ba20.py net_hiddens=256,256 encoder_hiddens=64,64 embed_dim=32 max_size=100000 per_decision_imp_sample=0 quad_reward_penalty_coef=0.1 with_mlp_batch_norm=0 with_mlp_layer_norm=1 do_graphopt=1 no_q_encoder=1 with_mono=0 with_lcr=0 log_sigma_min=-20 log_sigma_max=2 reward_lr=3e-3 do_dfs_expert_paths=0 num_iters=10 num_grad_steps=10 ortho_init=0 unnorm_policy=1 use_valid_samples=1 seed=0`
+* Sep reward encoder using per-decision importance samples:
+`python tests/test_irl_ba20.py net_hiddens=256,256 encoder_hiddens=64,64 embed_dim=32 max_size=100000 per_decision_imp_sample=1 quad_reward_penalty_coef=0.1 with_mlp_batch_norm=0 with_mlp_layer_norm=1 do_graphopt=0 no_q_encoder=1 with_mono=0 with_lcr=0 log_sigma_min=-20 log_sigma_max=2 reward_lr=3e-3 do_dfs_expert_paths=0 num_iters=10 num_grad_steps=10 ortho_init=0 unnorm_policy=1 use_valid_samples=1 seed=0`
+* Sep reward encoder using per-episode importance samples:
+`python tests/test_irl_ba20.py net_hiddens=256,256 encoder_hiddens=64,64 embed_dim=32 max_size=100000 per_decision_imp_sample=0 quad_reward_penalty_coef=0.1 with_mlp_batch_norm=0 with_mlp_layer_norm=1 do_graphopt=0 no_q_encoder=1 with_mono=0 with_lcr=0 log_sigma_min=-20 log_sigma_max=2 reward_lr=3e-3 do_dfs_expert_paths=0 num_iters=10 num_grad_steps=10 ortho_init=0 unnorm_policy=1 use_valid_samples=1 seed=0`
+* For using the Unscented Transform trick, add the `UT_trick=1` flag; 
+the default is `UT_trick=0` which falls back to reparameterisation 
+trick for estimating expectations. In practice, didn't see 
+any improvement when using UT trick.
+
+## IRL procedure is based on [Guided Cost Learning - C. Finn paper](https://arxiv.org/abs/1603.00448);
+* The contribution is the addition of per-decision importance 
+samples rather than per-episode ones. 
+    * That way each reward 
+is weighted by the importance sample from the 
+path up to that point in 
+time, rather than the entire path.
+    * Intuitively, we may have a very likely path up to time $t$, 
+    but then a very unlikely continuation up to time $T$. If 
+    a per-episode importance weight is used, all rewards (even 
+    from the part where we had a likely path) get downgraded 
+    weights because of the unlikely trajectory sapmled after 
+    time $t$.
+    * On the other hand, per-decision samples, more accurately 
+    attribute weights based on the path up to observing the 
+    current reward.
+* The sampling of the paths is done from a policy trained with 
+the current configuration of the reward $r_\psi$, using the 
+Soft Actor-Critic algorithm (MaxEnt RL algo), [SAC-paper](https://arxiv.org/abs/1812.05905).
 
 ## Side docs for mujoco - used to test policy learners:
 * `pip install -U portalocker`
@@ -8,101 +43,3 @@
 * `sudo apt-get install patchelf  # fix no such file patchelf error;`
 * Provided you have downloaded mjpro150 and have an access key the following should install `mujoco-py`:
     `pip install -U 'mujoco-py<1.50.2,>=1.50.1'`
-
-## Policy learners:
-### Soft Actor-Critic:
-* [SAC-paper](https://arxiv.org/abs/1812.05905).
-* I have been testing this on the MuJoCo envs - primarily `Hopper-v2` and `Ant-v2`. I have found that SAC benefits a lot from UT when the action space is large (the case for Ant - 8 dim action space, 27 dim obs space). There is little difference in the setting with small action space (action dim is 3 for Hopper) relative to the reparam trick as given in the paper by the authors.
-* UT might prove helpful for eval of expectations in high dim action spaces. In the case of diag Gauss policies, examples of eig vecs of the cov matrix are axis-aligned unit vectors, with eig vals - the componentwise variances in the Gauss vector. This makes it convenient to get UT input by adding and subtracting axis-aligned unit vectors scaled by the relevant standard deviations (sqrt of eig vals) from the mean vector - giving 2D+1 inputs, where D is the length of the Gauss vector (usually the action dim).
-* Tests:
-    * Connected graph in least steps from empty edge list based on [this](https://github.com/mariovas3/urban-nets-style-transfer/blob/master/tests/test_single_component_graph_sac.py) test script:
-        * [SingleComponentTest](https://github.com/mariovas3/urban-nets-style-transfer/tree/master/tests/single-component-10-nodes.png).
-        * [SingleComponentMetrics](https://github.com/mariovas3/urban-nets-style-transfer/tree/master/tests/single-component-10-nodes-metrics.png)
-
-## Reward func learning - IRL:
-### Guided Cost Learning - C. Finn:
-* [Guided Cost Learning - C. Finn paper](https://arxiv.org/abs/1603.00448).
-* Instead of the policy learner in the original paper, I will use some variant of SAC described in the Policy learners section.
-* The gist of this paper is to do max likelihood on the parameters of the deep reward func, based on the HMM-style soft optimal trajectory model.
-* The reward objective is:
-    * $J:=\log p(\tau_{1:N}|O_{1:N})$.
-    * $J=\frac{1}{N}\sum_{n=1}^N\log p(\tau_n)\exp r_{\psi}(\tau_n) - \log Z(\psi)$.
-    * $J = \frac{1}{N}\sum_{n=1}^{N} \log p(\tau_n) + r_{\psi}(\tau_n) - \log Z(\psi)$.
-    * $\nabla_{\psi}J=\frac{1}{N}\sum_{n=1}^N\nabla_{\psi}r_{\psi}(\tau_n) - \nabla_{\psi}\log Z(\psi)$.
-    * $\nabla_{\psi}J=\frac{1}{N}\sum_{n=1}^N\nabla_{\psi}r_{\psi}(\tau_n) - \mathbb{E}[\nabla_{\psi}r_{\psi}(\tau)| \tau\sim p(\tau|\pi^{r_{\psi}})]$.
-* Setting the above grad to $0$ leads to expected reward grads matching. If the reward func is dot product of features and $\psi$ we get expected feature matching and the interpretation is the same as the expected suff stat matching from ExpFam dist of soft opt trajectories.
-* The tough part about the above is that after each update of $\psi$ one needs to re-fit the policy to the new reward - that's expensive.
-* Instead of this, the GCL paper proposes only few grad steps for the policy and then use it to sample a trajectory which will be importance weighted to get unbiased estimate of the expectation under the true $\pi^{r_{\psi}}$.
-* The unnormalised importance weights are of the form:
-    * $w_j:=\frac{p(\tau_j)\exp r_{\psi}(\tau_j)}{p(\tau_j)|\pi^{curr}}$.
-    * $w_j:=\frac{p(s_1)\prod_{t=1}^{T_j}p(a_t|s_t)p(s_{t+1}|s_t, a_t)\exp r_{\psi}(s_t, a_t)}{p(s_1)\prod_{t=1}^{T_j}\pi^{curr}(a_t|s_t)p(s_{t+1}|s_t, a_t)}$.
-    * $w_j:=\frac{\prod_{t=1}^{T_j}p(a_t|s_t)\exp r_{\psi}(s_t, a_t)}{\prod_{t=1}^{T_j}\pi^{curr}(a_t|s_t)}$.
-* In the above the $p(a_t|s_t)$ term is the "prior" policy and can be absorbed in the reward or can be set to uniform, indep of $s_t$ and is therefore a constant that will cancel out when we divide by the sum of $w_j$.
-* We divide by the sum of the $w_j$ since the numerator is unnormalised (the denominator is normalised).
-* The importance weighted gradient of $J$ is therefore:
-    * $\nabla_{\psi}J=\frac{1}{N}\sum_{n=1}^N\nabla_{\psi}r_{\psi}(\tau_n) -\frac{1}{\sum_m^M w_m}\sum_{m=1}^{M}w_m\nabla_{\psi}r_{\psi}(\tau_m)$.
-    * Where in the above we sample $M$ trajectories from the current policy $\pi^{curr}$ that is not necessarily trained to convergence on $r_{\psi}$.
-    * I think it might be beneficial to use per-decision importance weights to decrease the variance. This is possible since the rewards don't depend on the future actions. This will be a bit more expensive to implement though as I may need to store rewards and weights along the sampled episodes.
-    * In the future, I may try implementing a control-variate approach or an adaptive bootstrap approach to further try reduce variance. It would be interesting to see how these approaches will compare.
-
-## Eval suite so far:
-* 1. Is implemented for BA20N3E as source and BA50N3E as target. It is also implemented for London tube as source and Paris tube as target.
-### Given irl-policy and irl-objective from IRL phase:
-1. Topology comparison after learning behaviours based on irl-objective:
-    * The goal is to observe graph properties of constructed graphs, 
-    starting from target vertex set and empty edge index, that are similar to the graph properties of the source graph. In GraphOpt they also claim the reward should transfer over all graphs from the same domain (e.g., citation), which is not clear why that should be the case. Nevertheless, their tests are oblivious to their claims I have implemented them.
-    * For k trials Do:
-        * Deploy irl-policy on target graph starting with 0 edges and record the new graph.
-            * Report min, median, max, mean and std of triangle count, degree and cluster coef
-        * Learn a new policy on target graph using irl-objective and then construct a full graph starting from node set of target graph with empty edge set.
-            * Report min, median, max, mean and std of triangle count, degree and cluster coef
-    * Report the mean and std of the 5 number stats computed over the k runs (e.g. for min degrees, compute avg minimum over the k runs and std of minima over the k runs respectively).
-    * Plot histograms and GaussKDE of triangles, degrees and clust coefs, comparing the reconstruction quality of irl-policy, policies learned from irl-objective, the quantities from the target graph itself, and the quantities for the source graph, which we used for the IRL phase.
-2. Missing link prediction:
-    * This is typically done with supervised learning with typical train/test splits. Train on subset of edges and test on disjoint subset of edges.
-3. Deploy irl-policy on training nodes and empty edge-sets and see if the constructed graphs resemble the structure of the source graph. Then you might claim you found a generative mechanism for graphs that resemble the structure of the source graph.
-    * A baseline for this might be some of the probabilistic models on graphs out there that aim to learn to generate graphs from some distribution (think NetGan and the Deepmind graph generation stuff).
-
-
-## Note:
-* I think the GraphOpt people are doing something different than style transfer via IRL.
-
-* GraphOpt deffinitely makes a strong and, IMO, unreasonable claim that the irl-policy on Cora does poor construction of Citeseer. They don't have grounds to claim this, since they had to change their graph encoder when moving to Citeseer, to account for the difference in input node feature dimensionality. Since in their implementation, the policy and the encoder are trained jointly, it is no surprise that the new encoder, trained with the new policy, is not compatible with the old policy in producing a good Citeseer reconstruction.
-    * Here I should claim, that my approach with keeping the encoders together with MLPs at all times gives us fairer comparisons (this obviously only works when source and target have same input node feature dims, to be compatible with the graph encoder). In that case I think I actually get to the Chelsea Finn claim that the irl-policy seems to do better than learning a new policy based on the irl-objective from scratch on the target task.
-* Their first eval suite, aims to see if the irl-objective serves as an objective for all graphs in a given domain - in plain words "can we find an objective that is explains the construction/generation of all graphs in a particular domain (e.g., citation graphs)". In their example, the source graph is Cora, and they want to claim that the learned objective from Cora is an objective that, when optimised, can specify or guide the construction of all citation graphs, so they try that on Citeseer as target graph. So in this case, their aim is to be able to be able to learn a policy that can reconstruct Citeseer, based on the objective recovered from Cora. 
-
-* To me this seems like a big assumption, that "citation graphs are all the same". My idea is to follow the maths, which aim to recover an objective that explains the construction of the source. As such, things, constructed by learning a policy based on that objective, should end up looking similar to the structure of the source graph, rather than necessarily look like the target graph itself. Here they kind of played the salesman role of overselling their product.
-
-* The point of IRL is to learn a reward given expert examples. The transfer bit should try to impose the style of the source task to the target task and not necessarily be good for reconstructing the target task itself (would only be the case if target task is very similar to the source task). 
-
-* In GraphOpt, they learn a reward (only MLP since they use a single graph encoder for policy, qfunc and reward) on Cora, and then they seem to aim to learn a policy that preserves the statistical properties of Citeseer (the target task). Which is unreasonable unless the task of building Cora is very similar to building Citeseer (difficult to justify since the former has 1433 dim node features while the latter has 3703 dim node features). This would only be the case if Cora and Citeseer are very similar tasks and the reward learned to enforce the Cora structure translates to also enforcing the Citeseer structure (some major assumption there).
-
-* Furthermore, the authors effectively change **part** of the reward when training on Citeseer because the reward then uses a different graph encoder that maps 3703 dim node features (from Citeseer) to the same dimensional graph embedding as used for Cora and pass these to the frozen MLP reward from the IRL task (the MLP part of the reward is the only thing transferred from the IRL procedure). 
-
-* The results they show then claim, the learned reward on Cora helped them learn a new policy on Citeseer to mimic the Citeseer graph, having kept the reward fixed. By changing the graph encoder, however, they end up jointly training the policy **and** part of the reward since the reward MLP is frozen but its graph encoder is changed when policy grad steps are made.
-
-* They also claim (inconsistently with the findings of the original Guided Cost Learning paper) that the direct deployment of the Cora policy on the Citeseer task did not do well in contrast with the newly learned policy which also jointly trains part of the reward function. This is expected since, although both graphs are citation graphs, the graph structures are different, leading to the policy trained with the IRL task on Cora to try and enforce the structure of Cora rather than that of Citeseer (expected since it was never trained on Citeseer in the first place). It is also unclear how this deployment was made, since due to the difference in dimensionality of node features, GNN layers for the two tasks (at least the first layer) should be different. If the GNN is changed, then the policy changes too, since it receives as input, graph embeddings from potentially different distribution than that while training on Cora.
-
-* The goal should be: given Citeseer nodes, build a graph with similar structure to Cora where the structure is judged by the reward learned during the IRL task performed on Cora. Then they also predictably say the learned policy during IRL on Cora does not lead to reconstructing/mimicking the structure of Citeseer (obviously since it was trained to build graphs similar to Cora and not Citeseer).
-
-## Ideas:
-
-### Graph policy - OUTDATED! - SEE CODE FOR E.G., TwoStageGaussPolicy or GaussPolicy:
-* Stochastic policy $\pi(a|graph)$ that samples vector $a$ and finds 1-NN in gnn embedding space (KDTree implementation). Then calculate cos distance with other node GNN embeddings and concat this vector to GNN embeddings and do another MLP that maps $NN^{(2)}: \mathbb{R}^{emb\_dim+1}\rightarrow \mathbb{R}$ and take softmax to spit out a node index to connect to:
-    * $Z = GNN(graph)\in \mathbb{R}^{num\_nodes\times emb\_dim}$.
-    * $a \sim Dist(NN^{(1)}(Z))$.
-    * $z^{(1)}= \arg \min_{z\in Z} d^{(1)}(a, Z).$
-    * $feat=d^{(2)}(z^{(1)}, Z)\in \mathbb{R}^{num\_nodes}$.
-    * $\tilde{Z}:=(Z, feat)\in \mathbb{R}^{num\_nodes\times emb\_dim+1}$.
-    * $z^{(2)}:=\arg \max_{z\in Z} softmax(NN^{(2)}(\tilde{Z}))$.
-    * Connect $z^{(1)}$ and $z^{(2)}$ with edge.
-
-* There should be some budgeting there for allowing some edges and not others.
-* The policy, the reward function and the value functions should have their own GNN encoders. For the reward this is necessary since we don't want to let the policy gradients implicitly change the reward function (would be the case if the GNN was shared by the policy and the reward function).
-* For the sake of compatibility with the openai gym Env, the action in this graph setting will be $\tilde{a}=(a, Z)$.
-
-### Graph  Buffer - mostly old notes below, but valid points nevertheless:
-* The observations should be instances of `torch_geometric.data.Data`. The actions should be tuples `(idx1, idx2)` of length 2 containing the indexes of the nodes to be connected. Based on these indexes, `x_embeds[idx1], x_embeds[idx2]` should be passed to the `log_prob` method of the `TwoStageGaussDist` instance. The `x_embeds` will be computed anew for each batch during the gradient steps. The state will be the graph itself rather than its embedding from the GNN to allow training of the GNN, therefore. And the actions' interpretation is that we emitted vectors close to the embeddings of the selected vectors.
-    * Given this setup, I might need a new Graph Buffer class, to accommodate for these formats.
-* The alternative would be to store `(a1, a2)` - a tuple of two vectors for for the actions from when the path was sampled (some point in the past). These, however, would have been output based on a different encoding from the GNN, so are not in general guaranteed to map to the same node embeddings given the new parameters of the GNN.
-* Another alternative would be to store GNN embeddings as observations and then generate a gaussian based on the new params of the policy. This, however, does not train the GNN since we don't use it if we store embeddings for the observations.
