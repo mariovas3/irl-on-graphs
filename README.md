@@ -15,6 +15,11 @@ the default is `UT_trick=0` which falls back to reparameterisation
 trick for estimating expectations. In practice, didn't see 
 any improvement when using UT trick.
 
+### The scripts above were run on a remote server;
+* After the relevant output from the above scripts was saved, 
+the results were analysed by the `experiments_analysis.ipynb` 
+notebook in the `notebooks` directory.
+
 ## IRL procedure is based on [Guided Cost Learning - C. Finn paper](https://arxiv.org/abs/1603.00448);
 * The contribution is the addition of per-decision importance 
 samples rather than per-episode ones. 

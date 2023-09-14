@@ -116,7 +116,7 @@ if __name__ == "__main__":
     
     # extra info to save in pkl after training is done;
     irl_trainer_config['multitask_gnn'] = agent_kwargs['with_multitask_gnn_loss']
-    irl_trainer_config['irl_iters'] = 10#12
+    irl_trainer_config['irl_iters'] = 50
     irl_trainer_config['policy_epochs'] = 1
     irl_trainer_config['vis_graph'] = False
     irl_trainer_config['save_edge_index'] = True
@@ -173,9 +173,9 @@ if __name__ == "__main__":
         irl_trainer.agent,
         reward_fn, 
         agent_constructor,  # VERY IMPORTANT TO GIVE THE CORRECT CONSTRUCTOR!!!
-        num_epochs_new_policy=1,#5,
+        num_epochs_new_policy=10,
         target_graph=graph_target,
-        run_k_times=1,#3,
+        run_k_times=3,
         new_policy_param_getter_fn=get_params_eval,
         sort_metrics=False,
         euc_dist_idxs=None,#torch.tensor([[0, 1]], dtype=torch.long),
