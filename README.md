@@ -20,6 +20,14 @@ repository related to the authors of
 [GraphOpt](https://arxiv.org/abs/2007.03619). To that end, I 
 implemented my own version based on the description in their paper.
 
+Additionally, although this repo is not a fork or a clone 
+of 
+`https://github.com/rail-berkeley/rlkit`, some design choices 
+were inspired by the aforementioned. I wish to thank 
+the contributors of `https://github.com/rail-berkeley/rlkit` 
+who have made 
+the PyTorch implementation of [SAC]((https://arxiv.org/abs/1812.05905)) publicly available, therefore. 
+
 
 ## IRL procedure is based on [Guided Cost Learning - C. Finn paper](https://arxiv.org/abs/1603.00448); and [GraphOpt](https://arxiv.org/abs/2007.03619);
 * The contribution is the addition of per-decision importance 
