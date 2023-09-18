@@ -10,7 +10,10 @@ import torch
 from torch_geometric.data import Data, Batch
 import torch_geometric.nn as tgnn
 
-from graph_irl.graph_rl_utils import get_action_vector_from_idx, inc_lcr_reg
+from graph_irl.graph_rl_utils import (
+    get_action_vector_from_idx,
+    inc_lcr_reg,
+)
 from graph_irl.distributions import GaussDist, TanhGauss
 
 import warnings
@@ -22,10 +25,10 @@ np.random.seed(0)
 class BufferBase:
     def __init__(
         self,
-        max_size, 
-        state_reward=False, 
+        max_size,
+        state_reward=False,
         seed=None,
-        transform_: Callable=None,
+        transform_: Callable = None,
     ):
         self.seed = 0 if seed is None else seed
         self.idx, self.max_size = 0, max_size
@@ -81,18 +84,21 @@ class GraphBuffer(BufferBase):
         action_is_index=True,
         action_dim=None,
         per_decision_imp_sample=False,
-        reward_scale=1.,
-        log_offset=0.,
-        lcr_reg=False, 
+        reward_scale=1.0,
+        log_offset=0.0,
+        lcr_reg=False,
         verbose=False,
         unnorm_policy=False,
         be_deterministic=False,
         zero_interm_rew=False,
     ):
         super(GraphBuffer, self).__init__(
-            max_size, state_reward, seed, transform_,
+            max_size,
+            state_reward,
+            seed,
+            transform_,
         )
-        # I will only keep state action trajectories and eval the reward 
+        # I will only keep state action trajectories and eval the reward
         # as I sample a batch in the sac training loop - for more efficiency;
 
         self.zero_interm_rew = zero_interm_rew
@@ -110,20 +116,20 @@ class GraphBuffer(BufferBase):
 
         # place holder edge index;
         edge_index = torch.tensor([[], []], dtype=torch.long)
-        
+
         # containers to store mdp info;
         self.obs_t = [
-            Data(x=nodes, edge_index=edge_index) 
+            Data(x=nodes, edge_index=edge_index)
             for _ in range(self.max_size)
         ]
         if self.action_is_index:
-            self.action_t = np.empty((max_size, 2), 
-                                     dtype=np.int64)
+            self.action_t = np.empty((max_size, 2), dtype=np.int64)
         else:
-            self.action_t = np.empty((max_size, action_dim), 
-                                     dtype=np.float32)
+            self.action_t = np.empty(
+                (max_size, action_dim), dtype=np.float32
+            )
         self.obs_tp1 = [
-            Data(x=nodes, edge_index=edge_index) 
+            Data(x=nodes, edge_index=edge_index)
             for _ in range(self.max_size)
         ]
         self.terminal_tp1 = np.empty((max_size,), dtype=np.int8)
@@ -131,18 +137,18 @@ class GraphBuffer(BufferBase):
 
         # keep nodes reference;
         self.nodes = nodes
-        
+
         # log_offset is subtracted in
         # reward - log_prob_policy - log_offset
         # the reward is always in (-inf, 0)
-        # as the reward and policy both become better, the 
-        # reward will give high reward for sampled traj 
-        # so reward -> 0, however log_prob_policy is generally 
-        # negative and depends on dim of action vector; 
+        # as the reward and policy both become better, the
+        # reward will give high reward for sampled traj
+        # so reward -> 0, however log_prob_policy is generally
+        # negative and depends on dim of action vector;
         # at that point our importance weights (reward - log_prob).exp()
         # might become too large so an offset might help;
         self.log_offset = log_offset
-        
+
         # similar purpose as log offset, although has slightly different
         # interpretation as amplifying reward signal;
         self.reward_scale = reward_scale
@@ -161,12 +167,11 @@ class GraphBuffer(BufferBase):
             for _ in range(self.max_size)
         ]
         if self.action_is_index:
-            self.action_t = np.empty((self.max_size, 2), 
-                                     dtype=np.int64)
+            self.action_t = np.empty((self.max_size, 2), dtype=np.int64)
         else:
-            self.action_t = np.empty((self.max_size, 
-                                      self.action_dim), 
-                                     dtype=np.float32)
+            self.action_t = np.empty(
+                (self.max_size, self.action_dim), dtype=np.float32
+            )
         self.obs_tp1 = [
             Data(x=self.nodes, edge_index=edge_index)
             for _ in range(self.max_size)
@@ -185,7 +190,9 @@ class GraphBuffer(BufferBase):
         self.terminal_tp1[idx] = terminal_tp1
         self.idx += 1
 
-    def add_sample_without_reward(self, obs_t, action_t, obs_tp1, terminal_tp1):
+    def add_sample_without_reward(
+        self, obs_t, action_t, obs_tp1, terminal_tp1
+    ):
         idx = self.idx % self.max_size
         if not self.looped and self.idx and not idx:
             self.looped = True
@@ -211,20 +218,24 @@ class GraphBuffer(BufferBase):
         assert batch_size <= self.__len__()
 
         # always sample without replacement;
-        idxs = np.random.choice(self.__len__(), size=batch_size, replace=False)
-        
+        idxs = np.random.choice(
+            self.__len__(), size=batch_size, replace=False
+        )
+
         # get batch of graphs;
         batch = Batch.from_data_list([self.obs_t[idx] for idx in idxs])
-        batch_tp1 = Batch.from_data_list([self.obs_tp1[idx] for idx in idxs])
-        
+        batch_tp1 = Batch.from_data_list(
+            [self.obs_tp1[idx] for idx in idxs]
+        )
+
         # see if should process inplace;
         # it's either this compute overhead
-        # or it will be a memory overhead that 
+        # or it will be a memory overhead that
         # scales as O(buffer_max_len * num_nodes_of_graph * new_columns)
         if self.transform_ is not None:
             self.transform_(batch)
             self.transform_(batch_tp1)
-        
+
         # return batch, actions, no_reward, future_batch, terminated
         return (
             batch,
@@ -237,71 +248,89 @@ class GraphBuffer(BufferBase):
     def _process_rewards_log_weights(self, rewards, log_weights, code):
         rewards = torch.cat(rewards, -1)
         log_weights = torch.cat(log_weights, -1)
-        return (
-            rewards,
-            torch.cumsum(log_weights, 0),
-            code,
-            len(rewards)
-        )
-    
-    def get_reward(self, batch_list, actions, reward_fn, 
-                   extra_graph_level_feats_list=None, 
-                   get_graph_embeds=False, reward_encoder=None):
+        return (rewards, torch.cumsum(log_weights, 0), code, len(rewards))
+
+    def get_reward(
+        self,
+        batch_list,
+        actions,
+        reward_fn,
+        extra_graph_level_feats_list=None,
+        get_graph_embeds=False,
+        reward_encoder=None,
+    ):
         if self.state_reward:
             assert len(batch_list) == len(actions) + 1
             batch = Batch.from_data_list(batch_list[1:])
             if extra_graph_level_feats_list:
-                extra_graph_level_feats = torch.cat(extra_graph_level_feats_list[1:], 0)
+                extra_graph_level_feats = torch.cat(
+                    extra_graph_level_feats_list[1:], 0
+                )
             else:
                 extra_graph_level_feats = None
             # return (rewards, [graph_embeds]), targets
             if reward_encoder is not None:
                 out = reward_encoder(batch, extra_graph_level_feats)[0]
                 return reward_fn(out)
-            temp = reward_fn(batch,
-                            extra_graph_level_feats=extra_graph_level_feats, 
-                            get_graph_embeds=get_graph_embeds)
+            temp = reward_fn(
+                batch,
+                extra_graph_level_feats=extra_graph_level_feats,
+                get_graph_embeds=get_graph_embeds,
+            )
             if get_graph_embeds:
-                return temp, tgnn.global_add_pool(batch.x[:, -1], batch.batch)
+                return temp, tgnn.global_add_pool(
+                    batch.x[:, -1], batch.batch
+                )
             return temp
         batch = Batch.from_data_list(batch_list)
         if extra_graph_level_feats_list:
-                extra_graph_level_feats = torch.cat(extra_graph_level_feats_list, 0)
+            extra_graph_level_feats = torch.cat(
+                extra_graph_level_feats_list, 0
+            )
         else:
             extra_graph_level_feats = None
         assert len(batch_list) == len(actions)
         # return (rewards, [graph_embeds]), targets
         temp = reward_fn(
-            (batch, actions), 
+            (batch, actions),
             extra_graph_level_feats,
             action_is_index=self.action_is_index,
-            get_graph_embeds=get_graph_embeds
+            get_graph_embeds=get_graph_embeds,
         )
         if get_graph_embeds:
             return temp, tgnn.global_add_pool(batch.x[:, -1], batch.batch)
         return temp
-    
+
     def get_log_probs_and_dists(
-            self, batch_list, actions, agent, 
-            extra_graph_level_feats_list=None,
+        self,
+        batch_list,
+        actions,
+        agent,
+        extra_graph_level_feats_list=None,
     ):
         if self.state_reward:
             assert len(batch_list) == len(actions) + 1
             batch = Batch.from_data_list(batch_list[:-1])
             if extra_graph_level_feats_list:
                 assert len(extra_graph_level_feats_list) == len(batch_list)
-                extra_graph_level_feats = torch.cat(extra_graph_level_feats_list[:-1], 0)
+                extra_graph_level_feats = torch.cat(
+                    extra_graph_level_feats_list[:-1], 0
+                )
             else:
                 extra_graph_level_feats = None
         else:
             assert len(batch_list) == len(actions)
             batch = Batch.from_data_list(batch_list)
             if extra_graph_level_feats_list:
-                extra_graph_level_feats = torch.cat(extra_graph_level_feats_list, 0)
+                extra_graph_level_feats = torch.cat(
+                    extra_graph_level_feats_list, 0
+                )
             else:
                 extra_graph_level_feats = None
-        
-        policy_dists, node_embeds = agent.policy(batch, extra_graph_level_feats)
+
+        policy_dists, node_embeds = agent.policy(
+            batch, extra_graph_level_feats
+        )
 
         # get action vectors from indexes by taking the node embeds
         # for the relevant indexes;
@@ -327,39 +356,41 @@ class GraphBuffer(BufferBase):
         return log_probs, policy_dists
 
     def get_single_ep_rewards_and_weights(
-            self, 
-            env, 
-            agent,
-            with_mrr=False,
-            with_auc=False,
-            positives_dict=None,
-            k_proposals: int=1,
-            reward_encoder=None,
+        self,
+        env,
+        agent,
+        with_mrr=False,
+        with_auc=False,
+        positives_dict=None,
+        k_proposals: int = 1,
+        reward_encoder=None,
     ):
-        temp_mse, temp_len = 0., 0
+        temp_mse, temp_len = 0.0, 0
         flag = agent.multitask_net is not None
         rrs_this_episode = []  # reciprocal ranks;
         reward_on_path = []
         if with_mrr or with_auc:
             assert positives_dict is not None
-        
+
         # init lcr regularisation term and last two rewards;
-        lcr_reg_term = 0.
+        lcr_reg_term = 0.0
         r1, r2 = None, None
         rewards = []
-        
+
         if self.per_decision_imp_sample:
             log_weights = []
         else:
             log_imp_weight, return_val = 0, 0
-        
+
         # start the episode;
         obs, info = env.reset(seed=self.seed)
         extra_graph_level_feats = None
         if self.transform_ is not None:
             self.transform_(obs)
             if self.transform_.get_graph_level_feats_fn is not None:
-                extra_graph_level_feats = self.transform_.get_graph_level_feats_fn(obs)
+                extra_graph_level_feats = (
+                    self.transform_.get_graph_level_feats_fn(obs)
+                )
 
         # eval policy and reward fn in batch mode;
         action_idxs = []
@@ -387,7 +418,9 @@ class GraphBuffer(BufferBase):
         while not (terminated or truncated):
             # sample actions;
             if self.be_deterministic:
-                (a1, a2), node_embeds = agent.sample_deterministic(obs, extra_graph_level_feats)
+                (a1, a2), node_embeds = agent.sample_deterministic(
+                    obs, extra_graph_level_feats
+                )
             else:
                 (a1, a2), node_embeds = agent.sample_action(
                     obs, k_proposals, extra_graph_level_feats
@@ -395,52 +428,48 @@ class GraphBuffer(BufferBase):
 
             # make env step;
             new_obs, reward, terminated, truncated, info = env.step(
-                (
-                    (a1.numpy(), a2.numpy()), 
-                    node_embeds.detach().numpy()
-                ),
-                positives_dict
+                ((a1.numpy(), a2.numpy()), node_embeds.detach().numpy()),
+                positives_dict,
             )
 
             # resample action if repeated edge or self loop;
-            if self.drop_repeats_or_self_loops and not (terminated or truncated):
+            if self.drop_repeats_or_self_loops and not (
+                terminated or truncated
+            ):
                 if info["self_loop"] or info["is_repeat"]:
                     continue
-            
+
             skip_sample = (
-                self.drop_repeats_or_self_loops 
+                self.drop_repeats_or_self_loops
                 and (
-                    info['max_repeats_reached'] 
-                    or info['max_self_loops_reached']
+                    info["max_repeats_reached"]
+                    or info["max_self_loops_reached"]
                 )
                 # also check if current is self loop or repeated edge;
-                # since if max repeats or max self loops are true 
+                # since if max repeats or max self loops are true
                 # but min_steps_to_do is not reached in env
                 # we may discard good edges;
-                and (
-                    info['self_loop']
-                    or info['is_repeat']
-                )
+                and (info["self_loop"] or info["is_repeat"])
             )
 
             steps -= int(skip_sample)
-            
+
             # get idxs of nodes to connect;
             first, second = info["first"], info["second"]
-            which_action = info['which_action']
-            recip_rank = info['recip_rank']
-            
+            which_action = info["which_action"]
+            recip_rank = info["recip_rank"]
+
             # add action to action list and observation in batch_list;
             if not skip_sample:
                 if which_action is not None:
                     assert len(a1.shape) == 2
                     a1 = a1[which_action, :].view(-1)
                     a2 = a2[which_action, :].view(-1)
-                    
+
                     # this is where you track recip rank
                     if with_mrr:
                         rrs_this_episode.append(recip_rank)
-                    
+
                     # and the entry of positives_dict is turned on
                     if with_auc:
                         e1, e2 = env._get_edge_hash(first, second)
@@ -449,45 +478,55 @@ class GraphBuffer(BufferBase):
                             positives_dict[(e1, e2)] = 1
                 if self.transform_ is not None:
                     self.transform_(new_obs)
-                    if self.transform_.get_graph_level_feats_fn is not None:
-                        extra_graph_level_feats_tp1 = self.transform_.get_graph_level_feats_fn(new_obs)
-                
-                if self.action_is_index:
-                        action_idxs.append(
-                            torch.tensor([first, second], 
-                                         dtype=torch.long)
+                    if (
+                        self.transform_.get_graph_level_feats_fn
+                        is not None
+                    ):
+                        extra_graph_level_feats_tp1 = (
+                            self.transform_.get_graph_level_feats_fn(
+                                new_obs
+                            )
                         )
+
+                if self.action_is_index:
+                    action_idxs.append(
+                        torch.tensor([first, second], dtype=torch.long)
+                    )
                 else:
                     assert a1.ndim == 1
                     action_idxs.append(torch.cat((a1, a2), -1))
-                
+
                 if not self.state_reward:
                     batch_list.append(obs)
                     if extra_graph_level_feats is not None:
-                        extra_graph_level_feats_list.append(extra_graph_level_feats)
+                        extra_graph_level_feats_list.append(
+                            extra_graph_level_feats
+                        )
                 else:
                     batch_list.append(new_obs)
                     if extra_graph_level_feats is not None:
-                        extra_graph_level_feats_list.append(extra_graph_level_feats_tp1)
-
+                        extra_graph_level_feats_list.append(
+                            extra_graph_level_feats_tp1
+                        )
 
             # if max batch length reached, compute rewards;
             sr = int(self.state_reward)
-            if (
-                len(batch_list) - sr and (
-                    len(batch_list) == self.graphs_per_batch + sr
-                    or terminated
-                    or truncated
-                )
+            if len(batch_list) - sr and (
+                len(batch_list) == self.graphs_per_batch + sr
+                or terminated
+                or truncated
             ):
                 # make batch of graphs;
                 action_idxs = torch.stack(action_idxs)
 
                 # calculate rewards on batch;
                 curr_rewards = self.get_reward(
-                    batch_list, action_idxs, env.reward_fn,
-                    extra_graph_level_feats_list, get_graph_embeds=flag,
-                    reward_encoder=reward_encoder
+                    batch_list,
+                    action_idxs,
+                    env.reward_fn,
+                    extra_graph_level_feats_list,
+                    get_graph_embeds=flag,
+                    reward_encoder=reward_encoder,
                 )
 
                 # this is for multitask gnn training;
@@ -495,11 +534,12 @@ class GraphBuffer(BufferBase):
                     (curr_rewards, graph_embeds), targets = curr_rewards
                     outs = agent.multitask_net(graph_embeds)
                     curr_length = len(curr_rewards.view(-1))
-                    temp_mse = (
-                        temp_mse * (temp_len / (temp_len + curr_length)) 
-                        + torch.nn.MSELoss()(
-                            outs.view(-1), targets.view(-1)
-                        ) * (curr_length / (temp_len + curr_length))
+                    temp_mse = temp_mse * (
+                        temp_len / (temp_len + curr_length)
+                    ) + torch.nn.MSELoss()(
+                        outs.view(-1), targets.view(-1)
+                    ) * (
+                        curr_length / (temp_len + curr_length)
                     )
                     temp_len += curr_length
                 curr_rewards = curr_rewards.view(-1) * self.reward_scale
@@ -508,7 +548,7 @@ class GraphBuffer(BufferBase):
                     curr_rewards = torch.zeros_like(curr_rewards)
                     if terminated or truncated:
                         curr_rewards[-1] = last_rew
-                
+
                 # track rewards on path;
                 reward_on_path.extend(curr_rewards.detach().tolist())
 
@@ -520,43 +560,63 @@ class GraphBuffer(BufferBase):
 
                 # get log probs and policy dists;
                 log_probs, policy_dists = self.get_log_probs_and_dists(
-                    batch_list, action_idxs, agent,
-                    extra_graph_level_feats_list
+                    batch_list,
+                    action_idxs,
+                    agent,
+                    extra_graph_level_feats_list,
                 )
-                
+
                 # see if should print stuff;
                 if self.verbose:
-                    print("\nreward range within buffer sampling: ", 
-                          curr_rewards.min().item(),
-                          curr_rewards.max().item(), sep=' ')
+                    print(
+                        "\nreward range within buffer sampling: ",
+                        curr_rewards.min().item(),
+                        curr_rewards.max().item(),
+                        sep=" ",
+                    )
                     i = log_probs.argmin().item()
                     j = log_probs.argmax().item()
-                    print(f"log_prob range: ", 
-                          log_probs[i].item(), 
-                          log_probs[j].item(), 
-                          sep=' ')
+                    print(
+                        f"log_prob range: ",
+                        log_probs[i].item(),
+                        log_probs[j].item(),
+                        sep=" ",
+                    )
                     if not isinstance(policy_dists, TanhGauss):
-                        print(f"corresponding entropies: ",
-                            policy_dists.entropy().sum(-1)[[i, j]].detach().numpy())
+                        print(
+                            f"corresponding entropies: ",
+                            policy_dists.entropy()
+                            .sum(-1)[[i, j]]
+                            .detach()
+                            .numpy(),
+                        )
 
                 # rewards and log_weights
                 rewards.append(curr_rewards)
                 if self.per_decision_imp_sample:
-                    log_weights.append((curr_rewards - log_probs - self.log_offset).detach())
+                    log_weights.append(
+                        (
+                            curr_rewards - log_probs - self.log_offset
+                        ).detach()
+                    )
                 else:
                     log_imp_weight += (
-                        (curr_rewards - log_probs - self.log_offset).sum().detach()
+                        (curr_rewards - log_probs - self.log_offset)
+                        .sum()
+                        .detach()
                     )
                     # return_val += curr_rewards.sum()
                     # if self.verbose:
-                        # print(f"step: {steps} of sampling, vanilla sum of log weights: {log_imp_weight}",
-                            # f"vanilla return: {return_val}\n", end='\n\n')
+                    # print(f"step: {steps} of sampling, vanilla sum of log weights: {log_imp_weight}",
+                    # f"vanilla return: {return_val}\n", end='\n\n')
 
                 # reset batch list and action idxs list;
                 if self.state_reward:
                     batch_list = [batch_list[-1]]
                     if extra_graph_level_feats_list:
-                        extra_graph_level_feats_list = [extra_graph_level_feats_list[-1]]
+                        extra_graph_level_feats_list = [
+                            extra_graph_level_feats_list[-1]
+                        ]
                 else:
                     batch_list = []
                     extra_graph_level_feats_list = []
@@ -577,8 +637,26 @@ class GraphBuffer(BufferBase):
                 if self.verbose:
                     print(f"steps done: {steps}, code: {code}")
                 if self.per_decision_imp_sample:
-                    return self._process_rewards_log_weights(rewards, log_weights, code) + (lcr_reg_term, obs, rrs_this_episode, reward_on_path, temp_mse)
-                return torch.cat(rewards, -1), log_imp_weight, code, env.steps_done, lcr_reg_term, obs, rrs_this_episode, reward_on_path, temp_mse
+                    return self._process_rewards_log_weights(
+                        rewards, log_weights, code
+                    ) + (
+                        lcr_reg_term,
+                        obs,
+                        rrs_this_episode,
+                        reward_on_path,
+                        temp_mse,
+                    )
+                return (
+                    torch.cat(rewards, -1),
+                    log_imp_weight,
+                    code,
+                    env.steps_done,
+                    lcr_reg_term,
+                    obs,
+                    rrs_this_episode,
+                    reward_on_path,
+                    temp_mse,
+                )
 
         assert steps == env.steps_done - env.num_edges_start_from
         if self.verbose:
@@ -586,8 +664,26 @@ class GraphBuffer(BufferBase):
         if self.per_decision_imp_sample:
             # in the per dicision case, need to cumsum the log_weights
             # until the current time point;
-            return self._process_rewards_log_weights(rewards, log_weights, 2) + (lcr_reg_term, obs, rrs_this_episode, reward_on_path, temp_mse)
-        return torch.cat(rewards, -1), log_imp_weight, 2, env.steps_done, lcr_reg_term, obs, rrs_this_episode, reward_on_path, temp_mse
+            return self._process_rewards_log_weights(
+                rewards, log_weights, 2
+            ) + (
+                lcr_reg_term,
+                obs,
+                rrs_this_episode,
+                reward_on_path,
+                temp_mse,
+            )
+        return (
+            torch.cat(rewards, -1),
+            log_imp_weight,
+            2,
+            env.steps_done,
+            lcr_reg_term,
+            obs,
+            rrs_this_episode,
+            reward_on_path,
+            temp_mse,
+        )
 
     def collect_path(
         self,
@@ -603,12 +699,12 @@ class GraphBuffer(BufferBase):
             agent: Supports sample_action(obs) api.
             num_steps_to_collect: Number of (obs, action, reward, next_obs, terminated)
                 tuples to be added to the buffer.
-        
+
         Note:
             This will collect only (obs, action, obs_tp1, terminal)
-            tuples as steps. The rewards will be computed within 
-            the SAC training loop, so that we always eval the 
-            current reward and don't have to discard old experience 
+            tuples as steps. The rewards will be computed within
+            the SAC training loop, so that we always eval the
+            current reward and don't have to discard old experience
             with old rewards.
         """
         num_steps_to_collect = min(num_steps_to_collect, self.max_size)
@@ -617,7 +713,7 @@ class GraphBuffer(BufferBase):
         extra_graph_level_feats = None
         self.seed += 1
         k_proposals = 1  # this is for compatibility
-        
+
         # get at least num_steps_to_collect steps
         # and exit when terminated or truncated;
         while t < num_steps_to_collect or not (terminated or truncated):
@@ -625,11 +721,14 @@ class GraphBuffer(BufferBase):
             if self.transform_ is not None:
                 self.transform_(obs_t)
                 if self.transform_.get_graph_level_feats_fn is not None:
-                    extra_graph_level_feats = self.transform_.get_graph_level_feats_fn(obs_t)
-            
+                    extra_graph_level_feats = (
+                        self.transform_.get_graph_level_feats_fn(obs_t)
+                    )
+
             # sample action;
-            (a1, a2), node_embeds = agent.sample_action(obs_t, k_proposals,
-                                                        extra_graph_level_feats)
+            (a1, a2), node_embeds = agent.sample_action(
+                obs_t, k_proposals, extra_graph_level_feats
+            )
             a1, a2 = a1.numpy(), a2.numpy()
 
             # sample dynamics;
@@ -638,20 +737,19 @@ class GraphBuffer(BufferBase):
             )
 
             # resample action if repeated edge or self loop;
-            if self.drop_repeats_or_self_loops and not (terminated or truncated):
+            if self.drop_repeats_or_self_loops and not (
+                terminated or truncated
+            ):
                 if info["self_loop"] or info["is_repeat"]:
                     continue
-            
+
             skip_sample = (
-                self.drop_repeats_or_self_loops 
+                self.drop_repeats_or_self_loops
                 and (
-                    info['max_repeats_reached'] 
-                    or info['max_self_loops_reached']
+                    info["max_repeats_reached"]
+                    or info["max_self_loops_reached"]
                 )
-                and (
-                    info['self_loop']
-                    or info['is_repeat']
-                )
+                and (info["self_loop"] or info["is_repeat"])
             )
 
             # this is if obs_t was set to point to memory of obs_tp1
@@ -661,7 +759,7 @@ class GraphBuffer(BufferBase):
 
             # see if this sample should be skipped;
             t -= int(skip_sample)
-            
+
             if not skip_sample:
                 # indexes of nodes to be connected;
                 first, second = info["first"], info["second"]
@@ -671,7 +769,7 @@ class GraphBuffer(BufferBase):
                 else:
                     assert a1.ndim == 1
                     action_t = np.concatenate((a1, a2), -1)
-                
+
                 # reward will be computed during training of SAC;
                 self.add_sample_without_reward(
                     obs_t, action_t, obs_tp1, terminated
@@ -721,7 +819,9 @@ class Buffer(BufferBase):
 
     def sample(self, batch_size):
         assert batch_size <= self.__len__()
-        idxs = np.random.choice(self.__len__(), size=batch_size, replace=False)
+        idxs = np.random.choice(
+            self.__len__(), size=batch_size, replace=False
+        )
         return (
             torch.tensor(self.obs_t[idxs], dtype=torch.float32),
             torch.tensor(self.action_t[idxs], dtype=torch.float32),

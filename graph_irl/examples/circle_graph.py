@@ -6,18 +6,24 @@ from typing import Callable
 
 def create_circle_graph(n_nodes, node_dim, init_fn: Callable):
     # circular graph with n_nodes;
-    a = [0] + torch.repeat_interleave(
-            torch.arange(1, n_nodes), 2
-        ).tolist() + [0]
-    
+    a = (
+        [0]
+        + torch.repeat_interleave(torch.arange(1, n_nodes), 2).tolist()
+        + [0]
+    )
+
     # get edge_index;
-    edge_index = torch.tensor([
-        a,
-        ((
-            torch.tensor([1, -1] * (len(a) // 2)) + torch.tensor(a)
-        ) % n_nodes).tolist()
-    ], dtype=torch.long)
-    
+    edge_index = torch.tensor(
+        [
+            a,
+            (
+                (torch.tensor([1, -1] * (len(a) // 2)) + torch.tensor(a))
+                % n_nodes
+            ).tolist(),
+        ],
+        dtype=torch.long,
+    )
+
     # create nodes;
     nodes = init_fn(edge_index.shape[-1] // 2, node_dim)
 

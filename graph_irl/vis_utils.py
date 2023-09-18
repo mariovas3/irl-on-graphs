@@ -9,21 +9,23 @@ import networkx as nx
 
 
 def plot_overlayed_hists(
-    entity_names, 
-    metric_names, 
+    entity_names,
+    metric_names,
     *metrics_for_all,
     figsize=(14, 8),
     path_to_save=None,
 ):
     fig = plt.figure(figsize=figsize)
     for i, n in enumerate(metric_names):
-        plt.subplot(1, len(metric_names), i+1)
+        plt.subplot(1, len(metric_names), i + 1)
         ax = plt.gca()
         for j, metrics_for_one in enumerate(metrics_for_all):
-            plt.hist(metrics_for_one[i], 
-                     log=True, 
-                     alpha=.5, 
-                     label=entity_names[j])
+            plt.hist(
+                metrics_for_one[i],
+                log=True,
+                alpha=0.5,
+                label=entity_names[j],
+            )
         plt.legend()
         plt.xlabel(n)
     fig.tight_layout()
@@ -36,7 +38,7 @@ def plot_overlayed_hists(
 def vis_single_graph(edge_index, save_to, pos):
     fig = plt.figure(figsize=(8, 8))
     G = nx.Graph()
-    save_to = save_to / 'single_graph_vis.png'
+    save_to = save_to / "single_graph_vis.png"
     G.add_edges_from(list(zip(*edge_index)))
     nx.draw_networkx(G, pos=pos)
     fig.tight_layout()
@@ -62,7 +64,7 @@ def see_one_episode(env, agent, seed, save_to):
         if terminated:
             print(f"simulation died step: {step}")
     # save episode;
-    with open(save_to, 'wb') as f:
+    with open(save_to, "wb") as f:
         pickle.dump(obs_list, f)
         pickle.dump(action_list, f)
     env.close()
@@ -79,7 +81,7 @@ def vis_graph_building(edge_index, save_to, pos=None):
             continue
         edges.append((first, second))
         unique_edges.add((first, second))
-        
+
     G = nx.Graph()
     fig = plt.figure(figsize=(12, 8))
 
@@ -87,7 +89,7 @@ def vis_graph_building(edge_index, save_to, pos=None):
 
     # no connections;
     if steps == 0:
-        file_name = save_to / f'last_episode_{len(edges)}_edges.png'
+        file_name = save_to / f"last_episode_{len(edges)}_edges.png"
         plt.savefig(file_name)
         plt.close()
         return
@@ -95,13 +97,13 @@ def vis_graph_building(edge_index, save_to, pos=None):
     rows = int(sqrt(steps))
     cols = int(steps / rows) + (1 if steps % rows else 0)
     for i in range(steps):
-        plt.subplot(rows, cols, i+1)
+        plt.subplot(rows, cols, i + 1)
         G.add_node(edges[i][0])
         G.add_node(edges[i][1])
         G.add_edge(*edges[i])
         nx.draw_networkx(G, pos=pos, label=True)
     fig.tight_layout()
-    file_name = save_to / f'last_episode_{len(edges)}_edges.png'
+    file_name = save_to / f"last_episode_{len(edges)}_edges.png"
     plt.savefig(file_name)
     plt.close()
 
@@ -112,22 +114,23 @@ def save_metric_plots(metric_names, metrics, path, seed, suptitle=None):
     rows = int(sqrt(len(metrics)))
     cols = int(len(metrics) / rows) + (1 if len(metrics) % rows else 0)
     fig = plt.figure(figsize=(12, 8))
-    for i, (metric_name, metric) in enumerate(sorted(zip(metric_names, metrics), key=lambda x: x[0])):
+    for i, (metric_name, metric) in enumerate(
+        sorted(zip(metric_names, metrics), key=lambda x: x[0])
+    ):
         plt.subplot(rows, cols, i + 1)
         ax = plt.gca()
         ax.plot(metric)
         try:
             ylow, yhigh = np.min(metric), np.max(metric)
         except:
-            print(f"problem with {metric_name}\n",
-                    metric)
-        yoffset = max((yhigh - ylow) / 10, .1)
+            print(f"problem with {metric_name}\n", metric)
+        yoffset = max((yhigh - ylow) / 10, 0.1)
         xlow, xhigh = 0, len(metric) + 5
         ax.set_ylim(ylow, yhigh)
         ax.set_ylabel(metric_name)
-        ax.set_yticks(np.arange(ylow-1.5 * yoffset, 
-                                yhigh+1.5 * yoffset, 
-                                yoffset))
+        ax.set_yticks(
+            np.arange(ylow - 1.5 * yoffset, yhigh + 1.5 * yoffset, yoffset)
+        )
         ax.set_xticks(np.arange(xlow, xhigh, (xhigh - xlow) / 10).round())
         ax.set_xticklabels(ax.get_xticks(), rotation=90)
     if suptitle is not None:
@@ -161,15 +164,19 @@ def get_moving_avgs(returns_over_episodes, num_steps):
     averages over num_steps steps.
     """
     if num_steps > len(returns_over_episodes):
-        print("issue in moving avg generation; "
-              f"not enough data for {num_steps} step ma;\n")
+        print(
+            "issue in moving avg generation; "
+            f"not enough data for {num_steps} step ma;\n"
+        )
         return []
         raise ValueError(
             "num_steps should be less than"
             " or equal to length of returns_over_episodes"
         )
     return (
-        np.correlate(returns_over_episodes, np.ones(num_steps), mode="valid")
+        np.correlate(
+            returns_over_episodes, np.ones(num_steps), mode="valid"
+        )
         / num_steps
     )
 

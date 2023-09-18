@@ -10,7 +10,10 @@ from torch import nn
 import torch.distributions as dists
 from pathlib import Path
 from graph_irl.distributions import *
-from graph_irl.graph_rl_utils import get_action_vector_from_idx, get_batch_knn_index
+from graph_irl.graph_rl_utils import (
+    get_action_vector_from_idx,
+    get_batch_knn_index,
+)
 import torch_geometric.nn as tgnn
 from math import exp
 
@@ -22,10 +25,10 @@ if not TEST_OUTPUTS_PATH.exists():
 
 class GCN(nn.Module):
     def __init__(
-        self, 
-        in_dim, 
-        hiddens, 
-        heads=1, 
+        self,
+        in_dim,
+        hiddens,
+        heads=1,
         final_tanh=False,
         knn_edge_index=None,
     ):
@@ -50,34 +53,40 @@ class GCN(nn.Module):
 
         for i in range(len(temp) - 1):
             assert temp[i + 1] % heads == 0
-            tgnet.append((tgnn.GATv2Conv(temp[i], temp[i + 1] // heads, 
-                                         heads=heads), 
-                          f"x, edge_index -> x"))
+            tgnet.append(
+                (
+                    tgnn.GATv2Conv(
+                        temp[i], temp[i + 1] // heads, heads=heads
+                    ),
+                    f"x, edge_index -> x",
+                )
+            )
             if i < len(temp) - 2:
                 tgnet.append(nn.ReLU())
             if knn_edge_index is not None:
-                self.net2.append((tgnn.GATv2Conv(temp[i], temp[i + 1] // heads, 
-                                         heads=heads), 
-                          f"x, edge_index -> x"))
+                self.net2.append(
+                    (
+                        tgnn.GATv2Conv(
+                            temp[i], temp[i + 1] // heads, heads=heads
+                        ),
+                        f"x, edge_index -> x",
+                    )
+                )
                 if i < len(temp) - 2:
                     self.net2.append(nn.ReLU())
-        
+
         # get graph net in Sequential container;
-        self.net = tgnn.Sequential('x, edge_index', tgnet)
+        self.net = tgnn.Sequential("x, edge_index", tgnet)
         if knn_edge_index is not None:
-            self.net2 = tgnn.Sequential('x, edge_index', self.net2)
+            self.net2 = tgnn.Sequential("x, edge_index", self.net2)
 
     def forward(self, batch, extra_graph_level_feats=None):
         x, edge_index = batch.x, batch.edge_index
         x = self.net(x, edge_index)
 
         if self.knn_edge_index is not None:
-            knn_index = get_batch_knn_index(
-                batch, self.knn_edge_index
-            )
-            x_knn = self.net2(
-                batch.x, knn_index
-            )
+            knn_index = get_batch_knn_index(batch, self.knn_edge_index)
+            x_knn = self.net2(batch.x, knn_index)
             x = torch.cat((x, x_knn), -1)
 
         # return avg node embedding for each graph in the batch;
@@ -94,7 +103,10 @@ class GCN(nn.Module):
 
 class AmortisedGaussNet(nn.Module):
     def __init__(
-        self, obs_dim, action_dim, hiddens, 
+        self,
+        obs_dim,
+        action_dim,
+        hiddens,
         with_layer_norm=False,
         with_batch_norm=False,
         log_sigma_min=None,
@@ -102,8 +114,8 @@ class AmortisedGaussNet(nn.Module):
     ):
         super(AmortisedGaussNet, self).__init__()
         assert not (with_layer_norm and with_batch_norm)
-        self.log_sigma_min=log_sigma_min
-        self.log_sigma_max=log_sigma_max
+        self.log_sigma_min = log_sigma_min
+        self.log_sigma_max = log_sigma_max
 
         # init net;
         self.net = nn.Sequential()
@@ -125,21 +137,23 @@ class AmortisedGaussNet(nn.Module):
         # add mean and Cholesky of diag covariance net;
         self.mu_net = nn.Linear(hiddens[-1], action_dim)
         self.std_net = nn.Sequential(
-            nn.Linear(hiddens[-1], action_dim), 
-            nn.Softplus()
+            nn.Linear(hiddens[-1], action_dim), nn.Softplus()
         )
 
     def forward(self, obs):
         # assert not torch.any(obs.isnan())
         emb = self.net(obs)  # shared embedding for mean and std;
-        if self.log_sigma_max is not None and self.log_sigma_min is not None:
+        if (
+            self.log_sigma_max is not None
+            and self.log_sigma_min is not None
+        ):
             return (
                 self.mu_net(emb),
                 torch.clamp(
-                    self.std_net(emb), 
+                    self.std_net(emb),
                     exp(self.log_sigma_min),
-                    exp(self.log_sigma_max)
-                )
+                    exp(self.log_sigma_max),
+                ),
             )
         return self.mu_net(emb), self.std_net(emb)
 
@@ -188,7 +202,9 @@ class GaussPolicy(nn.Module):
 
         # init net;
         self.net = AmortisedGaussNet(
-            obs_dim, out_dim, hiddens, 
+            obs_dim,
+            out_dim,
+            hiddens,
             with_layer_norm=with_layer_norm,
             with_batch_norm=with_batch_norm,
             log_sigma_min=log_sigma_min,
@@ -196,7 +212,7 @@ class GaussPolicy(nn.Module):
         )
 
     def forward(
-            self, obs, extra_graph_level_feats=None, get_graph_embeds=False
+        self, obs, extra_graph_level_feats=None, get_graph_embeds=False
     ):
         if self.encoder is not None:
             obs, node_embeds = self.encoder(
@@ -206,12 +222,16 @@ class GaussPolicy(nn.Module):
         if self.encoder is not None:
             if get_graph_embeds:
                 return (
-                    GaussDist(dists.Normal(mus, sigmas), self.two_action_vectors),
+                    GaussDist(
+                        dists.Normal(mus, sigmas), self.two_action_vectors
+                    ),
                     node_embeds,
-                    obs
-                )    
+                    obs,
+                )
             return (
-                GaussDist(dists.Normal(mus, sigmas), self.two_action_vectors),
+                GaussDist(
+                    dists.Normal(mus, sigmas), self.two_action_vectors
+                ),
                 node_embeds,
             )
         return GaussDist(dists.Normal(mus, sigmas))
@@ -235,14 +255,18 @@ class TwoStageGaussPolicy(nn.Module):
         self.name = "TwoStageGaussPolicy"
 
         self.net1 = AmortisedGaussNet(
-            obs_dim, action_dim, hiddens1, 
-            with_layer_norm=with_layer_norm, 
+            obs_dim,
+            action_dim,
+            hiddens1,
+            with_layer_norm=with_layer_norm,
             with_batch_norm=with_batch_norm,
             log_sigma_min=log_sigma_min,
             log_sigma_max=log_sigma_max,
         )
         self.net2 = AmortisedGaussNet(
-            obs_dim + action_dim, action_dim, hiddens2, 
+            obs_dim + action_dim,
+            action_dim,
+            hiddens2,
             with_layer_norm=with_layer_norm,
             with_batch_norm=with_batch_norm,
             log_sigma_min=log_sigma_min,
@@ -250,16 +274,18 @@ class TwoStageGaussPolicy(nn.Module):
         )
 
     def forward(
-            self, obs, extra_graph_level_feats=None, get_graph_embeds=False
+        self, obs, extra_graph_level_feats=None, get_graph_embeds=False
     ):
         obs, node_embeds = self.encoder(obs, extra_graph_level_feats)
         mus, sigmas = self.net1(obs)
         if get_graph_embeds:
             return (
-                TwoStageGaussDist(dists.Normal(mus, sigmas), obs, self.net2),
+                TwoStageGaussDist(
+                    dists.Normal(mus, sigmas), obs, self.net2
+                ),
                 node_embeds,
-                obs
-            )    
+                obs,
+            )
         return (
             TwoStageGaussDist(dists.Normal(mus, sigmas), obs, self.net2),
             node_embeds,
@@ -293,9 +319,11 @@ class TanhGaussPolicy(nn.Module):
             out_dim = 2 * action_dim
         else:
             out_dim = action_dim
-        
+
         self.net = AmortisedGaussNet(
-            obs_dim, out_dim, hiddens,
+            obs_dim,
+            out_dim,
+            hiddens,
             with_layer_norm=with_layer_norm,
             with_batch_norm=with_batch_norm,
             log_sigma_min=log_sigma_min,
@@ -303,32 +331,37 @@ class TanhGaussPolicy(nn.Module):
         )
 
     def forward(
-            self, obs, extra_graph_level_feats=None, get_graph_embeds=False
+        self, obs, extra_graph_level_feats=None, get_graph_embeds=False
     ):
         if self.encoder is not None:
-            obs, node_embeds = self.encoder(
-                obs, extra_graph_level_feats
-            )
+            obs, node_embeds = self.encoder(obs, extra_graph_level_feats)
         mus, sigmas = self.net(obs)
         if self.encoder is not None:
             if get_graph_embeds:
                 return (
-                    TanhGauss(dists.Normal(mus, sigmas), self.two_action_vectors),
+                    TanhGauss(
+                        dists.Normal(mus, sigmas), self.two_action_vectors
+                    ),
                     node_embeds,
-                    obs
+                    obs,
                 )
             return (
-                TanhGauss(dists.Normal(mus, sigmas), self.two_action_vectors),
-                node_embeds
+                TanhGauss(
+                    dists.Normal(mus, sigmas), self.two_action_vectors
+                ),
+                node_embeds,
             )
         return TanhGauss(dists.Normal(mus, sigmas))
 
 
 class Qfunc(nn.Module):
     def __init__(
-        self, obs_action_dim, hiddens, 
+        self,
+        obs_action_dim,
+        hiddens,
         with_layer_norm=False,
-        with_batch_norm=False, encoder=None,
+        with_batch_norm=False,
+        encoder=None,
     ):
         super(Qfunc, self).__init__()
 
@@ -359,11 +392,11 @@ class Qfunc(nn.Module):
         self.net.append(nn.Linear(hiddens[-1], 1))
 
     def forward(
-            self, 
-            obs_action, 
-            extra_graph_level_feats=None, 
-            action_is_index=False,
-            return_graph_lvl=False,
+        self,
+        obs_action,
+        extra_graph_level_feats=None,
+        action_is_index=False,
+        return_graph_lvl=False,
     ):
         """
         If self.encoder is not None, then obs_action is (batch, actions).
@@ -373,20 +406,18 @@ class Qfunc(nn.Module):
         """
         if self.encoder is not None:
             batch, actions = obs_action
-            obs, node_embeds = self.encoder(
-                batch, extra_graph_level_feats
-            )
+            obs, node_embeds = self.encoder(batch, extra_graph_level_feats)
             if action_is_index:
                 num_graphs = 1
-                if hasattr(batch, 'num_graphs'):
+                if hasattr(batch, "num_graphs"):
                     num_graphs = batch.num_graphs
-                
+
                 # get actions -> vector of idxs of nodes;
                 actions = get_action_vector_from_idx(
                     node_embeds, actions, num_graphs
                 )
             # else:
-                # actions = torch.cat(actions, -1)
+            # actions = torch.cat(actions, -1)
             obs_action = torch.cat((obs, actions), -1)
         if return_graph_lvl:
             assert self.encoder is not None
@@ -396,7 +427,11 @@ class Qfunc(nn.Module):
 
 class Vfunc(nn.Module):
     def __init__(
-        self, embed_dim, encoder, hiddens, with_batch_norm=False,
+        self,
+        embed_dim,
+        encoder,
+        hiddens,
+        with_batch_norm=False,
     ):
         super(Vfunc, self).__init__()
 

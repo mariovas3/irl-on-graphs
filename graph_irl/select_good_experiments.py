@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+
 p = Path(__file__).absolute().parent.parent
 if str(p) not in sys.path:
     sys.path.append(str(p))
@@ -20,20 +21,22 @@ def display_pvals_and_metrics(dirs: list, thres, target_graph=True):
         rejects_dict = get_number_rejected(pvals_in_dir, thres=thres)
         for k, v in sorted(rejects_dict.items(), key=lambda x: x[0]):
             print(k, v, v[0] / v[1])
-        print('\n')
+        print("\n")
 
 
 def get_pvals_and_metrics_in_dir(dir_path):
     """
-    Returns 
+    Returns
         pvals_in_dir (dict): policy_name_metric_name: pvals_over_seeds;
         metrics_in_dir (list): list of dicts, each dict is policy_name_metric_name: metric_numbers;
     """
     pvals_in_dir = {}
     metrics_in_dir = []
     for d in dir_path.iterdir():
-        topo_dir = d / 'target_graph_stats'
-        metrics, metric_names, policy_names, flag = process_topo_dir(topo_dir)
+        topo_dir = d / "target_graph_stats"
+        metrics, metric_names, policy_names, flag = process_topo_dir(
+            topo_dir
+        )
         assert flag
         metrics_in_dir.append(metrics)
         res, five_nums = get_all_p_vals(metrics, metric_names)
@@ -49,9 +52,13 @@ def get_pvals_source_graph(dir_path):
     pvals_in_dir = {}
     metrics_in_dir = []
     for d in dir_path.iterdir():
-        topo_dir = d / 'train_graph_gen_dir'
-        metrics, metric_names, policy_names, flag = process_topo_dir(topo_dir)
-        metrics2, metric_names2, policy_names2, flag2 = process_topo_dir(d / 'target_graph_stats', 'sourcegraph')
+        topo_dir = d / "train_graph_gen_dir"
+        metrics, metric_names, policy_names, flag = process_topo_dir(
+            topo_dir
+        )
+        metrics2, metric_names2, policy_names2, flag2 = process_topo_dir(
+            d / "target_graph_stats", "sourcegraph"
+        )
         metrics.update(metrics2)
         metric_names = metric_names.union(metric_names2)
         metrics_in_dir.append(metrics)
@@ -74,7 +81,7 @@ def count_rejects(pvals, thres):
 
 def get_number_rejected(pvals_in_dir, thres):
     """
-    Get a dictionary of number rejected hypothesis 
+    Get a dictionary of number rejected hypothesis
     when pvals < thres.
 
     Returns:
@@ -92,13 +99,13 @@ def process_topo_dir(topo_dir, filter=None):
     policy_names = set()
     flag = False
     for fi in topo_dir.iterdir():
-        file_name = str(fi).split('/')[-1]
+        file_name = str(fi).split("/")[-1]
         # check if run in this experiment finished successfully;
         # if yes, there should be png file;
-        if not flag and '.png' in file_name:
+        if not flag and ".png" in file_name:
             flag = True
-        if '.pkl' in file_name:
-            tokens = file_name[:-4].split('_')
+        if ".pkl" in file_name:
+            tokens = file_name[:-4].split("_")
             if filter is not None:
                 if tokens[0] != filter:
                     continue
@@ -107,9 +114,9 @@ def process_topo_dir(topo_dir, filter=None):
             # e.g., 'irlpolicy' or 'targetgraph'
             policy_names.add(tokens[0])
             # e.g., 'irlpolicy_degrees'
-            metric_name = tokens[0] + '_' + tokens[-1]
+            metric_name = tokens[0] + "_" + tokens[-1]
             # read the data - should be list;
-            with open(fi, 'rb') as f:
+            with open(fi, "rb") as f:
                 data = pickle.load(f)
             # some metrics are over multiple runs;
             # e.g., 'irlpolicy_0_degrees.pkl'
@@ -129,51 +136,55 @@ def check_dim(arr):
 def get_p_vals_of_source(metrics, metric_names):
     results = {}
     for n in metric_names:
-        n1 = 'irlpolicy' + '_' + n
-        n2 = 'sourcegraph' + '_' + n
-        p1 = ks_2samp(metrics[n1], metrics[n2], method='exact').pvalue
-        results[n1 + '_vs_source_KS_pval'] = p1
-    return results, {k: get_five_num_summary(v) for k, v in metrics.items()}
+        n1 = "irlpolicy" + "_" + n
+        n2 = "sourcegraph" + "_" + n
+        p1 = ks_2samp(metrics[n1], metrics[n2], method="exact").pvalue
+        results[n1 + "_vs_source_KS_pval"] = p1
+    return results, {
+        k: get_five_num_summary(v) for k, v in metrics.items()
+    }
 
 
 def get_all_p_vals(metrics, metric_names):
     results = {}
     for n in metric_names:
         # n = 'degrees'
-        n1 = 'irlpolicy' + '_' + n
-        n2 = 'newpolicy' + '_' + n
-        n3 = 'sourcegraph' + '_' + n
-        n4 = 'targetgraph' + '_' + n
+        n1 = "irlpolicy" + "_" + n
+        n2 = "newpolicy" + "_" + n
+        n3 = "sourcegraph" + "_" + n
+        n4 = "targetgraph" + "_" + n
         # kolmogorov-smirnov tests;
         # first compare irlpolicy ran on target vs sourcegraph dist;
         # since irlpolicy was trained on sourcegraph;
-        p1 = ks_2samp(metrics[n1], metrics[n3], method='exact').pvalue
+        p1 = ks_2samp(metrics[n1], metrics[n3], method="exact").pvalue
         # second, compare newpolicy ran on target vs targetgraph dist;
         # since it was retrained on target, using irl_reward;
-        p2 = ks_2samp(metrics[n2], metrics[n4], method='exact').pvalue
+        p2 = ks_2samp(metrics[n2], metrics[n4], method="exact").pvalue
         # compare irl policy to target;
-        p3 = ks_2samp(metrics[n1], metrics[n4], method='exact').pvalue
-        results[n1 + '_KS_pval'] = p1
-        results[n2 + '_KS_pval'] = p2
-        results[n1 + '_target_KS_pval'] = p3
-    return results, {k: get_five_num_summary(v) for k, v in metrics.items()}
+        p3 = ks_2samp(metrics[n1], metrics[n4], method="exact").pvalue
+        results[n1 + "_KS_pval"] = p1
+        results[n2 + "_KS_pval"] = p2
+        results[n1 + "_target_KS_pval"] = p3
+    return results, {
+        k: get_five_num_summary(v) for k, v in metrics.items()
+    }
 
 
 def get_min_p_vals(metrics, metric_names):
     min_p1, min_p2 = 2, 2
     for n in metric_names:
         # n = 'degrees'
-        n1 = 'irlpolicy' + '_' + n
-        n2 = 'newpolicy' + '_' + n
-        n3 = 'sourcegraph' + '_' + n
-        n4 = 'targetgraph' + '_' + n
+        n1 = "irlpolicy" + "_" + n
+        n2 = "newpolicy" + "_" + n
+        n3 = "sourcegraph" + "_" + n
+        n4 = "targetgraph" + "_" + n
         # kolmogorov-smirnov tests;
         # first compare irlpolicy ran on target vs sourcegraph dist;
         # since irlpolicy was trained on sourcegraph;
-        p1 = ks_2samp(metrics[n1], metrics[n3], method='exact').pvalue
+        p1 = ks_2samp(metrics[n1], metrics[n3], method="exact").pvalue
         # second, compare newpolicy ran on target vs targetgraph dist;
         # since it was retrained on target, using irl_reward;
-        p2 = ks_2samp(metrics[n2], metrics[n4], method='exact').pvalue
+        p2 = ks_2samp(metrics[n2], metrics[n4], method="exact").pvalue
         # keep track of least pvalues, i.e., where the
         # dists matched the least;
         min_p1, min_p2 = min(min_p1, p1), min(min_p2, p2)
@@ -189,8 +200,10 @@ def select_good_candidates(experiments_dir, k_best):
     heapify(source_priority)
     heapify(target_priority)
     for d in experiments_dir.iterdir():
-        topo_dir = d / 'target_graph_stats'
-        metrics, metric_names, policy_names, flag = process_topo_dir(topo_dir)
+        topo_dir = d / "target_graph_stats"
+        metrics, metric_names, policy_names, flag = process_topo_dir(
+            topo_dir
+        )
         if not flag:
             continue
         min_p1, min_p2 = get_min_p_vals(metrics, metric_names)
@@ -211,10 +224,10 @@ def get_agreement(h1, h2):
 
 def copy_selected_dirs(heap, dest_dir, target_nums=False):
     for it in heap:
-        exp_dir_name = str(it[-1]).split('/')[-1]
+        exp_dir_name = str(it[-1]).split("/")[-1]
         exp_dir_name = f"{exp_dir_name}-{it[0]:.4f}-{it[1]:.4f}"
         if target_nums:
-            exp_dir_name = exp_dir_name + '-targetnums'
+            exp_dir_name = exp_dir_name + "-targetnums"
         shutil.copytree(it[-1], Path(dest_dir) / exp_dir_name)
 
 
@@ -225,7 +238,9 @@ if __name__ == "__main__":
     dest_dir = input("provide a path to save experiments: ")
     dest_dir = p / dest_dir
 
-    source_priority, target_priority = select_good_candidates(experiments_path, k_best=10)
+    source_priority, target_priority = select_good_candidates(
+        experiments_path, k_best=10
+    )
     if target_nums:
         h = get_agreement(source_priority, target_priority)
     else:

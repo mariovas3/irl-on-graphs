@@ -6,17 +6,15 @@ import torch.distributions as dists
 class GaussInputDist:
     def __init__(self, diag_gauss):
         self.diag_gauss = diag_gauss
-    
+
     @staticmethod
     def unnorm_log_prob(x, diag_gauss):
-        return (
-            -.5 * ((x - diag_gauss.mean) / diag_gauss.stddev) ** 2
-        )
+        return -0.5 * ((x - diag_gauss.mean) / diag_gauss.stddev) ** 2
 
     def log_prob(self, x):
         pass
 
-    def sample(self, k_proposals: int=1):
+    def sample(self, k_proposals: int = 1):
         pass
 
     def rsample(self):
@@ -58,13 +56,13 @@ class GaussDist(GaussInputDist):
             x = torch.cat(x, -1)
             return self.diag_gauss.log_prob(x)
         return self.diag_gauss.log_prob(*x)
-    
+
     def get_unnorm_log_prob(self, *x):
         if self.two_action_vectors:
             x = torch.cat(x, -1)
             return GaussInputDist.unnorm_log_prob(x, self.diag_gauss)
         return GaussInputDist.unnorm_log_prob(*x, self.diag_gauss)
-    
+
     @property
     def mean(self):
         mus = super().mean
@@ -72,7 +70,7 @@ class GaussDist(GaussInputDist):
             mid = mus.shape[-1] // 2
             return mus[:, :mid].squeeze(), mus[:, mid:].squeeze()
         return mus
-    
+
     @property
     def stddev(self):
         sigmas = super().stddev
@@ -81,15 +79,15 @@ class GaussDist(GaussInputDist):
             return sigmas[:, :mid].squeeze(), sigmas[:, mid:].squeeze()
         return sigmas
 
-    def sample(self, k_proposals: int=1):
-        a = self.diag_gauss.sample((k_proposals, ))
+    def sample(self, k_proposals: int = 1):
+        a = self.diag_gauss.sample((k_proposals,))
         if self.two_action_vectors:
             mid = a.shape[-1] // 2
             return a[:, :, :mid].squeeze(), a[:, :, mid:].squeeze()
         return a
 
-    def rsample(self, k_proposals: int=1):
-        a = self.diag_gauss.rsample((k_proposals, ))
+    def rsample(self, k_proposals: int = 1):
+        a = self.diag_gauss.rsample((k_proposals,))
         if self.two_action_vectors:
             mid = a.shape[-1] // 2
             return a[:, :, :mid].squeeze(), a[:, :, mid:].squeeze()
@@ -108,25 +106,24 @@ class TwoStageGaussDist(GaussInputDist):
         super(TwoStageGaussDist, self).__init__(diag_gauss)
         self.obs = obs
         self.net = net
-    
+
     def get_unnorm_log_prob(self, a1, a2):
         diag_gauss2 = self._get_a2_dist(a1)
-        return (
-            GaussInputDist.unnorm_log_prob(a1, self.diag_gauss)
-            + GaussInputDist.unnorm_log_prob(a2, diag_gauss2)
-        )
+        return GaussInputDist.unnorm_log_prob(
+            a1, self.diag_gauss
+        ) + GaussInputDist.unnorm_log_prob(a2, diag_gauss2)
 
     def log_prob(self, a1, a2):
         diag_gauss2 = self._get_a2_dist(a1)
         return self.diag_gauss.log_prob(a1) + diag_gauss2.log_prob(a2)
 
-    def sample(self, k_proposals: int=1):
-        a1 = self.diag_gauss.sample((k_proposals, ))
+    def sample(self, k_proposals: int = 1):
+        a1 = self.diag_gauss.sample((k_proposals,))
         diag_gauss2 = self._get_a2_dist(a1)
         return a1.squeeze(), diag_gauss2.sample().squeeze()
 
-    def rsample(self, k_proposals: int=1):
-        a1 = self.diag_gauss.rsample((k_proposals, ))
+    def rsample(self, k_proposals: int = 1):
+        a1 = self.diag_gauss.rsample((k_proposals,))
         diag_gauss2 = self._get_a2_dist(a1)
         return a1.squeeze(), diag_gauss2.rsample().squeeze()
 
@@ -177,24 +174,22 @@ class TanhGauss(GaussInputDist):
 
     def _tanh_var_to_gauss_var(self, tanh_domain_x):
         return (
-            torch.log(1. + tanh_domain_x) / 2
-            - torch.log(1. - tanh_domain_x) / 2
+            torch.log(1.0 + tanh_domain_x) / 2
+            - torch.log(1.0 - tanh_domain_x) / 2
         )
-    
+
     def log_prob(self, *tanh_domain_x):
         if self.two_action_vectors:
             tanh_domain_x = torch.cat(tanh_domain_x, -1)
         gauss_domain_x = self._tanh_var_to_gauss_var(tanh_domain_x)
         return self._log_prob_from_gauss(gauss_domain_x)
-    
+
     def get_unnorm_log_prob(self, *tanh_domain_x):
         if self.two_action_vectors:
             tanh_domain_x = torch.cat(tanh_domain_x, -1)
-        tanh_domain_x = torch.clamp(
-            tanh_domain_x, -.99999, .99999
-        )
+        tanh_domain_x = torch.clamp(tanh_domain_x, -0.99999, 0.99999)
         gauss_domain_x = self._tanh_var_to_gauss_var(tanh_domain_x)
-        tanh_term = (1. - torch.tanh(gauss_domain_x) ** 2).log()
+        tanh_term = (1.0 - torch.tanh(gauss_domain_x) ** 2).log()
         unnormed_gausses = GaussInputDist.unnorm_log_prob(
             gauss_domain_x, self.diag_gauss
         )
@@ -207,19 +202,19 @@ class TanhGauss(GaussInputDist):
         tanh_term = (1.0 - torch.tanh(x) ** 2).log()
         return self.diag_gauss.log_prob(x) - tanh_term
 
-    def sample(self, k_proposals: int=1):
-        a = torch.tanh(self.diag_gauss.sample((k_proposals, )))
+    def sample(self, k_proposals: int = 1):
+        a = torch.tanh(self.diag_gauss.sample((k_proposals,)))
         if self.two_action_vectors:
             mid = a.shape[-1] // 2
             return a[:, :, :mid].squeeze(), a[:, :, mid:].squeeze()
         return a
 
-    def rsample(self, k_proposals: int=1):
+    def rsample(self, k_proposals: int = 1):
         # a is 3 dim tensor now;
-        a = torch.tanh(self.diag_gauss.rsample((k_proposals, )))
+        a = torch.tanh(self.diag_gauss.rsample((k_proposals,)))
         if self.two_action_vectors:
             mid = a.shape[-1] // 2
-            # in default case, should return 2 1d tensors; 
+            # in default case, should return 2 1d tensors;
             return a[:, :, :mid].squeeze(), a[:, :, mid:].squeeze()
         return a
 

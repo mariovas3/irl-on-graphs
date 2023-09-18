@@ -33,9 +33,9 @@ class IRLGraphTrainer:
         num_edges_start_from=0,
         reward_optim_lr_scheduler=None,
         reward_grad_clip=False,
-        reward_scale=1.,
+        reward_scale=1.0,
         per_decision_imp_sample=False,
-        weight_scaling_type='abs_max',
+        weight_scaling_type="abs_max",
         unnorm_policy=False,
         add_expert_to_generated=False,
         lcr_regularisation_coef=None,
@@ -72,8 +72,9 @@ class IRLGraphTrainer:
         # set expert example;
         self.nodes = nodes
         self.expert_edge_index = expert_edge_index
-        self.adj_list = edge_index_to_adj_list(expert_edge_index[:, ::2], 
-                                               len(nodes))
+        self.adj_list = edge_index_to_adj_list(
+            expert_edge_index[:, ::2], len(nodes)
+        )
         self.do_dfs_expert_paths = do_dfs_expert_paths
 
         # sampling params;
@@ -84,18 +85,22 @@ class IRLGraphTrainer:
         self.num_expert_traj = num_expert_traj
         self.graphs_per_batch = graphs_per_batch
         self.num_extra_paths_gen = num_extra_paths_gen
-        # if True, then starting state is some 
+        # if True, then starting state is some
         # expert path with num_edges_start_from number of edges;
         # this is so that gnn can actually pass some messages;
         self.num_edges_start_from = num_edges_start_from
 
         # reward-loss-related params;
         self.per_decision_imp_sample = per_decision_imp_sample
-        self.weight_type = 'per_dec' if self.per_decision_imp_sample else 'vanilla'
+        self.weight_type = (
+            "per_dec" if self.per_decision_imp_sample else "vanilla"
+        )
         self.weight_scaling_type = weight_scaling_type
         self.unnorm_policy = unnorm_policy
         self.lcr_regularisation_coef = lcr_regularisation_coef
-        self.mono_regularisation_on_demo_coef = mono_regularisation_on_demo_coef
+        self.mono_regularisation_on_demo_coef = (
+            mono_regularisation_on_demo_coef
+        )
 
         # See if should add expert trajectories to sampled ones
         # in the reward loss;
@@ -108,7 +113,7 @@ class IRLGraphTrainer:
         self.ortho_init = ortho_init
         if ortho_init:
             self.OI_init_nets()
-        
+
         # saving stuff;
         self.expert_avg_returns = []
         self.imp_sampled_returns = []
@@ -123,7 +128,7 @@ class IRLGraphTrainer:
 
     def train_policy_k_epochs(self, k, **kwargs):
         self.agent.train_k_epochs(k, **kwargs)
-    
+
     def _get_lcr_loss(self, rewards):
         if rewards.shape[-1] > 2:
             lcr_loss = (
@@ -132,28 +137,43 @@ class IRLGraphTrainer:
                         rewards[:, :-2]
                         + rewards[:, 2:]
                         - 2 * rewards[:, 1:-1]
-                    ) ** 2 * ((rewards[:, 2:] != 0).detach().int())
-                ).sum(-1).mean()
+                    )
+                    ** 2
+                    * ((rewards[:, 2:] != 0).detach().int())
+                )
+                .sum(-1)
+                .mean()
             ) * self.lcr_regularisation_coef
             return lcr_loss
         warnings.warn("expert trajectories less than 3 steps long")
-        return 0.
-    
+        return 0.0
+
     def get_source_graph_reward(self):
-        source_graph = Data(x=self.nodes, 
-                            edge_index=self.expert_edge_index)
+        source_graph = Data(
+            x=self.nodes, edge_index=self.expert_edge_index
+        )
         extra_graph_level_feats = None
         if self.agent.buffer.transform_ is not None:
             self.agent.buffer.transform_(source_graph)
-            if self.agent.buffer.transform_.get_graph_level_feats_fn is not None:
-                extra_graph_level_feats = self.agent.buffer.transform_.get_graph_level_feats_fn(source_graph)
+            if (
+                self.agent.buffer.transform_.get_graph_level_feats_fn
+                is not None
+            ):
+                extra_graph_level_feats = (
+                    self.agent.buffer.transform_.get_graph_level_feats_fn(
+                        source_graph
+                    )
+                )
 
         if self.do_graphopt:
-            out = self.agent.old_encoder(source_graph, extra_graph_level_feats)[0]
+            out = self.agent.old_encoder(
+                source_graph, extra_graph_level_feats
+            )[0]
             curr_rewards = self.reward_fn(out)
         else:
             curr_rewards = self.reward_fn(
-                source_graph, extra_graph_level_feats,
+                source_graph,
+                extra_graph_level_feats,
                 get_graph_embeds=False,
             )
         curr_rewards = curr_rewards.view(-1) * self.reward_scale
@@ -162,48 +182,86 @@ class IRLGraphTrainer:
     def do_reward_grad_step(self):
         self.reward_optim.zero_grad()
         mono_loss, lcr_loss1 = 0.0, 0.0
-        quad_expert = 0.
+        quad_expert = 0.0
 
         if self.zero_interm_rew:
-            expert_avg_returns, expert_rewards, tot_mse1, tot_len1 = self.get_source_graph_reward()
+            (
+                expert_avg_returns,
+                expert_rewards,
+                tot_mse1,
+                tot_len1,
+            ) = self.get_source_graph_reward()
         else:
             # get avg(expert_returns)
-            expert_avg_returns, expert_rewards, tot_mse1, tot_len1  = self.get_avg_expert_returns()
+            (
+                expert_avg_returns,
+                expert_rewards,
+                tot_mse1,
+                tot_len1,
+            ) = self.get_avg_expert_returns()
             assert expert_rewards.requires_grad
-        
+
         # get rewards for truncated trajectories;
         if not self.zero_interm_rew and self.num_edges_start_from > 0:
-            expert_rewards = expert_rewards[:, self.num_edges_start_from:]
+            expert_rewards = expert_rewards[:, self.num_edges_start_from :]
             expert_avg_returns = expert_rewards.sum(-1).mean()
-        
+
         if not self.zero_interm_rew and self.verbose:
             print("expert_rewards shape: ", expert_rewards.shape)
 
         # see if should penalise to encourage later steps in the expert traj
         # to receive more reward;
-        if not self.zero_interm_rew and self.mono_regularisation_on_demo_coef is not None:
+        if (
+            not self.zero_interm_rew
+            and self.mono_regularisation_on_demo_coef is not None
+        ):
             mono_loss = (
                 (
                     torch.relu(
                         expert_rewards[:, :-1] - expert_rewards[:, 1:]
-                    ) ** 2
-                ).sum(-1).mean()
+                    )
+                    ** 2
+                )
+                .sum(-1)
+                .mean()
             ) * self.mono_regularisation_on_demo_coef
 
         # lcr loss for the expert examples;
-        if not self.zero_interm_rew and self.lcr_regularisation_coef is not None:
+        if (
+            not self.zero_interm_rew
+            and self.lcr_regularisation_coef is not None
+        ):
             lcr_loss1 = self._get_lcr_loss(expert_rewards)
-        
-        # get imp_sampled generated returns with stop grad on the weights;
-        imp_sampled_gen_rewards, lcr_loss2, tot_mse2, tot_len2, quad_sampled = self.get_avg_generated_returns()
 
-        if not self.zero_interm_rew and self.quad_reward_penalty is not None:
-            quad_expert = (expert_rewards ** 2).sum(-1).mean() * self.quad_reward_penalty
+        # get imp_sampled generated returns with stop grad on the weights;
+        (
+            imp_sampled_gen_rewards,
+            lcr_loss2,
+            tot_mse2,
+            tot_len2,
+            quad_sampled,
+        ) = self.get_avg_generated_returns()
+
+        if (
+            not self.zero_interm_rew
+            and self.quad_reward_penalty is not None
+        ):
+            quad_expert = (expert_rewards**2).sum(
+                -1
+            ).mean() * self.quad_reward_penalty
             quad_sampled = quad_sampled * self.quad_reward_penalty
-        
-        l2_loss = 0.
+
+        l2_loss = 0.0
         if self.reward_l2_coef is not None:
-            l2_loss = self.reward_l2_coef * (torch.cat([p.view(-1) for p in self.reward_fn.net[-1].parameters()]) ** 2).sum(-1)
+            l2_loss = self.reward_l2_coef * (
+                torch.cat(
+                    [
+                        p.view(-1)
+                        for p in self.reward_fn.net[-1].parameters()
+                    ]
+                )
+                ** 2
+            ).sum(-1)
         # get loss;
         loss = (
             -(expert_avg_returns - imp_sampled_gen_rewards)
@@ -211,7 +269,7 @@ class IRLGraphTrainer:
             + lcr_loss1
             + lcr_loss2
             + quad_expert
-            + quad_sampled 
+            + quad_sampled
             + l2_loss
         )
 
@@ -219,14 +277,20 @@ class IRLGraphTrainer:
         loss.backward(retain_graph=self.agent.multitask_net is not None)
 
         # multitask loss;
-        if self.agent.multitask_net is not None  and not self.zero_interm_rew and not self.do_graphopt:
+        if (
+            self.agent.multitask_net is not None
+            and not self.zero_interm_rew
+            and not self.do_graphopt
+        ):
             self.agent.optim_multitask_net.zero_grad()
-            mtt_loss = tot_mse1 * (tot_len1 / (tot_len1 + tot_len2)) + tot_mse2 * (tot_len2 / (tot_len1 + tot_len2))
+            mtt_loss = tot_mse1 * (
+                tot_len1 / (tot_len1 + tot_len2)
+            ) + tot_mse2 * (tot_len2 / (tot_len1 + tot_len2))
             mtt_loss = self.agent.multitask_coef * mtt_loss
             self.mtt_losses.append(mtt_loss.item())
             print(f"multitask gnn loss: {self.mtt_losses[-1]}")
             mtt_loss.backward()
-        
+
         self.expert_avg_returns.append(expert_avg_returns.item())
         self.imp_sampled_returns.append(imp_sampled_gen_rewards.item())
         if self.mono_regularisation_on_demo_coef is not None:
@@ -253,13 +317,13 @@ class IRLGraphTrainer:
         if self.reward_l2_coef is not None:
             print(f"reward last layer square l2 loss: {l2_loss.item()}")
         print(f"overall reward loss: {loss.item()}")
-        
+
         # see if reward grads need clipping;
         if self.reward_grad_clip:
             nn.utils.clip_grad_norm_(
-                self.reward_fn.parameters(), 
-                max_norm=1.0, 
-                error_if_nonfinite=True
+                self.reward_fn.parameters(),
+                max_norm=1.0,
+                error_if_nonfinite=True,
             )
 
         if self.verbose:
@@ -269,10 +333,10 @@ class IRLGraphTrainer:
                 curr_grads.append(this_grad)
                 print(
                     f"len module param: {p.shape}",
-                    f"l2 norm of grad of params: "
-                    f"{this_grad}")
+                    f"l2 norm of grad of params: " f"{this_grad}",
+                )
             self.gradients.append(curr_grads)
-            print('\n')        
+            print("\n")
 
         # do grad step;
         self.reward_optim.step()
@@ -280,10 +344,10 @@ class IRLGraphTrainer:
         # see if lr scheduler present;
         if self.reward_optim_lr_scheduler is not None:
             self.reward_optim_lr_scheduler.step()
-        
+
     def get_avg_generated_returns(self):
         self.weight_processor = WeightsProcessor(
-            self.weight_type, 
+            self.weight_type,
             self.agent.env.spec.max_episode_steps,
         )
         if self.per_decision_imp_sample:
@@ -292,20 +356,22 @@ class IRLGraphTrainer:
 
     def _get_per_dec_imp_samp_returns(self):
         assert self.per_decision_imp_sample
-        
+
         # in undirected graph edges are duplicated;
         T = self.expert_edge_index.shape[-1] // 2
-        
+
         # for the step matching;
-        n_steps_to_sample = (self.num_expert_traj + self.num_extra_paths_gen) * T
+        n_steps_to_sample = (
+            self.num_expert_traj + self.num_extra_paths_gen
+        ) * T
         n_steps_done = 0
 
         # together with rewards from that episode;
         rewards = []
 
         # this is for getting avg sum of sq rewards over num episodes;
-        quad_rewards = 0.
-        
+        quad_rewards = 0.0
+
         # avg lcr reularisation over episodes;
         avg_lcr_reg_term, n_episodes = 0.0, 0
         flag = True
@@ -313,7 +379,7 @@ class IRLGraphTrainer:
         curr_irl_verbose = self.verbose
 
         # this is for gnn multitask;
-        tot_mse, tot_len = 0., 0
+        tot_mse, tot_len = 0.0, 0
 
         while n_steps_done < n_steps_to_sample:
             (
@@ -325,30 +391,37 @@ class IRLGraphTrainer:
                 obs,
                 _,
                 _,
-                temp_mse
+                temp_mse,
             ) = self.agent.buffer.get_single_ep_rewards_and_weights(
                 self.agent.env,
                 self.agent,
-                reward_encoder=self.agent.old_encoder if self.do_graphopt else None
+                reward_encoder=self.agent.old_encoder
+                if self.do_graphopt
+                else None,
             )
             assert steps == len(r)
-            tot_mse = (
-                tot_mse * (tot_len / (tot_len + steps))
-                + temp_mse * (steps / (tot_len + steps))
-            )
+            tot_mse = tot_mse * (
+                tot_len / (tot_len + steps)
+            ) + temp_mse * (steps / (tot_len + steps))
             tot_len += steps
 
             # update avg sum of squares;
             if self.quad_reward_penalty is not None:
-                quad_rewards = quad_rewards + ((r ** 2).sum(-1) - quad_rewards) / (n_episodes + 1)
-            
+                quad_rewards = quad_rewards + (
+                    (r**2).sum(-1) - quad_rewards
+                ) / (n_episodes + 1)
+
             assert len(log_w) == len(r)
             assert len(log_w) >= self.agent.env.min_steps_to_do
             assert r.requires_grad and not log_w.requires_grad
             if self.verbose:
-                print(f"single ep per dec sampled return: {r.detach().sum()}")
-                print(f"single ep cumsum log weights range: {log_w.min().item()}, "
-                      f"{log_w.max().item()}\n")
+                print(
+                    f"single ep per dec sampled return: {r.detach().sum()}"
+                )
+                print(
+                    f"single ep cumsum log weights range: {log_w.min().item()}, "
+                    f"{log_w.max().item()}\n"
+                )
 
             # update avg lcr_reg_term;
             n_episodes += 1
@@ -377,25 +450,33 @@ class IRLGraphTrainer:
         self.verbose = curr_irl_verbose
         if self.verbose:
             # print("actual weights per dec", weights[:, :longest], sep='\n')
-            print("sampled rewards shape ", rewards.shape, end='\n\n')
+            print("sampled rewards shape ", rewards.shape, end="\n\n")
 
         # set back to old value of verbose
         self.agent.buffer.verbose = curr_buffer_verbose
-        return (weights[:, :longest] * rewards[:, :longest]).sum(), avg_lcr_reg_term, tot_mse, tot_len, quad_rewards
+        return (
+            (weights[:, :longest] * rewards[:, :longest]).sum(),
+            avg_lcr_reg_term,
+            tot_mse,
+            tot_len,
+            quad_rewards,
+        )
 
     def _get_vanilla_imp_sampled_returns(self):
         assert not self.per_decision_imp_sample
         T = self.expert_edge_index.shape[-1] // 2
-        n_steps_to_sample = (self.num_expert_traj + self.num_extra_paths_gen) * T
+        n_steps_to_sample = (
+            self.num_expert_traj + self.num_extra_paths_gen
+        ) * T
         n_steps_done = 0
         returns = []
         avg_lcr_reg_term, n_episodes = 0.0, 0
         flag = True
         curr_buffer_verbose = self.agent.buffer.verbose
         curr_irl_verbose = self.verbose
-        quad_rewards = 0.
+        quad_rewards = 0.0
 
-        tot_mse, tot_len = 0., 0
+        tot_mse, tot_len = 0.0, 0
 
         # sample steps;
         while n_steps_done < n_steps_to_sample:
@@ -410,29 +491,34 @@ class IRLGraphTrainer:
                 obs,
                 _,
                 _,
-                temp_mse
+                temp_mse,
             ) = self.agent.buffer.get_single_ep_rewards_and_weights(
                 self.agent.env,
                 self.agent,
-                reward_encoder=self.agent.old_encoder if self.do_graphopt else None
+                reward_encoder=self.agent.old_encoder
+                if self.do_graphopt
+                else None,
             )
 
             # this is for multitask training;
-            tot_mse = (
-                tot_mse * (tot_len / (tot_len + steps))
-                + temp_mse * (steps / (tot_len + steps))
-            )
+            tot_mse = tot_mse * (
+                tot_len / (tot_len + steps)
+            ) + temp_mse * (steps / (tot_len + steps))
             tot_len += steps
 
             assert r.requires_grad and not log_w.requires_grad
             if self.quad_reward_penalty is not None:
-                quad_rewards = quad_rewards + ((r ** 2).sum(-1).mean() - quad_rewards) / (n_episodes + 1)
-            
+                quad_rewards = quad_rewards + (
+                    (r**2).sum(-1).mean() - quad_rewards
+                ) / (n_episodes + 1)
+
             # make r undiscounted return again;
             r = r.sum()
             if self.verbose:
-                print(f"single ep sampled undiscounted return: {r.item()}\n")
-            
+                print(
+                    f"single ep sampled undiscounted return: {r.item()}\n"
+                )
+
             # update avg_lcr_reg_term;
             n_episodes += 1
             avg_lcr_reg_term = (
@@ -446,7 +532,7 @@ class IRLGraphTrainer:
 
             # house keeping;
             n_steps_done += steps
-        
+
             if flag:
                 self.agent.buffer.verbose = False
                 self.verbose = False
@@ -457,8 +543,14 @@ class IRLGraphTrainer:
         self.agent.buffer.verbose = curr_buffer_verbose
         self.verbose = curr_irl_verbose
         # if self.verbose:
-            # print("actual weights vanilla", weights, sep='\n')
-        return returns @ weights, avg_lcr_reg_term, tot_mse, tot_len, quad_rewards
+        # print("actual weights vanilla", weights, sep='\n')
+        return (
+            returns @ weights,
+            avg_lcr_reg_term,
+            tot_mse,
+            tot_len,
+            quad_rewards,
+        )
 
     def get_avg_expert_returns(self) -> Tuple[float, torch.Tensor]:
         """
@@ -474,13 +566,23 @@ class IRLGraphTrainer:
         cached_expert_rewards = []
         flag = True
         curr_irl_verbose = self.verbose
-        tot_mse, tot_len = 0., 0
+        tot_mse, tot_len = 0.0, 0
         for _ in range(self.num_expert_traj):
             if self.do_dfs_expert_paths:
                 source = np.random.randint(0, len(self.nodes))
-                R, rewards, temp_mse, temp_len = self._get_single_ep_dfs_return(source)
+                (
+                    R,
+                    rewards,
+                    temp_mse,
+                    temp_len,
+                ) = self._get_single_ep_dfs_return(source)
             else:
-                R, rewards, temp_mse, temp_len = self._get_single_ep_expert_return()
+                (
+                    R,
+                    rewards,
+                    temp_mse,
+                    temp_len,
+                ) = self._get_single_ep_expert_return()
             if self.verbose:
                 print(f"single ep expert return: {R}")
             if flag:
@@ -489,11 +591,13 @@ class IRLGraphTrainer:
             N += 1
 
             # update stuff for multitask;
-            if self.agent.multitask_net is not None and not self.do_graphopt:
-                tot_mse = (
-                    tot_mse * (tot_len / (tot_len + temp_len))
-                    + temp_mse * (temp_len / (tot_len + temp_len))
-                )
+            if (
+                self.agent.multitask_net is not None
+                and not self.do_graphopt
+            ):
+                tot_mse = tot_mse * (
+                    tot_len / (tot_len + temp_len)
+                ) + temp_mse * (temp_len / (tot_len + temp_len))
                 tot_len += temp_len
 
             # update returns;
@@ -520,13 +624,13 @@ class IRLGraphTrainer:
         return self._get_return_and_rewards_on_path(
             self.expert_edge_index, idxs
         )
-    
+
     def _get_single_ep_dfs_return(self, source):
         edge_index = get_dfs_edge_order(self.adj_list, source)
         assert edge_index.shape == self.expert_edge_index.shape
         idxs = list(range(edge_index.shape[-1]))
         return self._get_return_and_rewards_on_path(edge_index, idxs)
-    
+
     def _get_return_and_rewards_on_path(self, edge_index, idxs):
         pointer = 0
         return_val = 0.0
@@ -534,13 +638,10 @@ class IRLGraphTrainer:
 
         # see if should do multitask gnn training;
         mtt = self.agent.multitask_net is not None
-        temp_mse, temp_len = 0., 0
+        temp_mse, temp_len = 0.0, 0
         # the * 2 multiplier is because undirected graph is assumed
         # and effectively each edge is duplicated in edge_index;
-        while (
-            pointer * self.graphs_per_batch * 2
-            < edge_index.shape[-1]
-        ):
+        while pointer * self.graphs_per_batch * 2 < edge_index.shape[-1]:
             batch_list = []
             action_idxs = []
             for i in range(
@@ -554,9 +655,7 @@ class IRLGraphTrainer:
                 batch_list.append(
                     Data(
                         x=self.nodes,
-                        edge_index=edge_index[
-                            :, idxs[ : i]
-                        ],
+                        edge_index=edge_index[:, idxs[:i]],
                     )
                 )
                 first, second = (
@@ -567,42 +666,53 @@ class IRLGraphTrainer:
                 if self.agent.buffer.state_reward:
                     batch_list[-1].edge_index = torch.cat(
                         (
-                            batch_list[-1].edge_index, 
-                            torch.tensor([[first, second], 
-                                            [second, first]], dtype=torch.long)
-                        ), -1
+                            batch_list[-1].edge_index,
+                            torch.tensor(
+                                [[first, second], [second, first]],
+                                dtype=torch.long,
+                            ),
+                        ),
+                        -1,
                     )
-    
+
             # create batch of graphs;
             batch = Batch.from_data_list(batch_list)
             extra_graph_level_feats = None
             if self.agent.buffer.transform_ is not None:
                 self.agent.buffer.transform_(batch)
-                if self.agent.buffer.transform_.get_graph_level_feats_fn is not None:
-                    extra_graph_level_feats = self.agent.buffer.transform_.get_graph_level_feats_fn(batch)
+                if (
+                    self.agent.buffer.transform_.get_graph_level_feats_fn
+                    is not None
+                ):
+                    extra_graph_level_feats = self.agent.buffer.transform_.get_graph_level_feats_fn(
+                        batch
+                    )
 
             pointer += 1
             if self.agent.buffer.state_reward:
                 if self.do_graphopt:
-                    out = self.agent.old_encoder(batch, extra_graph_level_feats)[0]
+                    out = self.agent.old_encoder(
+                        batch, extra_graph_level_feats
+                    )[0]
                     curr_rewards = self.reward_fn(out)
                 else:
                     curr_rewards = self.reward_fn(
-                        batch, extra_graph_level_feats,
+                        batch,
+                        extra_graph_level_feats,
                         get_graph_embeds=mtt,
                     )
             else:
                 if self.do_graphopt:
                     raise NotImplementedError(
-                        'graphopt only has state reward func!'
+                        "graphopt only has state reward func!"
                     )
                 curr_rewards = self.reward_fn(
-                    (batch, torch.tensor(action_idxs)), 
+                    (batch, torch.tensor(action_idxs)),
                     extra_graph_level_feats,
-                    action_is_index=True
+                    action_is_index=True,
                 )
             # see if should do multitask;
-            # graphopt doesn't have an encoder that belongs only 
+            # graphopt doesn't have an encoder that belongs only
             # to reward_fn, so can't compute multitask loss;
             # if do graphopt is True and mtt is True, the mtt
             # loss will be only computed on the encoder of the policy;
@@ -611,24 +721,25 @@ class IRLGraphTrainer:
                 curr_rewards, graph_embeds = curr_rewards
                 outs = self.agent.multitask_net(graph_embeds)
                 curr_length = len(curr_rewards.view(-1))
-                temp_mse = (
-                    temp_mse * (temp_len / (temp_len + curr_length))
-                    + nn.MSELoss()(
-                        outs.view(-1), targets.view(-1)
-                    ) * (curr_length / (temp_len + curr_length))
+                temp_mse = temp_mse * (
+                    temp_len / (temp_len + curr_length)
+                ) + nn.MSELoss()(outs.view(-1), targets.view(-1)) * (
+                    curr_length / (temp_len + curr_length)
                 )
                 temp_len += curr_length
             curr_rewards = curr_rewards.view(-1) * self.reward_scale
             return_val += curr_rewards.sum()
             cached_rewards.append(curr_rewards)
-        
+
         global DO_PLOT
         if DO_PLOT:
             G = Graph()
-            G.add_edges_from(list(zip(*batch_list[-1].edge_index.tolist())))
+            G.add_edges_from(
+                list(zip(*batch_list[-1].edge_index.tolist()))
+            )
             fig = plt.figure()
             draw_networkx(G)
-            plt.savefig('expert_example.png')
+            plt.savefig("expert_example.png")
             plt.close()
             DO_PLOT = False
         return return_val, torch.cat(cached_rewards), temp_mse, temp_len
@@ -655,23 +766,23 @@ class IRLGraphTrainer:
             self.agent.policy.requires_grad_(True)
             self.agent.policy.eval()
             self.train_policy_k_epochs(policy_epochs, **kwargs)
-        irl_dir = self.agent.save_to / 'irl_training_metrics'
+        irl_dir = self.agent.save_to / "irl_training_metrics"
         if not irl_dir.exists():
             irl_dir.mkdir(parents=True)
-        
-        metric_names=[
-                'expert_avg_returns',
-                'imp_sampled_returns',
-                'mono_losses',
-                'lcr_expert_losses',
-                'lcr_sampled_losses',
-                'quad_expert_losses',
-                'quad_sampled_losses',
-                'reward_l2_losses',
-                'l2_norm_gradients',
-                'mtt_losses',
-            ]
-        metrics=[
+
+        metric_names = [
+            "expert_avg_returns",
+            "imp_sampled_returns",
+            "mono_losses",
+            "lcr_expert_losses",
+            "lcr_sampled_losses",
+            "quad_expert_losses",
+            "quad_sampled_losses",
+            "reward_l2_losses",
+            "l2_norm_gradients",
+            "mtt_losses",
+        ]
+        metrics = [
             self.expert_avg_returns,
             self.imp_sampled_returns,
             self.mono_losses,
@@ -688,16 +799,19 @@ class IRLGraphTrainer:
             metric_names=metric_names,
             metrics=metrics,
         )
-        metric_names[-2] = 'avg_l2norm_gradients'
+        metric_names[-2] = "avg_l2norm_gradients"
         grads = np.array(metrics[-2])
         metrics[-2] = grads.mean(-1)
-        metric_names.append('max_l2norm_grads')
+        metric_names.append("max_l2norm_grads")
         metrics.append(grads.max(-1))
-        save_metric_plots(metric_names, metrics, 
-                          irl_dir, 
-                          seed=self.seed,
-                          suptitle=f"irl training for {num_iters} iters")
-    
+        save_metric_plots(
+            metric_names,
+            metrics,
+            irl_dir,
+            seed=self.seed,
+            suptitle=f"irl training for {num_iters} iters",
+        )
+
     def OI_init_nets(self):
         OI_init(self.reward_fn)
         self.agent.OI_init_nets()
@@ -707,5 +821,5 @@ def save_named_metrics(path, metric_names, metrics):
     assert path.exists()
     assert len(metric_names) == len(metrics)
     for n, m in zip(metric_names, metrics):
-        with open(path / (n + '.pkl'), 'wb') as f:
+        with open(path / (n + ".pkl"), "wb") as f:
             pickle.dump(m, f)
