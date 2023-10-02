@@ -52,10 +52,10 @@ Soft Actor-Critic algorithm (MaxEnt RL algo), [SAC-paper](https://arxiv.org/abs/
 ## Model Architectures;
 
 ### GraphOpt:
-![alt text](https://github.com/mariovas3/urban-nets-style-transfer/blob/master/ucl-pg-project-latex-template/GO_schematic2.png)
+![alt text](https://github.com/mariovas3/urban-nets-style-transfer/blob/master/pictures/GO_schematic2.png)
 
 ### Mine:
-![alt text](https://github.com/mariovas3/urban-nets-style-transfer/blob/master/ucl-pg-project-latex-template/my_model_architecture2.png)
+![alt text](https://github.com/mariovas3/urban-nets-style-transfer/blob/master/pictures/my_model_architecture2.png)
 
 ## Side docs for mujoco - used to test policy learners:
 * `pip install -U portalocker`
