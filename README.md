@@ -68,6 +68,8 @@ Soft Actor-Critic algorithm (MaxEnt RL algo), [SAC-paper](https://arxiv.org/abs/
 
 ## Experiments recipes:
 ### Barabasi graphs:
+> Train graph has 40 nodes and 3 edges added, while test graph has 80 nodes and 3 edges added.
+
 * GraphOpt with per-decision imporance samples:
 `python tests/test_irl_ba20.py net_hiddens=256,256 encoder_hiddens=64,64 embed_dim=32 max_size=100000 per_decision_imp_sample=1 quad_reward_penalty_coef=0.1 with_mlp_batch_norm=0 with_mlp_layer_norm=1 do_graphopt=1 no_q_encoder=1 with_mono=0 with_lcr=0 log_sigma_min=-20 log_sigma_max=2 reward_lr=3e-3 do_dfs_expert_paths=0 num_iters=10 num_grad_steps=10 ortho_init=0 unnorm_policy=1 use_valid_samples=1 seed=0`
 * GraphOpt using per-episode importance samples:
@@ -81,7 +83,17 @@ the default is `UT_trick=0` which falls back to reparameterisation
 trick for estimating expectations. In practice, didn't see 
 any improvement when using UT trick.
 
+The graph topologies were compared using Kolmogorov-Smirnov tests on the topology metrics (degree distribution, triangle distribution and clustering coefficient distribution), comparing 
+the distributions of the given graphs and the constructed graphs by the policy.
+
+A sample visualisation of histograms and KDE plots is shown below:
+
+<img alt="Plot of histograms and KDE of topology metrics of ground truth and constructed graphs." src="./assets/images/graph_stats_hist_kde_plots.png"/>
+
 ### The scripts above were run on a remote server;
 * After the relevant output from the above scripts was saved, 
 the results were analysed by the `experiments_analysis.ipynb` 
-notebook in the `notebooks` directory.
+notebook in the `notebooks` <a href="./notebooks/experiments_analysis.ipynb">directory</a>.
+
+
+> To reproduce the results, create a Python 3.8 Conda environment and install the requirements in `conda_requirements.txt`.
